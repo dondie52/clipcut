@@ -11,7 +11,10 @@ import {
   toBlob,
   cleanup,
   setProgressCallback,
-  clearProgressCallback
+  clearProgressCallback,
+  createAbortController,
+  createAbortError,
+  isAbortError
 } from './ffmpeg';
 
 /**
@@ -22,7 +25,7 @@ import {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with mixed audio as Blob
  */
-export async function mixAudio(videoFile, audioFile, volume = 0.3, onProgress = null) {
+export async function mixAudio(videoFile, audioFile, volume = 0.3, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
@@ -30,6 +33,7 @@ export async function mixAudio(videoFile, audioFile, volume = 0.3, onProgress = 
   const videoInput = 'input_video.mp4';
   const audioInput = 'input_audio.mp3';
   const outputName = 'output_mixed.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(videoInput, videoFile);
@@ -46,10 +50,13 @@ export async function mixAudio(videoFile, audioFile, volume = 0.3, onProgress = 
       '-c:a', 'aac',
       '-b:a', '192k',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([videoInput, audioInput, outputName]);
@@ -63,7 +70,7 @@ export async function mixAudio(videoFile, audioFile, volume = 0.3, onProgress = 
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with replaced audio as Blob
  */
-export async function replaceAudio(videoFile, audioFile, onProgress = null) {
+export async function replaceAudio(videoFile, audioFile, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
@@ -71,6 +78,7 @@ export async function replaceAudio(videoFile, audioFile, onProgress = null) {
   const videoInput = 'input_video.mp4';
   const audioInput = 'input_audio.mp3';
   const outputName = 'output_replaced.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(videoInput, videoFile);
@@ -86,10 +94,13 @@ export async function replaceAudio(videoFile, audioFile, onProgress = null) {
       '-b:a', '192k',
       '-shortest',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([videoInput, audioInput, outputName]);
@@ -103,13 +114,14 @@ export async function replaceAudio(videoFile, audioFile, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with adjusted volume as Blob
  */
-export async function adjustVolume(videoFile, volumeLevel = 1.0, onProgress = null) {
+export async function adjustVolume(videoFile, volumeLevel = 1.0, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_volume.mp4';
   const outputName = 'output_volume.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -121,10 +133,13 @@ export async function adjustVolume(videoFile, volumeLevel = 1.0, onProgress = nu
       '-c:a', 'aac',
       '-b:a', '192k',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -137,13 +152,14 @@ export async function adjustVolume(videoFile, volumeLevel = 1.0, onProgress = nu
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with no audio as Blob
  */
-export async function muteAudio(videoFile, onProgress = null) {
+export async function muteAudio(videoFile, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_mute.mp4';
   const outputName = 'output_mute.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -153,10 +169,13 @@ export async function muteAudio(videoFile, onProgress = null) {
       '-c:v', 'copy',
       '-an',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -170,13 +189,14 @@ export async function muteAudio(videoFile, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Extracted audio as Blob
  */
-export async function extractAudio(videoFile, format = 'mp3', onProgress = null) {
+export async function extractAudio(videoFile, format = 'mp3', onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_extract.mp4';
   const outputName = `output_extract.${format}`;
+  const operationSignal = signal || createAbortController().signal;
   
   const mimeTypes = {
     mp3: 'audio/mpeg',
@@ -198,10 +218,13 @@ export async function extractAudio(videoFile, format = 'mp3', onProgress = null)
       '-vn',
       ...(codecArgs[format] || codecArgs.mp3),
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, mimeTypes[format] || 'audio/mpeg');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -214,13 +237,14 @@ export async function extractAudio(videoFile, format = 'mp3', onProgress = null)
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with normalized audio as Blob
  */
-export async function normalizeAudio(videoFile, onProgress = null) {
+export async function normalizeAudio(videoFile, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_normalize.mp4';
   const outputName = 'output_normalize.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -233,10 +257,13 @@ export async function normalizeAudio(videoFile, onProgress = null) {
       '-c:a', 'aac',
       '-b:a', '192k',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -252,13 +279,14 @@ export async function normalizeAudio(videoFile, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with faded audio as Blob
  */
-export async function fadeAudio(videoFile, fadeInDuration = 0, fadeOutDuration = 0, totalDuration = null, onProgress = null) {
+export async function fadeAudio(videoFile, fadeInDuration = 0, fadeOutDuration = 0, totalDuration = null, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_fade.mp4';
   const outputName = 'output_fade.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -290,10 +318,13 @@ export async function fadeAudio(videoFile, fadeInDuration = 0, fadeOutDuration =
     
     args.push(outputName);
     
-    await exec(args);
+    await exec(args, operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);

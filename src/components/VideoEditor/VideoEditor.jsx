@@ -74,7 +74,7 @@ let _idN = 0;
 const genId = () => `clip-${Date.now()}-${(++_idN).toString(36)}`;
 
 /* ========== LOADING OVERLAY ========== */
-const LoadingOverlay = memo(({ message, progress, subMessage }) => (
+const LoadingOverlay = memo(({ message, progress, subMessage, onCancel, isCancelling = false }) => (
   <div className="loading-overlay" style={{
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
     display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000,
@@ -115,6 +115,25 @@ const LoadingOverlay = memo(({ message, progress, subMessage }) => (
           </div>
           <p style={{ color: "#75aadb", fontSize: "13px", fontWeight: 700, margin: 0 }}>{progress}%</p>
         </>
+      )}
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          disabled={isCancelling}
+          style={{
+            marginTop: '16px',
+            width: '100%',
+            padding: '9px 12px',
+            borderRadius: '8px',
+            border: '1px solid rgba(255,255,255,0.2)',
+            background: isCancelling ? 'rgba(100,116,139,0.2)' : 'rgba(239,68,68,0.12)',
+            color: isCancelling ? '#94a3b8' : '#fca5a5',
+            cursor: isCancelling ? 'not-allowed' : 'pointer',
+            fontWeight: 600
+          }}
+        >
+          {isCancelling ? 'Cancelling…' : 'Cancel'}
+        </button>
       )}
     </div>
   </div>
@@ -511,7 +530,11 @@ const VideoEditor = () => {
       notify("success", `Exported at ${res}`);
     } catch (e) { 
       console.error("Export error:", e);
-      notify("error", `Export failed: ${e.message || "Unknown error. Please check the console for details."}`); 
+      if (e?.name === 'AbortError') {
+        notify("warning", "Export cancelled");
+      } else {
+        notify("error", `Export failed: ${e.message || "Unknown error. Please check the console for details."}`);
+      }
     } finally { 
       setIsExporting(false); 
       setLoadMsg(""); 
@@ -670,8 +693,10 @@ const VideoEditor = () => {
       <TopBar
         projectName={projectName} onProjectNameChange={setProjectName}
         onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress}
+        isCancelling={ffmpeg.isCancelling}
         hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions}
         lastSaved={lastSaved} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+        onCancelExport={ffmpeg.cancelOperation}
       />
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
@@ -703,7 +728,15 @@ const VideoEditor = () => {
         mediaItems={mediaItems} onAddToTimeline={addToTimeline}
       />
 
-      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} subMessage={loadSub} />}
+      {(ffmpeg.isLoading || loadMsg) && (
+        <LoadingOverlay
+          message={loadMsg || "Loading FFmpeg..."}
+          progress={ffmpeg.progress}
+          subMessage={loadSub}
+          onCancel={ffmpeg.currentOperation ? ffmpeg.cancelOperation : null}
+          isCancelling={ffmpeg.isCancelling}
+        />
+      )}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
     </div>
   );

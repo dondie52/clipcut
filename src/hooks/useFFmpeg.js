@@ -13,6 +13,7 @@ import {
   subscribeToLoadingState,
   cancelCurrentOperation,
   createAbortController,
+  isAbortError,
   clearAllFiles,
   getMemoryUsage,
   isMemoryLimitExceeded,
@@ -35,8 +36,10 @@ export function useFFmpeg() {
   const [loadProgress, setLoadProgress] = useState(0);
   const [error, setError] = useState(null);
   const [currentOperation, setCurrentOperation] = useState(null);
+  const [isCancelling, setIsCancelling] = useState(false);
   
   const isMounted = useRef(true);
+  const operationControllerRef = useRef(null);
   
   // Cleanup on unmount and subscribe to loading state changes
   useEffect(() => {
@@ -111,9 +114,13 @@ export function useFFmpeg() {
     setCurrentOperation(operationName);
     setProgress(0);
     setError(null);
+    setIsCancelling(false);
+
+    const controller = createAbortController();
+    operationControllerRef.current = controller;
     
     try {
-      const result = await operationFn(handleProgress);
+      const result = await operationFn(handleProgress, controller.signal);
       if (isMounted.current) {
         setProgress(100);
         setCurrentOperation(null);
@@ -121,35 +128,46 @@ export function useFFmpeg() {
       return result;
     } catch (err) {
       if (isMounted.current) {
-        setError(err.message || `Failed to ${operationName}`);
+        if (isAbortError(err) || controller.signal.aborted) {
+          setError(`${operationName} cancelled.`);
+        } else {
+          setError(err.message || `Failed to ${operationName}`);
+        }
         setCurrentOperation(null);
       }
       throw err;
+    } finally {
+      if (operationControllerRef.current === controller) {
+        operationControllerRef.current = null;
+      }
+      if (isMounted.current) {
+        setIsCancelling(false);
+      }
     }
   }, [initialize, handleProgress]);
   
   // Video Operations
   const trimVideo = useCallback(async (file, startTime, duration) => {
-    return executeOperation('trim video', (onProgress) => 
-      videoOperations.trimVideo(file, startTime, duration, onProgress)
+    return executeOperation('trim video', (onProgress, signal) => 
+      videoOperations.trimVideo(file, startTime, duration, onProgress, signal)
     );
   }, [executeOperation]);
   
   const splitVideo = useCallback(async (file, splitTime) => {
-    return executeOperation('split video', (onProgress) => 
-      videoOperations.splitVideo(file, splitTime, onProgress)
+    return executeOperation('split video', (onProgress, signal) => 
+      videoOperations.splitVideo(file, splitTime, onProgress, signal)
     );
   }, [executeOperation]);
   
   const mergeClips = useCallback(async (clips) => {
-    return executeOperation('merge clips', (onProgress) => 
-      videoOperations.mergeClips(clips, onProgress)
+    return executeOperation('merge clips', (onProgress, signal) => 
+      videoOperations.mergeClips(clips, onProgress, signal)
     );
   }, [executeOperation]);
   
   const exportVideo = useCallback(async (file, resolution) => {
-    return executeOperation('export video', (onProgress) => 
-      videoOperations.exportVideo(file, resolution, onProgress)
+    return executeOperation('export video', (onProgress, signal) => 
+      videoOperations.exportVideo(file, resolution, onProgress, signal)
     );
   }, [executeOperation]);
   
@@ -163,82 +181,82 @@ export function useFFmpeg() {
   }, []);
 
   const convertToWebFormat = useCallback(async (file) => {
-    return executeOperation('convert to web format', (onProgress) => 
-      videoOperations.convertFormat(file, 'mp4', onProgress)
+    return executeOperation('convert to web format', (onProgress, signal) => 
+      videoOperations.convertFormat(file, 'mp4', onProgress, signal)
     );
   }, [executeOperation]);
   
   // Audio Operations
   const mixAudio = useCallback(async (videoFile, audioFile, volume = 0.3) => {
-    return executeOperation('mix audio', (onProgress) => 
-      audioOperations.mixAudio(videoFile, audioFile, volume, onProgress)
+    return executeOperation('mix audio', (onProgress, signal) => 
+      audioOperations.mixAudio(videoFile, audioFile, volume, onProgress, signal)
     );
   }, [executeOperation]);
   
   const adjustVolume = useCallback(async (file, volumeLevel) => {
-    return executeOperation('adjust volume', (onProgress) => 
-      audioOperations.adjustVolume(file, volumeLevel, onProgress)
+    return executeOperation('adjust volume', (onProgress, signal) => 
+      audioOperations.adjustVolume(file, volumeLevel, onProgress, signal)
     );
   }, [executeOperation]);
   
   const muteAudio = useCallback(async (file) => {
-    return executeOperation('mute audio', (onProgress) => 
-      audioOperations.muteAudio(file, onProgress)
+    return executeOperation('mute audio', (onProgress, signal) => 
+      audioOperations.muteAudio(file, onProgress, signal)
     );
   }, [executeOperation]);
   
   const extractAudio = useCallback(async (file, format = 'mp3') => {
-    return executeOperation('extract audio', (onProgress) => 
-      audioOperations.extractAudio(file, format, onProgress)
+    return executeOperation('extract audio', (onProgress, signal) => 
+      audioOperations.extractAudio(file, format, onProgress, signal)
     );
   }, [executeOperation]);
   
   // Effects Operations
   const addTextOverlay = useCallback(async (file, text, options = {}) => {
-    return executeOperation('add text', (onProgress) => 
-      effects.addTextOverlay(file, text, options, onProgress)
+    return executeOperation('add text', (onProgress, signal) => 
+      effects.addTextOverlay(file, text, options, onProgress, signal)
     );
   }, [executeOperation]);
   
   const addTransition = useCallback(async (clip1, clip2, type = 'fade', duration = 1) => {
-    return executeOperation('add transition', (onProgress) => 
-      effects.addTransition(clip1, clip2, type, duration, onProgress)
+    return executeOperation('add transition', (onProgress, signal) => 
+      effects.addTransition(clip1, clip2, type, duration, onProgress, signal)
     );
   }, [executeOperation]);
   
   const changeSpeed = useCallback(async (file, speed) => {
-    return executeOperation('change speed', (onProgress) => 
-      effects.changeSpeed(file, speed, onProgress)
+    return executeOperation('change speed', (onProgress, signal) => 
+      effects.changeSpeed(file, speed, onProgress, signal)
     );
   }, [executeOperation]);
   
   const addFade = useCallback(async (file, fadeIn, fadeOut, duration) => {
-    return executeOperation('add fade', (onProgress) => 
-      effects.addFade(file, fadeIn, fadeOut, duration, onProgress)
+    return executeOperation('add fade', (onProgress, signal) => 
+      effects.addFade(file, fadeIn, fadeOut, duration, onProgress, signal)
     );
   }, [executeOperation]);
   
   const rotateVideo = useCallback(async (file, degrees) => {
-    return executeOperation('rotate video', (onProgress) => 
-      effects.rotateVideo(file, degrees, onProgress)
+    return executeOperation('rotate video', (onProgress, signal) => 
+      effects.rotateVideo(file, degrees, onProgress, signal)
     );
   }, [executeOperation]);
   
   const flipVideo = useCallback(async (file, direction) => {
-    return executeOperation('flip video', (onProgress) => 
-      effects.flipVideo(file, direction, onProgress)
+    return executeOperation('flip video', (onProgress, signal) => 
+      effects.flipVideo(file, direction, onProgress, signal)
     );
   }, [executeOperation]);
   
   const cropVideo = useCallback(async (file, cropArea) => {
-    return executeOperation('crop video', (onProgress) => 
-      effects.cropVideo(file, cropArea, onProgress)
+    return executeOperation('crop video', (onProgress, signal) => 
+      effects.cropVideo(file, cropArea, onProgress, signal)
     );
   }, [executeOperation]);
   
   const adjustBrightnessContrast = useCallback(async (file, brightness, contrast) => {
-    return executeOperation('adjust colors', (onProgress) => 
-      effects.adjustBrightnessContrast(file, brightness, contrast, onProgress)
+    return executeOperation('adjust colors', (onProgress, signal) => 
+      effects.adjustBrightnessContrast(file, brightness, contrast, onProgress, signal)
     );
   }, [executeOperation]);
   
@@ -269,11 +287,11 @@ export function useFFmpeg() {
    * Cancel the current FFmpeg operation
    */
   const cancelOperation = useCallback(() => {
+    setIsCancelling(true);
     cancelCurrentOperation();
     if (isMounted.current) {
-      setCurrentOperation(null);
       setProgress(0);
-      setError('Operation cancelled');
+      setError('Cancelling operation...');
     }
   }, []);
 
@@ -306,6 +324,7 @@ export function useFFmpeg() {
     loadProgress,
     error,
     currentOperation,
+    isCancelling,
     
     // Core
     initialize,

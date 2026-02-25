@@ -12,7 +12,10 @@ import {
   cleanup,
   formatTime,
   setProgressCallback,
-  clearProgressCallback
+  clearProgressCallback,
+  createAbortController,
+  createAbortError,
+  isAbortError
 } from './ffmpeg';
 
 /**
@@ -63,7 +66,7 @@ export const TRANSITION_TYPES = [
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with text overlay as Blob
  */
-export async function addTextOverlay(videoFile, text, options = {}, onProgress = null) {
+export async function addTextOverlay(videoFile, text, options = {}, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
@@ -79,6 +82,7 @@ export async function addTextOverlay(videoFile, text, options = {}, onProgress =
   
   const inputName = 'input_text.mp4';
   const outputName = 'output_text.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -118,10 +122,13 @@ export async function addTextOverlay(videoFile, text, options = {}, onProgress =
       '-crf', '23',
       '-c:a', 'copy',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -137,7 +144,7 @@ export async function addTextOverlay(videoFile, text, options = {}, onProgress =
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with transition as Blob
  */
-export async function addTransition(clip1, clip2, transitionType = 'fade', duration = 1, onProgress = null) {
+export async function addTransition(clip1, clip2, transitionType = 'fade', duration = 1, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
@@ -148,6 +155,7 @@ export async function addTransition(clip1, clip2, transitionType = 'fade', durat
   const input1Name = 'input_trans_1.mp4';
   const input2Name = 'input_trans_2.mp4';
   const outputName = 'output_transition.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(input1Name, clip1);
@@ -170,10 +178,13 @@ export async function addTransition(clip1, clip2, transitionType = 'fade', durat
       '-c:a', 'aac',
       '-b:a', '192k',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([input1Name, input2Name, outputName]);
@@ -211,13 +222,14 @@ async function getVideoDuration(videoFile) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Filtered video as Blob
  */
-export async function applyFilter(videoFile, filter, onProgress = null) {
+export async function applyFilter(videoFile, filter, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_filter.mp4';
   const outputName = 'output_filter.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -230,10 +242,13 @@ export async function applyFilter(videoFile, filter, onProgress = null) {
       '-crf', '23',
       '-c:a', 'copy',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -248,12 +263,12 @@ export async function applyFilter(videoFile, filter, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Adjusted video as Blob
  */
-export async function adjustBrightnessContrast(videoFile, brightness = 0, contrast = 0, onProgress = null) {
+export async function adjustBrightnessContrast(videoFile, brightness = 0, contrast = 0, onProgress = null, signal = null) {
   // Convert -1 to 1 range to FFmpeg's eq filter range
   // brightness: -1.0 to 1.0 (FFmpeg default is 0)
   // contrast: 0.0 to 2.0 (FFmpeg default is 1, so we add 1)
   const filter = `eq=brightness=${brightness}:contrast=${1 + contrast}`;
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -263,9 +278,9 @@ export async function adjustBrightnessContrast(videoFile, brightness = 0, contra
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Adjusted video as Blob
  */
-export async function adjustSaturation(videoFile, saturation = 1, onProgress = null) {
+export async function adjustSaturation(videoFile, saturation = 1, onProgress = null, signal = null) {
   const filter = `eq=saturation=${saturation}`;
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -275,9 +290,9 @@ export async function adjustSaturation(videoFile, saturation = 1, onProgress = n
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Blurred video as Blob
  */
-export async function applyBlur(videoFile, radius = 5, onProgress = null) {
+export async function applyBlur(videoFile, radius = 5, onProgress = null, signal = null) {
   const filter = `boxblur=${radius}:${radius}`;
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -287,9 +302,9 @@ export async function applyBlur(videoFile, radius = 5, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Sharpened video as Blob
  */
-export async function applySharpen(videoFile, strength = 1, onProgress = null) {
+export async function applySharpen(videoFile, strength = 1, onProgress = null, signal = null) {
   const filter = `unsharp=5:5:${strength}:5:5:0`;
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -299,13 +314,14 @@ export async function applySharpen(videoFile, strength = 1, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Speed-adjusted video as Blob
  */
-export async function changeSpeed(videoFile, speed = 1.0, onProgress = null) {
+export async function changeSpeed(videoFile, speed = 1.0, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_speed.mp4';
   const outputName = 'output_speed.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   // Clamp speed to reasonable values
   const clampedSpeed = Math.max(0.25, Math.min(4.0, speed));
@@ -343,10 +359,13 @@ export async function changeSpeed(videoFile, speed = 1.0, onProgress = null) {
       '-c:a', 'aac',
       '-b:a', '192k',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -362,13 +381,14 @@ export async function changeSpeed(videoFile, speed = 1.0, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Video with fade effects as Blob
  */
-export async function addFade(videoFile, fadeInDuration = 0, fadeOutDuration = 0, totalDuration = null, onProgress = null) {
+export async function addFade(videoFile, fadeInDuration = 0, fadeOutDuration = 0, totalDuration = null, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_fade.mp4';
   const outputName = 'output_fade.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, videoFile);
@@ -398,10 +418,13 @@ export async function addFade(videoFile, fadeInDuration = 0, fadeOutDuration = 0
       '-crf', '23',
       '-c:a', 'copy',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -415,7 +438,7 @@ export async function addFade(videoFile, fadeInDuration = 0, fadeOutDuration = 0
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Rotated video as Blob
  */
-export async function rotateVideo(videoFile, degrees = 90, onProgress = null) {
+export async function rotateVideo(videoFile, degrees = 90, onProgress = null, signal = null) {
   const transposeMap = {
     90: 'transpose=1',      // 90 clockwise
     180: 'transpose=1,transpose=1', // 180
@@ -424,7 +447,7 @@ export async function rotateVideo(videoFile, degrees = 90, onProgress = null) {
   };
   
   const filter = transposeMap[degrees] || transposeMap[90];
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -434,9 +457,9 @@ export async function rotateVideo(videoFile, degrees = 90, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Flipped video as Blob
  */
-export async function flipVideo(videoFile, direction = 'horizontal', onProgress = null) {
+export async function flipVideo(videoFile, direction = 'horizontal', onProgress = null, signal = null) {
   const filter = direction === 'vertical' ? 'vflip' : 'hflip';
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
 
 /**
@@ -450,8 +473,8 @@ export async function flipVideo(videoFile, direction = 'horizontal', onProgress 
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Cropped video as Blob
  */
-export async function cropVideo(videoFile, cropArea, onProgress = null) {
+export async function cropVideo(videoFile, cropArea, onProgress = null, signal = null) {
   const { width, height, x = 0, y = 0 } = cropArea;
   const filter = `crop=${width}:${height}:${x}:${y}`;
-  return applyFilter(videoFile, filter, onProgress);
+  return applyFilter(videoFile, filter, onProgress, signal);
 }
