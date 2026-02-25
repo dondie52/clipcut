@@ -22,6 +22,47 @@ let progressCallback = null;
 // Current operation's AbortController
 let currentAbortController = null;
 
+/**
+ * Create a consistent abort error for FFmpeg operations
+ * @param {string} message
+ * @returns {DOMException}
+ */
+export function createAbortError(message = 'Operation cancelled by user') {
+  return new DOMException(message, 'AbortError');
+}
+
+/**
+ * Check if an error represents an aborted FFmpeg operation
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isAbortError(error) {
+  return error?.name === 'AbortError' || error?.message === 'Operation aborted';
+}
+
+/**
+ * Terminate FFmpeg worker safely after an abort
+ * FFmpeg.wasm cannot stop mid-command cleanly, so we terminate and recreate.
+ */
+async function terminateFFmpegWorker() {
+  if (!ffmpegInstance) {
+    loadingPromise = null;
+    return;
+  }
+
+  try {
+    await ffmpegInstance.terminate();
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[FFmpeg] terminate() failed during cancel:', error?.message || error);
+    }
+  } finally {
+    ffmpegInstance = null;
+    loadingPromise = null;
+    clearProgressCallback();
+  }
+}
+
 // Track files written to virtual FS for memory management
 const virtualFSFiles = new Set();
 
@@ -245,7 +286,12 @@ export async function readFile(filename) {
  * @param {string} filename - Name of the file to delete
  */
 export async function deleteFile(filename) {
-  const ffmpeg = await loadFFmpeg();
+  if (!isFFmpegLoaded()) {
+    virtualFSFiles.delete(filename);
+    return;
+  }
+
+  const ffmpeg = getFFmpegInstance();
   try {
     await ffmpeg.deleteFile(filename);
     // Update tracking
@@ -269,7 +315,7 @@ export async function exec(args, signal = null) {
   
   // Check if already aborted
   if (signal?.aborted) {
-    throw new DOMException('Operation aborted', 'AbortError');
+    throw createAbortError();
   }
   
   // FFmpeg WASM doesn't support direct AbortSignal
@@ -278,24 +324,39 @@ export async function exec(args, signal = null) {
   
   if (signal) {
     return new Promise((resolve, reject) => {
-      const onAbort = () => {
-        // FFmpeg WASM doesn't have a clean way to abort mid-operation
-        // We can only prevent returning the result
-        reject(new DOMException('Operation aborted', 'AbortError'));
+      const onAbort = async () => {
+        await terminateFFmpegWorker();
+        reject(createAbortError());
       };
       
       signal.addEventListener('abort', onAbort, { once: true });
       
       execPromise
         .then(resolve)
-        .catch(reject)
+        .catch((error) => {
+          if (signal.aborted || isAbortError(error)) {
+            reject(createAbortError());
+            return;
+          }
+          reject(error);
+        })
         .finally(() => {
           signal.removeEventListener('abort', onAbort);
+          if (currentAbortController?.signal === signal) {
+            currentAbortController = null;
+          }
         });
     });
   }
-  
-  return execPromise;
+
+  try {
+    return await execPromise;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw createAbortError();
+    }
+    throw error;
+  }
 }
 
 /**
@@ -305,7 +366,8 @@ export async function exec(args, signal = null) {
 export function createAbortController() {
   // Cancel any existing operation
   if (currentAbortController) {
-    currentAbortController.abort();
+    currentAbortController.abort(createAbortError('Operation superseded by a new request'));
+    void terminateFFmpegWorker();
   }
   currentAbortController = new AbortController();
   return currentAbortController;
@@ -324,9 +386,10 @@ export function getCurrentSignal() {
  */
 export function cancelCurrentOperation() {
   if (currentAbortController) {
-    currentAbortController.abort();
+    currentAbortController.abort(createAbortError());
     currentAbortController = null;
   }
+  void terminateFFmpegWorker();
 }
 
 /**

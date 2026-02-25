@@ -85,7 +85,9 @@ const ExportModal = memo(({
   isOpen, 
   onClose, 
   onExport, 
+  onCancel,
   isExporting, 
+  isCancelling = false,
   progress, 
   resolutions 
 }) => {
@@ -371,6 +373,26 @@ const ExportModal = memo(({
             }}>
               {progress}%
             </p>
+
+            <button
+              onClick={onCancel}
+              disabled={isCancelling}
+              style={{
+                marginTop: '18px',
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.2)',
+                background: isCancelling ? 'rgba(100,116,139,0.2)' : 'rgba(239,68,68,0.12)',
+                color: isCancelling ? '#94a3b8' : '#fca5a5',
+                cursor: isCancelling ? 'not-allowed' : 'pointer',
+                fontWeight: 600,
+                fontFamily: "'Spline Sans', sans-serif"
+              }}
+              aria-label={isCancelling ? 'Cancelling export' : 'Cancel export'}
+            >
+              {isCancelling ? 'Cancelling…' : 'Cancel Export'}
+            </button>
           </div>
         )}
       </div>
@@ -386,6 +408,7 @@ const TopBar = ({
   onProjectNameChange,
   onExport,
   isExporting = false,
+  isCancelling = false,
   exportProgress = 0,
   hasMediaToExport = false,
   resolutions = {},
@@ -393,7 +416,8 @@ const TopBar = ({
   canUndo = false,
   canRedo = false,
   onUndo,
-  onRedo
+  onRedo,
+  onCancelExport
 }) => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
@@ -641,7 +665,9 @@ const TopBar = ({
         isOpen={showExportModal}
         onClose={handleCloseModal}
         onExport={handleExport}
+        onCancel={onCancelExport}
         isExporting={isExporting}
+        isCancelling={isCancelling}
         progress={exportProgress}
         resolutions={resolutions}
       />

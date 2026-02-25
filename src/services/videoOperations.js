@@ -14,7 +14,10 @@ import {
   cleanup,
   formatTime,
   setProgressCallback,
-  clearProgressCallback
+  clearProgressCallback,
+  createAbortController,
+  createAbortError,
+  isAbortError
 } from './ffmpeg';
 import { trackVideoOperation, METRIC_TYPES } from '../utils/performance';
 
@@ -35,7 +38,7 @@ export const RESOLUTIONS = {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Trimmed video as Blob
  */
-export async function trimVideo(inputFile, startTime, duration, onProgress = null) {
+export async function trimVideo(inputFile, startTime, duration, onProgress = null, signal = null) {
   return trackVideoOperation(
     METRIC_TYPES.VIDEO_TRIM,
     async () => {
@@ -45,6 +48,7 @@ export async function trimVideo(inputFile, startTime, duration, onProgress = nul
       
       const inputName = 'input_trim.mp4';
       const outputName = 'output_trim.mp4';
+      const operationSignal = signal || createAbortController().signal;
       
       try {
         await writeFile(inputName, inputFile);
@@ -56,10 +60,13 @@ export async function trimVideo(inputFile, startTime, duration, onProgress = nul
           '-c', 'copy',
           '-avoid_negative_ts', 'make_zero',
           outputName
-        ]);
+        ], operationSignal);
         
         const data = await readFile(outputName);
         return toBlob(data, 'video/mp4');
+      } catch (error) {
+        if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+        throw error;
       } finally {
         clearProgressCallback();
         await cleanup([inputName, outputName]);
@@ -80,7 +87,7 @@ export async function trimVideo(inputFile, startTime, duration, onProgress = nul
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<{part1: Blob, part2: Blob}>} Two video parts as Blobs
  */
-export async function splitVideo(inputFile, splitTime, onProgress = null) {
+export async function splitVideo(inputFile, splitTime, onProgress = null, signal = null) {
   return trackVideoOperation(
     METRIC_TYPES.VIDEO_SPLIT,
     async () => {
@@ -91,6 +98,7 @@ export async function splitVideo(inputFile, splitTime, onProgress = null) {
       const inputName = 'input_split.mp4';
       const output1Name = 'output_split_1.mp4';
       const output2Name = 'output_split_2.mp4';
+      const operationSignal = signal || createAbortController().signal;
       
       try {
         await writeFile(inputName, inputFile);
@@ -101,7 +109,7 @@ export async function splitVideo(inputFile, splitTime, onProgress = null) {
           '-t', formatTime(splitTime),
           '-c', 'copy',
           output1Name
-        ]);
+        ], operationSignal);
         
         // Second part: from split point to end
         await exec([
@@ -109,7 +117,7 @@ export async function splitVideo(inputFile, splitTime, onProgress = null) {
           '-ss', formatTime(splitTime),
           '-c', 'copy',
           output2Name
-        ]);
+        ], operationSignal);
         
         const data1 = await readFile(output1Name);
         const data2 = await readFile(output2Name);
@@ -118,6 +126,9 @@ export async function splitVideo(inputFile, splitTime, onProgress = null) {
           part1: toBlob(data1, 'video/mp4'),
           part2: toBlob(data2, 'video/mp4')
         };
+      } catch (error) {
+        if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+        throw error;
       } finally {
         clearProgressCallback();
         await cleanup([inputName, output1Name, output2Name]);
@@ -136,7 +147,7 @@ export async function splitVideo(inputFile, splitTime, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Merged video as Blob
  */
-export async function mergeClips(clipFiles, onProgress = null) {
+export async function mergeClips(clipFiles, onProgress = null, signal = null) {
   if (clipFiles.length === 0) {
     throw new Error('No clips to merge');
   }
@@ -157,6 +168,7 @@ export async function mergeClips(clipFiles, onProgress = null) {
       const inputNames = [];
       const concatListName = 'concat_list.txt';
       const outputName = 'output_merged.mp4';
+      const operationSignal = signal || createAbortController().signal;
       
       try {
         // Write all input files and create concat list
@@ -183,8 +195,9 @@ export async function mergeClips(clipFiles, onProgress = null) {
             '-c', 'copy',  // Fast copy without re-encoding
             '-avoid_negative_ts', 'make_zero',  // Handle timestamp issues
             outputName
-          ]);
+          ], operationSignal);
         } catch (copyError) {
+          if (isAbortError(copyError) || operationSignal.aborted) throw createAbortError();
           // If copy fails (codec mismatch), re-encode with fast settings
           console.warn('[FFmpeg] Copy failed, re-encoding with fast preset:', copyError);
           await exec([
@@ -197,11 +210,14 @@ export async function mergeClips(clipFiles, onProgress = null) {
             '-c:a', 'aac',
             '-b:a', '128k',
             outputName
-          ]);
+          ], operationSignal);
         }
         
         const data = await readFile(outputName);
         return toBlob(data, 'video/mp4');
+      } catch (error) {
+        if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+        throw error;
       } finally {
         clearProgressCallback();
         await cleanup([...inputNames, concatListName, outputName]);
@@ -221,7 +237,7 @@ export async function mergeClips(clipFiles, onProgress = null) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Exported video as Blob
  */
-export async function exportVideo(inputFile, resolution = '1080p', onProgress = null) {
+export async function exportVideo(inputFile, resolution = '1080p', onProgress = null, signal = null) {
   return trackVideoOperation(
     METRIC_TYPES.VIDEO_EXPORT,
     async () => {
@@ -232,6 +248,7 @@ export async function exportVideo(inputFile, resolution = '1080p', onProgress = 
       const { width, height } = RESOLUTIONS[resolution] || RESOLUTIONS['1080p'];
       const inputName = 'input_export.mp4';
       const outputName = 'output_export.mp4';
+      const operationSignal = signal || createAbortController().signal;
       
       try {
         await writeFile(inputName, inputFile);
@@ -252,10 +269,13 @@ export async function exportVideo(inputFile, resolution = '1080p', onProgress = 
           '-movflags', '+faststart',  // Enable fast start for web playback
           '-threads', '0',            // Use all available threads
           outputName
-        ]);
+        ], operationSignal);
         
         const data = await readFile(outputName);
         return toBlob(data, 'video/mp4');
+      } catch (error) {
+        if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+        throw error;
       } finally {
         clearProgressCallback();
         await cleanup([inputName, outputName]);
@@ -309,73 +329,79 @@ export async function generateThumbnail(videoFile, time = 0) {
     METRIC_TYPES.VIDEO_THUMBNAIL,
     async () => {
       return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    
-    let timeout;
-    
-    const cleanup = () => {
-      if (timeout) clearTimeout(timeout);
-      if (video.src) {
-        URL.revokeObjectURL(video.src);
-      }
-      video.remove();
-      canvas.remove();
-    };
-    
-    // Set a timeout to prevent hanging
-    timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Thumbnail generation timeout'));
-    }, 10000); // 10 second timeout
-    
-    video.onloadedmetadata = () => {
-      // Seek to the desired time
-      video.currentTime = Math.min(time, video.duration || 0);
-    };
-    
-    video.onseeked = () => {
-      try {
-        // Set canvas dimensions (max 320px width, maintain aspect ratio)
-        const maxWidth = 320;
-        const aspectRatio = video.videoWidth / video.videoHeight;
-        const width = Math.min(maxWidth, video.videoWidth);
-        const height = width / aspectRatio;
+        const video = document.createElement('video');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
         
-        canvas.width = width;
-        canvas.height = height;
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
         
-        // Draw the video frame to canvas
-        ctx.drawImage(video, 0, 0, width, height);
+        let timeout;
         
-        // Convert canvas to blob
-        canvas.toBlob((blob) => {
-          if (blob) {
-            cleanup();
-            resolve(blob);
-          } else {
-            cleanup();
-            reject(new Error('Failed to generate thumbnail'));
+        const cleanup = () => {
+          if (timeout) clearTimeout(timeout);
+          if (video.src) {
+            URL.revokeObjectURL(video.src);
           }
-        }, 'image/jpeg', 0.85);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    };
-    
-    video.onerror = () => {
-      cleanup();
-      reject(new Error('Failed to load video for thumbnail'));
-    };
-    
-    video.src = URL.createObjectURL(videoFile);
-  });
+          video.remove();
+          canvas.remove();
+        };
+        
+        // Set a timeout to prevent hanging
+        timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Thumbnail generation timeout'));
+        }, 10000); // 10 second timeout
+        
+        video.onloadedmetadata = () => {
+          // Seek to the desired time
+          video.currentTime = Math.min(time, video.duration || 0);
+        };
+        
+        video.onseeked = () => {
+          try {
+            // Set canvas dimensions (max 320px width, maintain aspect ratio)
+            const maxWidth = 320;
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            const width = Math.min(maxWidth, video.videoWidth);
+            const height = width / aspectRatio;
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Draw the video frame to canvas
+            ctx.drawImage(video, 0, 0, width, height);
+            
+            // Convert canvas to blob
+            canvas.toBlob((blob) => {
+              if (blob) {
+                cleanup();
+                resolve(blob);
+              } else {
+                cleanup();
+                reject(new Error('Failed to generate thumbnail'));
+              }
+            }, 'image/jpeg', 0.85);
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        };
+        
+        video.onerror = () => {
+          cleanup();
+          reject(new Error('Failed to load video for thumbnail'));
+        };
+        
+        video.src = URL.createObjectURL(videoFile);
+      });
+    },
+    {
+      time,
+      fileSize: videoFile.size,
+    }
+  );
 }
 
 /**
@@ -417,13 +443,14 @@ export async function generateThumbnails(videoFile, count = 5) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Low-res preview video as Blob
  */
-export async function generatePreviewVideo(inputFile, onProgress = null) {
+export async function generatePreviewVideo(inputFile, onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_preview.mp4';
   const outputName = 'output_preview.mp4';
+  const operationSignal = signal || createAbortController().signal;
   
   try {
     await writeFile(inputName, inputFile);
@@ -441,10 +468,13 @@ export async function generatePreviewVideo(inputFile, onProgress = null) {
       '-movflags', '+faststart', // Enable fast start for web playback
       '-threads', '0',
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
@@ -534,13 +564,14 @@ export async function preloadVideoFrames(videoFile, frameCount = 10) {
  * @param {Function} onProgress - Progress callback
  * @returns {Promise<Blob>} Converted video as Blob
  */
-export async function convertFormat(inputFile, format = 'mp4', onProgress = null) {
+export async function convertFormat(inputFile, format = 'mp4', onProgress = null, signal = null) {
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);
   
   const inputName = 'input_convert.mp4';
   const outputName = `output_convert.${format}`;
+  const operationSignal = signal || createAbortController().signal;
   
   const mimeTypes = {
     mp4: 'video/mp4',
@@ -558,10 +589,13 @@ export async function convertFormat(inputFile, format = 'mp4', onProgress = null
       '-i', inputName,
       ...codecArgs,
       outputName
-    ]);
+    ], operationSignal);
     
     const data = await readFile(outputName);
     return toBlob(data, mimeTypes[format] || 'video/mp4');
+  } catch (error) {
+    if (isAbortError(error) || operationSignal.aborted) throw createAbortError();
+    throw error;
   } finally {
     clearProgressCallback();
     await cleanup([inputName, outputName]);
