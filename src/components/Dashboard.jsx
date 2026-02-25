@@ -2,6 +2,8 @@ import { useState, useRef, useCallback, useEffect, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
 import { listProjects as listCloudProjects, deleteProject as deleteCloudProject } from "../services/projectService";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
+import { logger } from "../utils/logger";
 
 /* ========== CSS ========== */
 const DASH_CSS = `
@@ -356,7 +358,7 @@ const Dashboard = () => {
       
       setProjects(formattedProjects);
     } catch (e) {
-      console.error('Failed to load projects:', e);
+      logger.error('Failed to load projects', { error: e });
       setProjects([]);
     } finally {
       setIsLoading(false);
@@ -380,18 +382,21 @@ const Dashboard = () => {
   }, [loadProjects]);
 
   const handleNewProject = useCallback(() => {
+    trackEvent(analyticsEvents.dashboardNewProjectClick);
     fileInputRef.current?.click();
   }, []);
 
   const handleFileSelect = useCallback((e) => {
     const files = Array.from(e.target.files);
     if (files.length > 0) {
+      trackEvent(analyticsEvents.dashboardFileImport, { fileCount: files.length });
       navigate("/editor", { state: { filesToImport: files } });
     }
     e.target.value = "";
   }, [navigate]);
 
   const handleLoadProject = useCallback((project) => {
+    trackEvent(analyticsEvents.dashboardProjectOpen, { projectId: project.id });
     navigate("/editor", { 
       state: { 
         projectId: project.id,
@@ -402,6 +407,7 @@ const Dashboard = () => {
   }, [navigate]);
 
   const handleAIFeature = useCallback((featureId) => {
+    trackEvent(analyticsEvents.dashboardAIFeatureSelect, { featureId });
     // Navigate to editor with AI feature flag
     navigate("/editor", { 
       state: { 
@@ -411,6 +417,7 @@ const Dashboard = () => {
   }, [navigate]);
 
   const handleToolClick = useCallback((tool) => {
+    trackEvent(analyticsEvents.dashboardToolSelect, { tool: tool.icon });
     // Navigate to editor with tool flag
     navigate("/editor", { 
       state: { 
@@ -424,9 +431,10 @@ const Dashboard = () => {
     if (window.confirm('Are you sure you want to delete this project?')) {
       try {
         await deleteCloudProject(projectId, user?.id);
+        trackEvent(analyticsEvents.dashboardProjectDelete, { projectId });
         setProjects(prev => prev.filter(p => p.id !== projectId));
       } catch (err) {
-        console.error('Failed to delete project:', err);
+        logger.error('Failed to delete project', { error: err, projectId });
         alert('Failed to delete project. Please try again.');
       }
     }

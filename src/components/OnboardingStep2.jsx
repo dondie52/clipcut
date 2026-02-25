@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
 
 const OnboardingStep2 = ({ onContinue, onSkip }) => {
   const [skillLevel, setSkillLevel] = useState("intermediate");
@@ -134,7 +135,7 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
 
           {/* Actions */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", paddingTop: "16px" }}>
-            <button onClick={onContinue} style={{
+            <button onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "2" }); onContinue?.(); }} style={{
               width: "100%", maxWidth: "360px", background: "#75AADB", color: "#0a0a0a",
               fontWeight: 700, fontSize: "18px", padding: "16px", borderRadius: "8px",
               border: "none", cursor: "pointer", transition: "all 0.2s ease",
@@ -143,7 +144,7 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
               onMouseLeave={(e) => e.target.style.background = "#75AADB"}>
               Complete Setup
             </button>
-            <a href="#" onClick={(e) => { e.preventDefault(); onSkip?.(); }} style={{
+            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2" }); onSkip?.(); }} style={{
               color: "rgba(255,255,255,0.4)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
             }}>Skip for now</a>
           </div>

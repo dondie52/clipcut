@@ -9,6 +9,7 @@ import {
   PASSWORD_REQUIREMENTS 
 } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
 
 // Rate limiter: 3 registration attempts per 2 minutes
 const registerRateLimiter = createRateLimiter(3, 120000);
@@ -68,6 +69,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
 
     setLoading(true);
     registerRateLimiter.recordAttempt();
+    trackEvent(analyticsEvents.registerAttempt, { emailDomain: email.split("@")[1] || "unknown" });
 
     try {
       await signUp({ 
@@ -75,9 +77,11 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
         password, 
         username: username.trim() 
       });
+      trackEvent(analyticsEvents.registerSuccess);
       navigate("/onboarding/1");
     } catch (err) {
       // Use sanitized error message
+      trackEvent(analyticsEvents.registerFailure, { reason: err?.message || "unknown" });
       setError(sanitizeErrorMessage(err, "Failed to create account. Please try again."));
     } finally {
       setLoading(false);
@@ -88,6 +92,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
     setError("");
     setFieldErrors({});
     try {
+      trackEvent(analyticsEvents.googleSignInAttempt);
       await signInWithGoogle();
     } catch (err) {
       setError(sanitizeErrorMessage(err, "Failed to sign in with Google"));
@@ -389,7 +394,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
           {/* Footer */}
           <p style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: "14px", margin: "24px 0 0 0" }}>
             Already have an account?
-            <a href="#" onClick={(e) => { e.preventDefault(); onNavigateToLogin?.(); }} style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
+            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.loginAttempt, { source: "register_screen_link" }); onNavigateToLogin?.(); }} style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
               Sign in
             </a>
           </p>

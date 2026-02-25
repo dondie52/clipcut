@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
 
 const OnboardingStep1 = ({ onContinue, onSkip }) => {
   const [displayName, setDisplayName] = useState("");
@@ -116,12 +117,12 @@ const OnboardingStep1 = ({ onContinue, onSkip }) => {
 
             {/* Actions */}
             <div style={{ paddingTop: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
-              <button type="submit" onClick={onContinue} style={btnPrimary}
+              <button type="submit" onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "1" }); onContinue?.(); }} style={btnPrimary}
                 onMouseEnter={(e) => e.target.style.background = "#8bbae3"}
                 onMouseLeave={(e) => e.target.style.background = "#75AADB"}>
                 Continue
               </button>
-              <button type="button" onClick={onSkip} style={{
+              <button type="button" onClick={() => { trackEvent(analyticsEvents.onboardingSkip, { step: "1" }); onSkip?.(); }} style={{
                 width: "100%", background: "none", border: "none", cursor: "pointer",
                 color: "rgba(117,170,219,0.6)", fontSize: "14px", fontWeight: 500, padding: "8px",
               }}>

@@ -5,6 +5,7 @@
  */
 
 import { Component } from 'react';
+import { captureError, logger } from '../utils';
 
 /**
  * Error boundary wrapper component
@@ -26,8 +27,8 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log error to console in development
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error', { error, errorInfo });
+    captureError(error, { source: 'ErrorBoundary', componentStack: errorInfo?.componentStack });
     
     this.setState({ errorInfo });
     

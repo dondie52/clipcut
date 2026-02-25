@@ -34,3 +34,9 @@ export {
   trackFileUpload,
   trackUserInteraction,
 } from './performance';
+
+export { logger, LOG_LEVELS } from './logger';
+
+export { trackEvent, analyticsEvents } from './analytics';
+
+export { initErrorAlerts, captureError } from './errorAlerts';
