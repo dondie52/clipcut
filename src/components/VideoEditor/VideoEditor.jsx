@@ -446,7 +446,10 @@ const VideoEditor = () => {
       if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
       setSelectedClipId(c1.id);
       notify("success", "Clip split");
-    } catch (e) { notify("error", `Split failed: ${e.message}`); }
+    } catch (e) {
+      if (e?.name === 'AbortError') notify("warning", "Split cancelled");
+      else notify("error", `Split failed: ${e.message}`);
+    }
     finally { setIsProcessing(false); setLoadMsg(""); }
   }, [clips, ffmpeg, setClips, notify]);
 
@@ -461,7 +464,10 @@ const VideoEditor = () => {
       setClips(p => p.map(c => c.id === clipId ? { ...c, file: trimmed, blobUrl: url, duration: dur } : c));
       if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
       notify("success", "Clip trimmed");
-    } catch (e) { notify("error", `Trim failed: ${e.message}`); }
+    } catch (e) {
+      if (e?.name === 'AbortError') notify("warning", "Trim cancelled");
+      else notify("error", `Trim failed: ${e.message}`);
+    }
     finally { setIsProcessing(false); setLoadMsg(""); }
   }, [clips, ffmpeg, setClips, notify]);
 
@@ -633,7 +639,8 @@ const VideoEditor = () => {
       
       notify("success", "Video converted successfully");
     } catch (e) {
-      notify("error", `Conversion failed: ${e.message}`);
+      if (e?.name === 'AbortError') notify("warning", "Conversion cancelled");
+      else notify("error", `Conversion failed: ${e.message}`);
     } finally {
       convertingBlobUrls.current.delete(blobUrl);
       setIsProcessing(false);
