@@ -34,3 +34,9 @@ export {
   trackFileUpload,
   trackUserInteraction,
 } from './performance';
+
+export {
+  initCoreWebVitalsTracking,
+  getAnalyticsBuffer,
+  clearAnalyticsBuffer,
+} from './analytics';

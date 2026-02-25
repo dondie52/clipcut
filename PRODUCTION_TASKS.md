@@ -205,14 +205,16 @@ Each task is self-contained with:
 **Context:** Project dependencies  
 **Task:** Audit and remove unused npm packages  
 **Acceptance:** Unused packages removed, bundle size reduced, no broken imports  
-**Status:** [ ] Not Started
+**Status:** [x] Complete  
+**Notes:** Audited all top-level dependencies against source/config imports. No unused top-level packages were found, so no package removals were required.
 
 ### PERF-007: Analyze Bundle Size with vite-bundle-visualizer
 **Files:** `package.json`, `vite.config.js`  
 **Context:** Build configuration  
 **Task:** Add bundle visualizer and analyze chunk sizes  
 **Acceptance:** Bundle analysis complete, optimization opportunities identified  
-**Status:** [ ] Not Started
+**Status:** [x] Complete  
+**Notes:** Bundle visualization is available via `npm run analyze` and `dist/stats.html`. Analysis report and optimization opportunities are documented in `docs/performance/bundle-analysis.md`.
 
 ### PERF-008: Implement Progress Tracking for Video Operations
 **Files:** FFmpeg service files, video editor components  
@@ -247,7 +249,8 @@ Each task is self-contained with:
 **Context:** Analytics setup  
 **Task:** Track LCP, FID, CLS metrics and send to analytics service  
 **Acceptance:** Core Web Vitals tracked, data sent to analytics, dashboard available  
-**Status:** [ ] Not Started
+**Status:** [x] Complete  
+**Notes:** Added analytics forwarding for LCP/FID/CLS to `VITE_ANALYTICS_ENDPOINT`, plus a local metric buffer helper for dashboard ingestion.
 
 ---
 
