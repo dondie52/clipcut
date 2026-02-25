@@ -10,7 +10,8 @@ import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
-import { performanceMonitor, METRIC_TYPES } from './utils/performance'
+import { performanceMonitor } from './utils/performance'
+import { initCoreWebVitalsTracking } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -84,6 +85,13 @@ const AppContent = () => {
     checkMobile()
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+
+  // Initialize Core Web Vitals analytics reporting
+  useEffect(() => {
+    const cleanup = initCoreWebVitalsTracking()
+    return cleanup
   }, [])
 
   // Show splash screen on initial load
