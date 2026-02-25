@@ -18,6 +18,26 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Add missing columns if table already exists from previous migration
+DO $$
+BEGIN
+  -- Add is_template column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'projects' AND column_name = 'is_template'
+  ) THEN
+    ALTER TABLE projects ADD COLUMN is_template BOOLEAN DEFAULT FALSE;
+  END IF;
+  
+  -- Add is_public column if it doesn't exist
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'projects' AND column_name = 'is_public'
+  ) THEN
+    ALTER TABLE projects ADD COLUMN is_public BOOLEAN DEFAULT FALSE;
+  END IF;
+END $$;
+
 -- Indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
 CREATE INDEX IF NOT EXISTS idx_projects_created_at ON projects(created_at DESC);
@@ -29,27 +49,32 @@ ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for projects
 -- Users can view their own projects
+DROP POLICY IF EXISTS "Users can view own projects" ON projects;
 CREATE POLICY "Users can view own projects"
   ON projects FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Users can view public projects
+DROP POLICY IF EXISTS "Anyone can view public projects" ON projects;
 CREATE POLICY "Anyone can view public projects"
   ON projects FOR SELECT
   USING (is_public = TRUE);
 
 -- Users can create their own projects
+DROP POLICY IF EXISTS "Users can create own projects" ON projects;
 CREATE POLICY "Users can create own projects"
   ON projects FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can update their own projects
+DROP POLICY IF EXISTS "Users can update own projects" ON projects;
 CREATE POLICY "Users can update own projects"
   ON projects FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can delete their own projects
+DROP POLICY IF EXISTS "Users can delete own projects" ON projects;
 CREATE POLICY "Users can delete own projects"
   ON projects FOR DELETE
   USING (auth.uid() = user_id);

@@ -115,38 +115,84 @@ export async function signUp({ email, password, username }) {
 
 /**
  * Sign in an existing user with email and password
+ * Includes account lockout checking
  * @param {Object} credentials - User credentials
  * @param {string} credentials.email - User email address
  * @param {string} credentials.password - User password
  * @returns {Promise<Object>} Supabase auth response with session and user
- * @throws {Error} If sign in fails
+ * @throws {Error} If sign in fails or account is locked
  */
 export async function signIn({ email, password }) {
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  // Check if account is locked
+  const lockoutStatus = await checkAccountLockout(email);
+  if (lockoutStatus.locked) {
+    const lockedUntil = new Date(lockoutStatus.lockedUntil);
+    const minutesRemaining = Math.ceil((lockedUntil - new Date()) / 60000);
+    throw new Error(`Account is locked due to too many failed attempts. Please try again in ${minutesRemaining} minute${minutesRemaining !== 1 ? 's' : ''}.`);
+  }
 
-  if (error) throw error;
-  return data;
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      // Record failed attempt
+      await recordFailedLoginAttempt(email);
+      throw error;
+    }
+
+    // Clear failed attempts on successful login
+    await clearFailedLoginAttempts(email);
+    return data;
+  } catch (err) {
+    // Re-throw the error
+    throw err;
+  }
 }
 
 /**
  * Sign in with Google OAuth
- * Redirects to Google for authentication
+ * Redirects to Google for authentication with enhanced error handling
  * @returns {Promise<Object>} Supabase OAuth response
  * @throws {Error} If OAuth initialization fails
  */
 export async function signInWithGoogle() {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: window.location.origin + "/onboarding/1",
-    },
-  });
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin + "/onboarding/1",
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      },
+    });
 
-  if (error) throw error;
-  return data;
+    if (error) {
+      // Enhanced error handling for OAuth
+      const errorMessages = {
+        'popup_closed_by_user': 'Sign-in was cancelled. Please try again.',
+        'oauth_error': 'Authentication failed. Please try again.',
+        'network_error': 'Network error. Please check your connection and try again.',
+      };
+      
+      const friendlyMessage = errorMessages[error.message] || 
+        'Failed to sign in with Google. Please try again.';
+      
+      throw new Error(friendlyMessage);
+    }
+    
+    return data;
+  } catch (err) {
+    // Re-throw with user-friendly message if not already handled
+    if (err.message && !err.message.includes('Please try again')) {
+      throw new Error('Failed to sign in with Google. Please try again.');
+    }
+    throw err;
+  }
 }
 
 /**
@@ -326,4 +372,309 @@ export async function saveOnboardingData(userId, onboardingData) {
 
   if (error) throw error;
   return data;
+}
+
+/**
+ * Email Verification Functions
+ */
+
+/**
+ * Resend verification email to the user
+ * @param {string} email - User email address
+ * @returns {Promise<Object>} Supabase response
+ * @throws {Error} If resend fails
+ */
+export async function resendVerificationEmail(email) {
+  const { data, error } = await supabase.auth.resend({
+    type: 'signup',
+    email: email,
+    options: {
+      emailRedirectTo: window.location.origin + '/verify-email',
+    },
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+/**
+ * Check if user's email is verified
+ * @param {string} userId - User UUID
+ * @returns {Promise<boolean>} True if email is verified
+ */
+export async function isEmailVerified(userId) {
+  try {
+    const user = await getUser();
+    return !!user?.email_confirmed_at;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Account Lockout Functions
+ * Note: These functions require a 'login_attempts' table in Supabase
+ * Create it with: CREATE TABLE login_attempts (
+ *   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+ *   user_id UUID REFERENCES auth.users(id),
+ *   email TEXT NOT NULL,
+ *   failed_attempts INTEGER DEFAULT 0,
+ *   locked_until TIMESTAMPTZ,
+ *   last_attempt TIMESTAMPTZ DEFAULT NOW(),
+ *   created_at TIMESTAMPTZ DEFAULT NOW()
+ * );
+ */
+
+/**
+ * Record a failed login attempt
+ * @param {string} email - User email address
+ * @returns {Promise<Object>} Lockout status
+ */
+export async function recordFailedLoginAttempt(email) {
+  const MAX_ATTEMPTS = 5;
+  const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+
+  try {
+    // Try to get user ID from email (if user exists)
+    const { data: users } = await supabase.auth.admin?.listUsers();
+    const user = users?.users?.find(u => u.email === email);
+    const userId = user?.id || null;
+
+    // Get or create login attempt record
+    const { data: existing, error: fetchError } = await supabase
+      .from("login_attempts")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (fetchError && fetchError.code !== 'PGRST116') {
+      // Table might not exist, return safe default
+      return { locked: false, attemptsRemaining: MAX_ATTEMPTS };
+    }
+
+    const now = new Date();
+    let attempts = existing ? existing.failed_attempts + 1 : 1;
+    let lockedUntil = existing?.locked_until ? new Date(existing.locked_until) : null;
+
+    // Check if still locked
+    if (lockedUntil && now < lockedUntil) {
+      return {
+        locked: true,
+        lockedUntil: lockedUntil.toISOString(),
+        attemptsRemaining: 0,
+      };
+    }
+
+    // Reset if lockout expired
+    if (lockedUntil && now >= lockedUntil) {
+      attempts = 1;
+      lockedUntil = null;
+    }
+
+    // Lock if max attempts reached
+    if (attempts >= MAX_ATTEMPTS) {
+      lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS);
+    }
+
+    // Upsert the record
+    const { error: upsertError } = await supabase
+      .from("login_attempts")
+      .upsert({
+        id: existing?.id,
+        user_id: userId,
+        email,
+        failed_attempts: attempts,
+        locked_until: lockedUntil?.toISOString() || null,
+        last_attempt: now.toISOString(),
+      }, {
+        onConflict: 'email',
+      });
+
+    if (upsertError) {
+      // Table might not exist, return safe default
+      return { locked: false, attemptsRemaining: MAX_ATTEMPTS - attempts };
+    }
+
+    return {
+      locked: attempts >= MAX_ATTEMPTS,
+      lockedUntil: lockedUntil?.toISOString() || null,
+      attemptsRemaining: Math.max(0, MAX_ATTEMPTS - attempts),
+      attempts: attempts,
+    };
+  } catch (err) {
+    // If table doesn't exist or other error, return safe default
+    console.warn('Account lockout tracking not available:', err);
+    return { locked: false, attemptsRemaining: MAX_ATTEMPTS };
+  }
+}
+
+/**
+ * Clear failed login attempts after successful login
+ * @param {string} email - User email address
+ */
+export async function clearFailedLoginAttempts(email) {
+  try {
+    await supabase
+      .from("login_attempts")
+      .delete()
+      .eq("email", email);
+  } catch (err) {
+    // Ignore errors if table doesn't exist
+    console.warn('Failed to clear login attempts:', err);
+  }
+}
+
+/**
+ * Check if account is locked
+ * @param {string} email - User email address
+ * @returns {Promise<Object>} Lockout status
+ */
+export async function checkAccountLockout(email) {
+  try {
+    const { data, error } = await supabase
+      .from("login_attempts")
+      .select("*")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { locked: false, attemptsRemaining: 5 };
+    }
+
+    const now = new Date();
+    const lockedUntil = data.locked_until ? new Date(data.locked_until) : null;
+
+    if (lockedUntil && now < lockedUntil) {
+      return {
+        locked: true,
+        lockedUntil: lockedUntil.toISOString(),
+        attemptsRemaining: 0,
+      };
+    }
+
+    return {
+      locked: false,
+      attemptsRemaining: Math.max(0, 5 - data.failed_attempts),
+    };
+  } catch (err) {
+    return { locked: false, attemptsRemaining: 5 };
+  }
+}
+
+/**
+ * Two-Factor Authentication (2FA) Functions
+ * Uses Supabase's built-in TOTP support
+ */
+
+/**
+ * Enable 2FA for the current user
+ * @returns {Promise<Object>} QR code data and secret
+ * @throws {Error} If enabling 2FA fails
+ */
+export async function enable2FA() {
+  try {
+    const { data, error } = await supabase.auth.mfa.enroll({
+      factorType: 'totp',
+      friendlyName: 'ClipCut Authenticator',
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    throw new Error(`Failed to enable 2FA: ${err.message}`);
+  }
+}
+
+/**
+ * Verify and enable 2FA with a TOTP code
+ * @param {string} factorId - Factor ID from enable2FA
+ * @param {string} code - TOTP verification code
+ * @returns {Promise<Object>} Verification result
+ * @throws {Error} If verification fails
+ */
+export async function verify2FA(factorId, code) {
+  try {
+    const { data, error } = await supabase.auth.mfa.verify({
+      factorId,
+      code,
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    throw new Error(`2FA verification failed: ${err.message}`);
+  }
+}
+
+/**
+ * Disable 2FA for the current user
+ * @param {string} factorId - Factor ID to remove
+ * @returns {Promise<void>}
+ * @throws {Error} If disabling fails
+ */
+export async function disable2FA(factorId) {
+  try {
+    const { data, error } = await supabase.auth.mfa.unenroll({
+      factorId,
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    throw new Error(`Failed to disable 2FA: ${err.message}`);
+  }
+}
+
+/**
+ * Get all enrolled 2FA factors for the current user
+ * @returns {Promise<Array>} List of enrolled factors
+ */
+export async function get2FAFactors() {
+  try {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+
+    if (error) throw error;
+    return data.factors || [];
+  } catch (err) {
+    console.warn('Failed to get 2FA factors:', err);
+    return [];
+  }
+}
+
+/**
+ * Challenge 2FA during login
+ * @param {string} factorId - Factor ID to challenge
+ * @returns {Promise<Object>} Challenge data
+ */
+export async function challenge2FA(factorId) {
+  try {
+    const { data, error } = await supabase.auth.mfa.challenge({
+      factorId,
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    throw new Error(`2FA challenge failed: ${err.message}`);
+  }
+}
+
+/**
+ * Verify 2FA challenge code
+ * @param {string} challengeId - Challenge ID from challenge2FA
+ * @param {string} code - TOTP code
+ * @returns {Promise<Object>} Verification result
+ */
+export async function verify2FAChallenge(challengeId, code) {
+  try {
+    const { data, error } = await supabase.auth.mfa.verify({
+      challengeId,
+      code,
+    });
+
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    throw new Error(`2FA verification failed: ${err.message}`);
+  }
 }

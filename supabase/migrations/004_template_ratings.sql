@@ -24,22 +24,26 @@ ALTER TABLE template_ratings ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies for template_ratings
 -- Anyone can view ratings
+DROP POLICY IF EXISTS "Anyone can view ratings" ON template_ratings;
 CREATE POLICY "Anyone can view ratings"
   ON template_ratings FOR SELECT
   USING (true);
 
 -- Authenticated users can create ratings
+DROP POLICY IF EXISTS "Authenticated users can create ratings" ON template_ratings;
 CREATE POLICY "Authenticated users can create ratings"
   ON template_ratings FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can update their own ratings
+DROP POLICY IF EXISTS "Users can update own ratings" ON template_ratings;
 CREATE POLICY "Users can update own ratings"
   ON template_ratings FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
 -- Users can delete their own ratings
+DROP POLICY IF EXISTS "Users can delete own ratings" ON template_ratings;
 CREATE POLICY "Users can delete own ratings"
   ON template_ratings FOR DELETE
   USING (auth.uid() = user_id);

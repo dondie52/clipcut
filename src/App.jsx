@@ -15,6 +15,8 @@ import { performanceMonitor, METRIC_TYPES } from './utils/performance'
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
 const DesktopRegister = lazy(() => import('./components/DesktopRegister.jsx'))
+const ResetPassword = lazy(() => import('./components/ResetPassword.jsx'))
+const VerifyEmail = lazy(() => import('./components/VerifyEmail.jsx'))
 const OnboardingStep1 = lazy(() => import('./components/OnboardingStep1.jsx'))
 const OnboardingStep2 = lazy(() => import('./components/OnboardingStep2.jsx'))
 const OnboardingStep3 = lazy(() => import('./components/OnboardingStep3.jsx'))
@@ -138,6 +140,22 @@ const AppContent = () => {
                 onNavigateToLogin={() => navigate('/login')}
               />
             </PublicRoute>
+          }
+        />
+        <Route
+          path="/reset-password"
+          element={
+            <PublicRoute>
+              <ResetPassword />
+            </PublicRoute>
+          }
+        />
+        <Route
+          path="/verify-email"
+          element={
+            <ProtectedRoute>
+              <VerifyEmail />
+            </ProtectedRoute>
           }
         />
 

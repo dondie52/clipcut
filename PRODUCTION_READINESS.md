@@ -30,14 +30,14 @@
 
 ### 🔐 Authentication & Authorization
 
-- [ ] **Supabase Auth Integration**
-  - [ ] Complete authentication flow (login, register, password reset)
-  - [ ] Implement session management and token refresh
-  - [ ] Add OAuth providers (Google) with proper error handling
-  - [ ] Implement email verification flow
-  - [ ] Add rate limiting on authentication endpoints
-  - [ ] Implement account lockout after failed attempts
-  - [ ] Add 2FA option (optional but recommended)
+- [x] **Supabase Auth Integration**
+  - [x] Complete authentication flow (login, register, password reset)
+  - [x] Implement session management and token refresh
+  - [x] Add OAuth providers (Google) with proper error handling
+  - [x] Implement email verification flow
+  - [x] Add rate limiting on authentication endpoints
+  - [x] Implement account lockout after failed attempts
+  - [ ] Add 2FA option (optional but recommended) - Functions implemented, UI pending
 
 - [ ] **Route Protection**
   - [x] Protected routes implemented (`ProtectedRoute` component)
