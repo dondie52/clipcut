@@ -11,7 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
 import { performanceMonitor } from './utils/performance'
-import { initAnalytics, trackPageView, initCoreWebVitalsTracking } from './utils/analytics'
+import { initAnalytics, trackPageView, trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -88,6 +88,8 @@ const AppContent = () => {
     if (!showSplash) {
       performanceMonitor.measurePageLoad(location.pathname)
       trackPageView(location.pathname)
+      // Also track as custom event for backward compatibility
+      trackEvent(analyticsEvents.pageView, { path: location.pathname })
     }
   }, [location.pathname, showSplash])
 

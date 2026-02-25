@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { signIn, resetPassword } from "../supabase/authService";
 import { validateLogin, sanitizeErrorMessage, validateEmail } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
 
 // Rate limiter: 5 attempts per minute for login
 const loginRateLimiter = createRateLimiter(5, 60000);
@@ -73,12 +74,15 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
 
     setLoading(true);
     loginRateLimiter.recordAttempt();
-    
+    trackEvent(analyticsEvents.loginAttempt, { emailDomain: email.split("@")[1] || "unknown" });
+
     try {
       await signIn({ email: email.trim().toLowerCase(), password });
+      trackEvent(analyticsEvents.loginSuccess);
       navigate("/dashboard");
     } catch (err) {
       // Use sanitized error message to prevent information leakage
+      trackEvent(analyticsEvents.loginFailure, { reason: err?.message || "unknown" });
       setError(sanitizeErrorMessage(err, "Invalid email or password"));
     } finally {
       setLoading(false);
@@ -108,6 +112,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
 
     try {
       await resetPassword(email.trim().toLowerCase());
+      trackEvent(analyticsEvents.passwordResetRequested);
       setResetSuccess(true);
     } catch (err) {
       // Don't reveal if email exists or not
@@ -343,7 +348,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
 
           <p style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: "14px", margin: "24px 0 0 0" }}>
             Don't have an account?
-            <a href="#" onClick={(e) => { e.preventDefault(); onNavigateToRegister?.(); }}
+            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.registerAttempt, { source: "login_screen_link" }); onNavigateToRegister?.(); }}
               style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
               Sign up
             </a>

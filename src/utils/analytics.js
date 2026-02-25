@@ -1,14 +1,16 @@
 /**
  * Analytics Utility
- * Centralized analytics tracking using Google Analytics 4 and Core Web Vitals
+ * Centralized analytics tracking using Google Analytics 4, custom endpoint, and Core Web Vitals
  * @module utils/analytics
  */
 
 import ReactGA from 'react-ga4'
 import { METRIC_TYPES } from './performance'
+import { logger } from './logger'
 
 // Check if Analytics is configured
 const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID
+const ANALYTICS_ENDPOINT = import.meta.env.VITE_ANALYTICS_ENDPOINT
 const IS_PRODUCTION = import.meta.env.PROD
 
 // Track initialization state
@@ -66,35 +68,147 @@ export function isAnalyticsEnabled() {
  * @param {string} [title] - Optional page title
  */
 export function trackPageView(path, title) {
-  if (!isAnalyticsEnabled()) {
-    return
+  // Track in Google Analytics
+  if (isAnalyticsEnabled()) {
+    ReactGA.send({
+      hitType: 'pageview',
+      page: path,
+      title: title || document.title,
+    })
   }
 
-  ReactGA.send({
-    hitType: 'pageview',
-    page: path,
-    title: title || document.title,
-  })
+  // Also track as custom event for endpoint
+  trackCustomEvent(analyticsEvents.pageView, { path })
 }
 
 /**
  * Track a custom event
- * @param {string} category - Event category (e.g., 'Video', 'User')
- * @param {string} action - Event action (e.g., 'Export', 'Login')
- * @param {string} [label] - Optional event label
- * @param {number} [value] - Optional numeric value
+ * Supports both styles:
+ * - GA4 style: trackEvent(category, action, label?, value?)
+ * - Custom endpoint style: trackEvent(eventName, properties?)
+ * 
+ * @param {string} categoryOrEventName - Event category (GA4) or event name (custom)
+ * @param {string|Object} actionOrProperties - Event action (GA4) or properties object (custom)
+ * @param {string} [label] - Optional event label (GA4 only)
+ * @param {number} [value] - Optional numeric value (GA4 only)
  */
-export function trackEvent(category, action, label, value) {
-  if (!isAnalyticsEnabled()) {
-    return
+export function trackEvent(categoryOrEventName, actionOrProperties, label, value) {
+  // Detect which style based on second argument type
+  if (typeof actionOrProperties === 'object' && actionOrProperties !== null && !Array.isArray(actionOrProperties)) {
+    // Custom endpoint style: trackEvent(eventName, properties)
+    trackCustomEvent(categoryOrEventName, actionOrProperties)
+  } else if (typeof actionOrProperties === 'string') {
+    // GA4 style: trackEvent(category, action, label?, value?)
+    if (isAnalyticsEnabled()) {
+      ReactGA.event({
+        category: categoryOrEventName,
+        action: actionOrProperties,
+        label,
+        value,
+      })
+    }
+    // Also send to custom endpoint if configured (convert to event name)
+    if (ANALYTICS_ENDPOINT) {
+      const eventName = `${categoryOrEventName}_${actionOrProperties}`.toLowerCase()
+      trackCustomEvent(eventName, { label, value })
+    }
+  } else {
+    // Fallback: treat as custom event with no properties
+    trackCustomEvent(categoryOrEventName, {})
+  }
+}
+
+/**
+ * Track a custom event to analytics endpoint (alternative signature)
+ * @param {string} eventName - Event name (e.g., 'page_view', 'login_attempt')
+ * @param {Object} [properties] - Event properties
+ */
+export async function trackCustomEvent(eventName, properties = {}) {
+  // Send to custom analytics endpoint if configured
+  if (ANALYTICS_ENDPOINT) {
+    try {
+      const sessionId = getSessionId()
+      const payload = {
+        event: eventName,
+        timestamp: new Date().toISOString(),
+        sessionId,
+        path: window.location.pathname,
+        userAgent: navigator.userAgent,
+        properties,
+      }
+
+      const body = JSON.stringify(payload)
+
+      if (navigator.sendBeacon) {
+        const blob = new Blob([body], { type: 'application/json' })
+        navigator.sendBeacon(ANALYTICS_ENDPOINT, blob)
+      } else {
+        await fetch(ANALYTICS_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+          keepalive: true,
+        })
+      }
+
+      logger.debug('Tracked analytics event', { eventName, properties })
+    } catch (error) {
+      logger.warn('Failed to send analytics event', { eventName, error })
+    }
   }
 
-  ReactGA.event({
-    category,
-    action,
-    label,
-    value,
-  })
+  // Also send to GA4 if enabled (map event name to category/action)
+  if (isAnalyticsEnabled() && eventName) {
+    // Try to extract category and action from event name
+    const parts = eventName.split('_')
+    const category = parts[0] || 'Custom'
+    const action = parts.slice(1).join('_') || eventName
+    
+    ReactGA.event({
+      category,
+      action,
+      label: properties?.path || properties?.step || undefined,
+      value: properties?.value,
+    })
+  }
+}
+
+/**
+ * Get or create session ID for analytics
+ * @returns {string}
+ */
+function getSessionId() {
+  const key = 'clipcut_analytics_session_id'
+  const existing = sessionStorage.getItem(key)
+  if (existing) return existing
+
+  const newSessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  sessionStorage.setItem(key, newSessionId)
+  return newSessionId
+}
+
+/**
+ * Predefined analytics event names
+ */
+export const analyticsEvents = {
+  pageView: 'page_view',
+  coreWebVital: 'core_web_vital',
+  loginAttempt: 'login_attempt',
+  loginSuccess: 'login_success',
+  loginFailure: 'login_failure',
+  passwordResetRequested: 'password_reset_requested',
+  registerAttempt: 'register_attempt',
+  registerSuccess: 'register_success',
+  registerFailure: 'register_failure',
+  googleSignInAttempt: 'google_sign_in_attempt',
+  onboardingContinue: 'onboarding_continue',
+  onboardingSkip: 'onboarding_skip',
+  dashboardNewProjectClick: 'dashboard_new_project_click',
+  dashboardFileImport: 'dashboard_file_import',
+  dashboardProjectOpen: 'dashboard_project_open',
+  dashboardProjectDelete: 'dashboard_project_delete',
+  dashboardAIFeatureSelect: 'dashboard_ai_feature_select',
+  dashboardToolSelect: 'dashboard_tool_select',
 }
 
 /**

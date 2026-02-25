@@ -35,6 +35,8 @@ export {
   trackUserInteraction,
 } from './performance';
 
+export { logger, LOG_LEVELS } from './logger';
+
 export {
   initErrorTracking,
   setupGlobalErrorHandlers,
@@ -52,6 +54,7 @@ export {
   isAnalyticsEnabled,
   trackPageView,
   trackEvent,
+  trackCustomEvent,
   trackLogin,
   trackSignup,
   trackVideoExport,
@@ -66,4 +69,6 @@ export {
   initCoreWebVitalsTracking,
   getAnalyticsBuffer,
   clearAnalyticsBuffer,
+  // Custom event tracking
+  analyticsEvents,
 } from './analytics';
