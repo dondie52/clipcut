@@ -72,13 +72,21 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
     trackEvent(analyticsEvents.registerAttempt, { emailDomain: email.split("@")[1] || "unknown" });
 
     try {
-      await signUp({ 
+      const signUpResult = await signUp({ 
         email: email.trim().toLowerCase(), 
         password, 
         username: username.trim() 
       });
       trackEvent(analyticsEvents.registerSuccess);
-      navigate("/onboarding/1");
+
+      if (signUpResult?.session) {
+        navigate("/onboarding/1");
+      } else {
+        navigate("/login", {
+          replace: true,
+          state: { message: "Check your email to verify your account, then sign in." },
+        });
+      }
     } catch (err) {
       // Use sanitized error message
       trackEvent(analyticsEvents.registerFailure, { reason: err?.message || "unknown" });

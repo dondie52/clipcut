@@ -40,70 +40,80 @@ Each task is self-contained with:
 **Context:** Supabase auth client setup, login form component  
 **Task:** Implement complete login flow with email/password, error handling, and redirect to dashboard  
 **Acceptance:** User can log in, errors are displayed, redirect works after successful login  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Login flow uses Supabase email/password auth, field-level validation, error sanitization, and redirects authenticated users to `/dashboard`.
 
 ### SEC-002: Complete Registration Flow Implementation
 **Files:** `src/components/DesktopRegister.jsx`, `src/services/supabase.js`  
 **Context:** Supabase auth client setup, registration form component  
 **Task:** Implement complete registration flow with email verification, password strength validation, and redirect  
 **Acceptance:** User can register, password validation works, email verification sent, redirect works  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Registration flow enforces password strength checks, handles email-verification-first signups, and redirects accordingly.
 
 ### SEC-003: Implement Password Reset Flow
 **Files:** `src/components/DesktopLogin.jsx`, `src/services/supabase.js`  
 **Context:** Supabase auth client, forgot password link  
 **Task:** Add password reset functionality with email sending and reset form  
 **Acceptance:** User can request password reset, email sent, reset form works, password updated  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Added password reset request from login plus a dedicated `/reset-password` update form for completing password changes.
 
 ### SEC-004: Add Google OAuth Provider
 **Files:** `src/components/DesktopLogin.jsx`, `src/services/supabase.js`  
 **Context:** Supabase auth client, OAuth configuration  
 **Task:** Implement Google OAuth sign-in with proper error handling  
 **Acceptance:** Google sign-in button works, OAuth flow completes, errors handled gracefully  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Google OAuth sign-in is wired through Supabase with UI entry points and sanitized error handling.
 
 ### SEC-005: Implement Session Management and Token Refresh
 **Files:** `src/services/supabase.js`, `src/App.jsx`  
 **Context:** Supabase client configuration, app routing  
 **Task:** Add automatic token refresh, session persistence, and session timeout handling  
 **Acceptance:** Tokens refresh automatically, session persists across page reloads, timeout handled  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Auth context now validates sessions, supports refresh, persists auth state via Supabase client config, and handles inactivity sign-out.
 
 ### SEC-006: Add Rate Limiting on Authentication Endpoints
 **Files:** `src/utils/rateLimiter.js`, `src/components/DesktopLogin.jsx`, `src/components/DesktopRegister.jsx`  
 **Context:** Rate limiter utility, auth components  
 **Task:** Implement rate limiting for login and registration attempts  
 **Acceptance:** Failed attempts are rate limited, user sees appropriate messages, lockout after threshold  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Login/registration/reset actions are rate-limited on the client with clear lockout feedback.
 
 ### SEC-007: Verify All Protected Routes
 **Files:** `src/components/ProtectedRoute.jsx`, `src/App.jsx`  
 **Context:** Route configuration, protected route component  
 **Task:** Review all routes and ensure sensitive routes use ProtectedRoute component  
 **Acceptance:** All sensitive routes are protected, redirects work correctly, unauthorized access blocked  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Sensitive app routes (`/onboarding/*`, `/dashboard`, `/editor`) are wrapped in `ProtectedRoute` and unauthenticated users are redirected to `/login`.
 
 ### SEC-008: Implement Session Timeout Warnings
 **Files:** `src/hooks/useSessionTimeout.js`, `src/App.jsx`  
 **Context:** Session management, app structure  
 **Task:** Create hook to detect session timeout and show warning to user  
 **Acceptance:** Warning appears before session expires, user can extend session, auto-logout on expiry  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Added `useSessionTimeout` and in-app warning banner that allows extending session or signing out before expiry.
 
 ### SEC-009: Document All Environment Variables
 **Files:** `.env.example`, `README.md`  
 **Context:** Environment variable usage throughout codebase  
 **Task:** Document all required environment variables with descriptions and examples  
 **Acceptance:** All env vars documented, examples provided, types specified  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Added a complete environment variable reference (types, examples, required/optional flags) in `README.md` and aligned sample entries in `.env.example` + `env.example`.
 
 ### SEC-010: Implement Frontend Input Validation
 **Files:** `src/utils/validation.js`, form components  
 **Context:** All form components (login, register, etc.)  
 **Task:** Create validation utility and add validation to all user input forms  
 **Acceptance:** All inputs validated, error messages shown, invalid submissions prevented  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
+**Notes:** Shared validation utilities enforce email/password/username checks across login and registration forms with actionable messages.
 
 ### SEC-011: Implement File Type Validation
 **Files:** `src/utils/fileValidation.js`, file upload components  

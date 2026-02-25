@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
-import { signIn, resetPassword } from "../supabase/authService";
+import { useLocation, useNavigate } from "react-router-dom";
+import { signIn, resetPassword, signInWithGoogle } from "../supabase/authService";
 import { validateLogin, sanitizeErrorMessage, validateEmail } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
@@ -11,6 +11,7 @@ const resetRateLimiter = createRateLimiter(3, 60000);
 
 const DesktopLogin = ({ onNavigateToRegister }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,6 +87,20 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
       setError(sanitizeErrorMessage(err, "Invalid email or password"));
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const handleGoogleSignIn = async () => {
+    setError("");
+    setFieldErrors({});
+    setResetSuccess(false);
+
+    try {
+      trackEvent(analyticsEvents.googleSignInAttempt, { source: "login" });
+      await signInWithGoogle();
+    } catch (err) {
+      setError(sanitizeErrorMessage(err, "Failed to sign in with Google"));
     }
   };
 
@@ -226,6 +241,20 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
             Sign in to continue editing
           </p>
 
+          {location.state?.message && (
+            <div style={{
+              background: "rgba(117,170,219,0.12)",
+              border: "1px solid rgba(117,170,219,0.35)",
+              borderRadius: "8px",
+              padding: "12px",
+              marginBottom: "20px",
+              color: "#75AADB",
+              fontSize: "14px",
+            }}>
+              {location.state.message}
+            </div>
+          )}
+
           {/* Success message for password reset */}
           {resetSuccess && (
             <div style={{
@@ -258,6 +287,17 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
               {error}
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            style={{
+              width: "100%", background: "rgba(255,255,255,0.05)", color: "white", fontWeight: 600, fontSize: "14px",
+              padding: "12px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.2)", cursor: "pointer", marginBottom: "18px",
+            }}
+          >
+            Continue with Google
+          </button>
 
           <form ref={formRef} onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }} noValidate>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
