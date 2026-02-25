@@ -110,7 +110,7 @@ let _idN = 0;
 const genId = () => `clip-${Date.now()}-${(++_idN).toString(36)}`;
 
 /* ========== LOADING OVERLAY ========== */
-const LoadingOverlay = memo(({ message, progress, subMessage }) => (
+const LoadingOverlay = memo(({ message, progress, subMessage, operationLabel }) => (
   <div className="loading-overlay" style={{
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
     display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000,
@@ -136,6 +136,7 @@ const LoadingOverlay = memo(({ message, progress, subMessage }) => (
         }} />
       </div>
       <p style={{ color: "white", fontSize: "15px", margin: "0 0 6px", fontWeight: 600 }}>{message}</p>
+      {operationLabel && <p style={{ color: "rgba(255, 255, 255, 0.65)", fontSize: "12px", margin: "0 0 8px" }}>{operationLabel}</p>}
       {subMessage && <p style={{ color: "#64748b", fontSize: "12px", margin: "0 0 16px" }}>{subMessage}</p>}
       {progress > 0 && (
         <>
@@ -149,7 +150,7 @@ const LoadingOverlay = memo(({ message, progress, subMessage }) => (
               transition: "width 0.3s ease", borderRadius: "3px",
             }} />
           </div>
-          <p style={{ color: "#75aadb", fontSize: "13px", fontWeight: 700, margin: 0 }}>{progress}%</p>
+          <p style={{ color: "#75aadb", fontSize: "13px", fontWeight: 700, margin: 0 }}>{Math.round(progress)}%</p>
         </>
       )}
     </div>
@@ -464,7 +465,7 @@ const VideoEditor = () => {
       setSelectedClipId(c1.id);
       notify("success", "Clip split");
     } catch (e) { notify("error", `Split failed: ${e.message}`); }
-    finally { setIsProcessing(false); setLoadMsg(""); }
+    finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
   }, [clips, ffmpeg, setClips, notify]);
 
   // ---- Trim ----
@@ -479,7 +480,7 @@ const VideoEditor = () => {
       if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
       notify("success", "Clip trimmed");
     } catch (e) { notify("error", `Trim failed: ${e.message}`); }
-    finally { setIsProcessing(false); setLoadMsg(""); }
+    finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
   }, [clips, ffmpeg, setClips, notify]);
 
   // ---- Export ----
@@ -551,6 +552,7 @@ const VideoEditor = () => {
     } finally { 
       setIsExporting(false); 
       setLoadMsg(""); 
+      ffmpeg.resetProgress();
     }
   }, [clips, projectName, ffmpeg, notify]);
 
@@ -651,6 +653,7 @@ const VideoEditor = () => {
       convertingBlobUrls.current.delete(blobUrl);
       setIsProcessing(false);
       setLoadMsg("");
+      ffmpeg.resetProgress();
     }
   }, [ffmpeg, mediaItems, clips, setClips, notify]);
 
@@ -705,7 +708,7 @@ const VideoEditor = () => {
 
       <TopBar
         projectName={projectName} onProjectNameChange={setProjectName}
-        onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress}
+        onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress} currentOperation={ffmpeg.currentOperation}
         hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions}
         lastSaved={lastSaved} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
       />
@@ -747,7 +750,7 @@ const VideoEditor = () => {
         />
       </Suspense>
 
-      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} subMessage={loadSub} />}
+      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} />}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
     </div>
   );

@@ -10,8 +10,8 @@ import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
-import { performanceMonitor, METRIC_TYPES } from './utils/performance'
-import { initAnalytics, trackPageView } from './utils/analytics'
+import { performanceMonitor } from './utils/performance'
+import { initAnalytics, trackPageView, initCoreWebVitalsTracking } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -69,12 +69,18 @@ const AppContent = () => {
   const location = useLocation()
   const analyticsInitialized = useRef(false)
   
-  // Initialize analytics once on mount
+  // Initialize Google Analytics once on mount
   useEffect(() => {
     if (!analyticsInitialized.current) {
       initAnalytics()
       analyticsInitialized.current = true
     }
+  }, [])
+
+  // Initialize Core Web Vitals analytics reporting
+  useEffect(() => {
+    const cleanup = initCoreWebVitalsTracking()
+    return cleanup
   }, [])
   
   // Track route changes for performance monitoring and analytics

@@ -47,6 +47,7 @@ export {
 } from './errorTracking';
 
 export {
+  // Google Analytics 4
   initAnalytics,
   isAnalyticsEnabled,
   trackPageView,
@@ -61,4 +62,8 @@ export {
   trackTiming,
   trackOnboardingStep,
   trackSearch,
+  // Core Web Vitals
+  initCoreWebVitalsTracking,
+  getAnalyticsBuffer,
+  clearAnalyticsBuffer,
 } from './analytics';
