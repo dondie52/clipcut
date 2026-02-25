@@ -3,18 +3,47 @@
  * Core FFmpeg service with initialization and file operations
  * Features:
  * - Lazy loading (only loads when first needed)
+ * - Dynamic imports (FFmpeg packages not bundled until needed)
  * - Singleton pattern (single instance across app)
  * - WASM caching via IndexedDB
  * - Progress tracking
  * - Memory management
  */
 
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+// Dynamic imports - FFmpeg packages are loaded only when needed
+// This prevents them from being bundled in the initial load
+let FFmpegClass = null;
+let ffmpegUtil = null;
 
 // Singleton instance
 let ffmpegInstance = null;
 let loadingPromise = null;
+let moduleLoadingPromise = null;
+
+/**
+ * Dynamically load FFmpeg modules
+ * @returns {Promise<void>}
+ */
+async function loadFFmpegModules() {
+  if (FFmpegClass && ffmpegUtil) {
+    return;
+  }
+  
+  if (moduleLoadingPromise) {
+    return moduleLoadingPromise;
+  }
+  
+  moduleLoadingPromise = (async () => {
+    const [ffmpegModule, utilModule] = await Promise.all([
+      import('@ffmpeg/ffmpeg'),
+      import('@ffmpeg/util'),
+    ]);
+    FFmpegClass = ffmpegModule.FFmpeg;
+    ffmpegUtil = utilModule;
+  })();
+  
+  return moduleLoadingPromise;
+}
 
 // Progress callback holder
 let progressCallback = null;
@@ -67,11 +96,15 @@ export function getLoadingState() {
 
 /**
  * Get or create the FFmpeg instance (singleton pattern)
- * @returns {FFmpeg} The FFmpeg instance
+ * Now async to support dynamic imports
+ * @returns {Promise<FFmpeg>} The FFmpeg instance
  */
-export function getFFmpegInstance() {
+export async function getFFmpegInstance() {
+  // Ensure modules are loaded
+  await loadFFmpegModules();
+  
   if (!ffmpegInstance) {
-    ffmpegInstance = new FFmpeg();
+    ffmpegInstance = new FFmpegClass();
     
     // Set up logging (only in development)
     if (process.env.NODE_ENV !== 'production') {
@@ -140,7 +173,10 @@ export async function preloadFFmpeg() {
  * @returns {Promise<FFmpeg>} Loaded FFmpeg instance
  */
 export async function loadFFmpeg(onProgress = null) {
-  const ffmpeg = getFFmpegInstance();
+  // Ensure modules are loaded first
+  await loadFFmpegModules();
+  
+  const ffmpeg = await getFFmpegInstance();
   
   // Return existing promise if already loading
   if (loadingPromise) {
@@ -174,13 +210,13 @@ export async function loadFFmpeg(onProgress = null) {
         }
       };
       
-      // Load core JS
-      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+      // Load core JS (using dynamically imported toBlobURL)
+      const coreURL = await ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
       coreLoaded = true;
       updateProgress();
       
       // Load WASM
-      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+      const wasmURL = await ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
       wasmLoaded = true;
       updateProgress();
       
@@ -222,7 +258,9 @@ export function isFFmpegLoaded() {
  */
 export async function writeFile(filename, file) {
   const ffmpeg = await loadFFmpeg();
-  const data = await fetchFile(file);
+  // Use dynamically imported fetchFile
+  await loadFFmpegModules();
+  const data = await ffmpegUtil.fetchFile(file);
   await ffmpeg.writeFile(filename, data);
   
   // Track file for memory management
@@ -478,5 +516,12 @@ export function formatBytes(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + ' MB';
 }
 
-// Re-export fetchFile for convenience
-export { fetchFile };
+/**
+ * Dynamically load and use fetchFile from @ffmpeg/util
+ * @param {File|Blob|string} file - File to fetch
+ * @returns {Promise<Uint8Array>} File data
+ */
+export async function fetchFile(file) {
+  await loadFFmpegModules();
+  return ffmpegUtil.fetchFile(file);
+}

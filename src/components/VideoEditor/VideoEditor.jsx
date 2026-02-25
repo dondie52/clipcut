@@ -1,11 +1,7 @@
-import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo, lazy, Suspense } from "react";
 import { useLocation } from "react-router-dom";
 import TopBar from './TopBar';
 import Toolbar from './Toolbar';
-import MediaPanel from './MediaPanel';
-import Player from './Player';
-import InspectorPanel from './InspectorPanel';
-import Timeline from './Timeline';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
@@ -18,6 +14,12 @@ import {
   TOAST_AUTO_CLOSE_DELAY,
   TOAST_ANIMATION_DURATION 
 } from '../../constants';
+
+// Lazy load heavy sub-components for better code splitting
+const MediaPanel = lazy(() => import('./MediaPanel'));
+const Player = lazy(() => import('./Player'));
+const InspectorPanel = lazy(() => import('./InspectorPanel'));
+const Timeline = lazy(() => import('./Timeline'));
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -41,6 +43,40 @@ const VIDEO_EDITOR_CSS = `
   }
   ${SCROLLBAR_CSS}
 `;
+
+/* ========== LAZY LOADING FALLBACKS ========== */
+const PanelLoadingFallback = memo(({ width, height = "100%" }) => (
+  <div style={{
+    width, height, background: "#0e1820",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    borderRight: "1px solid rgba(117,170,219,0.08)",
+  }}>
+    <div style={{
+      width: "24px", height: "24px",
+      border: "2px solid rgba(117,170,219,0.2)", borderTopColor: "#75aadb",
+      borderRadius: "50%", animation: "spin 0.8s linear infinite",
+    }} />
+  </div>
+));
+PanelLoadingFallback.displayName = "PanelLoadingFallback";
+
+const TimelineLoadingFallback = memo(() => (
+  <div style={{
+    height: "200px", background: "#0e1820",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    borderTop: "1px solid rgba(117,170,219,0.1)",
+  }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+      <div style={{
+        width: "24px", height: "24px",
+        border: "2px solid rgba(117,170,219,0.2)", borderTopColor: "#75aadb",
+        borderRadius: "50%", animation: "spin 0.8s linear infinite",
+      }} />
+      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px" }}>Loading timeline...</span>
+    </div>
+  </div>
+));
+TimelineLoadingFallback.displayName = "TimelineLoadingFallback";
 
 /* ========== UNDO/REDO SYSTEM ========== */
 const timelineReducer = (state, action) => {
@@ -676,32 +712,40 @@ const VideoEditor = () => {
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
       <main style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        <MediaPanel
-          mediaTab={mediaTab} onMediaTabChange={setMediaTab}
-          mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
-          onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
-          isImporting={isImporting}
-        />
-        <Player
-          isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
-          videoSrc={previewSrc} currentTime={pb.clipOffset}
-          onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
-          onVideoError={handleVideoFormatError}
-        />
-        <InspectorPanel
-          rightTab={rightTab} onRightTabChange={setRightTab}
-          rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-          selectedClip={selectedClip} onClipUpdate={updateClip}
-        />
+        <Suspense fallback={<PanelLoadingFallback width="280px" />}>
+          <MediaPanel
+            mediaTab={mediaTab} onMediaTabChange={setMediaTab}
+            mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
+            onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
+            isImporting={isImporting}
+          />
+        </Suspense>
+        <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
+          <Player
+            isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
+            videoSrc={previewSrc} currentTime={pb.clipOffset}
+            onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
+            onVideoError={handleVideoFormatError}
+          />
+        </Suspense>
+        <Suspense fallback={<PanelLoadingFallback width="280px" />}>
+          <InspectorPanel
+            rightTab={rightTab} onRightTabChange={setRightTab}
+            rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+            selectedClip={selectedClip} onClipUpdate={updateClip}
+          />
+        </Suspense>
       </main>
 
-      <Timeline
-        clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
-        onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip} onTrimClip={trimClip}
-        currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
-        isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
-        mediaItems={mediaItems} onAddToTimeline={addToTimeline}
-      />
+      <Suspense fallback={<TimelineLoadingFallback />}>
+        <Timeline
+          clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
+          onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip} onTrimClip={trimClip}
+          currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
+          isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+          mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+        />
+      </Suspense>
 
       {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} subMessage={loadSub} />}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
