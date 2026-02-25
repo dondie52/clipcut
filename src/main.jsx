@@ -2,9 +2,12 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
-import { initErrorAlerts, logger } from './utils'
+import { initErrorTracking, setupGlobalErrorHandlers } from './utils/errorTracking'
+import { logger } from './utils/logger'
 
-initErrorAlerts()
+// Initialize error tracking (Sentry) before anything else
+initErrorTracking()
+setupGlobalErrorHandlers()
 
 // Register service worker with auto-update
 if (import.meta.env.PROD) {

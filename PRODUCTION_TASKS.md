@@ -198,21 +198,23 @@ Each task is self-contained with:
 **Context:** Components that display images  
 **Task:** Add lazy loading to all image elements using loading="lazy" or IntersectionObserver  
 **Acceptance:** Images load on scroll, placeholder shown, performance improved  
-**Status:** [ ] Not Started
+**Status:** [x ] Not Started
 
 ### PERF-006: Remove Unused Dependencies
 **Files:** `package.json`  
 **Context:** Project dependencies  
 **Task:** Audit and remove unused npm packages  
 **Acceptance:** Unused packages removed, bundle size reduced, no broken imports  
-**Status:** [ ] Not Started
+**Status:** [x] Complete  
+**Notes:** Audited all top-level dependencies against source/config imports. No unused top-level packages were found, so no package removals were required.
 
 ### PERF-007: Analyze Bundle Size with vite-bundle-visualizer
 **Files:** `package.json`, `vite.config.js`  
 **Context:** Build configuration  
 **Task:** Add bundle visualizer and analyze chunk sizes  
 **Acceptance:** Bundle analysis complete, optimization opportunities identified  
-**Status:** [ ] Not Started
+**Status:** [x] Complete  
+**Notes:** Bundle visualization is available via `npm run analyze` and `dist/stats.html`. Analysis report and optimization opportunities are documented in `docs/performance/bundle-analysis.md`.
 
 ### PERF-008: Implement Progress Tracking for Video Operations
 **Files:** FFmpeg service files, video editor components  
@@ -247,7 +249,8 @@ Each task is self-contained with:
 **Context:** Analytics setup  
 **Task:** Track LCP, FID, CLS metrics and send to analytics service  
 **Acceptance:** Core Web Vitals tracked, data sent to analytics, dashboard available  
-**Status:** [x] Complete
+**Status:** [x] Complete  
+**Notes:** Added analytics forwarding for LCP/FID/CLS to `VITE_ANALYTICS_ENDPOINT`, plus a local metric buffer helper for dashboard ingestion.
 
 ---
 
@@ -360,35 +363,35 @@ Each task is self-contained with:
 **Context:** Error handling, app structure  
 **Task:** Install Sentry and configure error tracking  
 **Acceptance:** Sentry installed, errors tracked, dashboard accessible  
-**Status:** [ ] Not Started
+**Status:** [x] Completed
 
 ### MON-002: Implement Error Boundary with Reporting
 **Files:** `src/components/ErrorBoundary.jsx`  
 **Context:** Error boundary component  
 **Task:** Enhance error boundary to report errors to Sentry  
 **Acceptance:** Errors caught and reported, user sees friendly message, errors logged  
-**Status:** [x] Complete
+**Status:** [x] Completed
 
 ### MON-003: Track JavaScript Errors
 **Files:** `src/utils/errorTracking.js`, `src/main.jsx`  
 **Context:** Error tracking setup  
 **Task:** Set up global error handlers for uncaught errors  
 **Acceptance:** All JS errors tracked, context included, errors visible in dashboard  
-**Status:** [x] Complete
+**Status:** [x] Completed
 
 ### MON-004: Track Unhandled Promise Rejections
 **Files:** `src/utils/errorTracking.js`, `src/main.jsx`  
 **Context:** Error tracking setup  
 **Task:** Add handler for unhandled promise rejections  
 **Acceptance:** Promise rejections tracked, context included, errors visible  
-**Status:** [x] Complete
+**Status:** [x] Completed
 
 ### MON-005: Set Up Google Analytics
 **Files:** `src/utils/analytics.js`, `src/App.jsx`  
 **Context:** Analytics setup  
 **Task:** Install and configure Google Analytics or privacy-friendly alternative  
 **Acceptance:** Analytics installed, events tracked, dashboard accessible  
-**Status:** [ ] Not Started
+**Status:** [x] Completed
 
 ### MON-006: Track User Actions (Events)
 **Files:** `src/utils/analytics.js`, interactive components  
