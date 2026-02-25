@@ -179,6 +179,7 @@ const QUALITY_PRESETS = {
  * @param {Function} props.onExport - Export handler (receives settings)
  * @param {boolean} props.isExporting - Whether export is in progress
  * @param {number} props.progress - Export progress (0-100)
+ * @param {string} props.operationLabel - Active processing operation label
  * @param {number} props.clipCount - Number of clips to export
  * @param {number} props.duration - Total duration in seconds
  */
@@ -188,6 +189,7 @@ const ExportModal = memo(({
   onExport, 
   isExporting = false, 
   progress = 0,
+  operationLabel = 'Exporting video...',
   clipCount = 0,
   duration = 0,
 }) => {
@@ -329,10 +331,10 @@ const ExportModal = memo(({
                 fontSize: "13px",
               }}>
                 <span style={{ color: "rgba(255, 255, 255, 0.7)" }}>
-                  Exporting...
+                  {operationLabel}
                 </span>
                 <span style={{ color: "#75aadb", fontWeight: 600 }}>
-                  {progress}%
+                  {Math.round(progress)}%
                 </span>
               </div>
               <div style={{
@@ -344,7 +346,7 @@ const ExportModal = memo(({
               }}>
                 <div style={{
                   height: "100%",
-                  width: `${progress}%`,
+                  width: `${Math.round(progress)}%`,
                   background: progress >= 100 
                     ? "linear-gradient(90deg, #22c55e, #16a34a)" 
                     : "linear-gradient(90deg, #75aadb, #5a8cbf)",

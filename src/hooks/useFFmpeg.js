@@ -22,6 +22,9 @@ import * as videoOperations from '../services/videoOperations';
 import * as audioOperations from '../services/audioOperations';
 import * as effects from '../services/effects';
 
+const PREPARING_PROGRESS = 15;
+const PROCESSING_PROGRESS_SPAN = 85;
+
 /**
  * Custom hook for using FFmpeg in React components
  * Handles loading state, progress tracking, and error management
@@ -111,17 +114,35 @@ export function useFFmpeg() {
     setCurrentOperation(operationName);
     setProgress(0);
     setError(null);
+
+    const updateOperationProgress = ({ progress: rawProgress = 0, time = 0 }) => {
+      const normalized = PREPARING_PROGRESS + Math.round((rawProgress / 100) * PROCESSING_PROGRESS_SPAN);
+      const clamped = Math.max(PREPARING_PROGRESS, Math.min(99, normalized));
+      handleProgress({ progress: clamped, time });
+    };
     
     try {
-      const result = await operationFn(handleProgress);
+      // Surface a visible preparing phase while FFmpeg writes files before process updates begin.
+      handleProgress({ progress: PREPARING_PROGRESS });
+
+      const result = await operationFn(updateOperationProgress);
       if (isMounted.current) {
         setProgress(100);
         setCurrentOperation(null);
+
+        // Reset to idle after success so the next operation never starts with stale progress.
+        setTimeout(() => {
+          if (isMounted.current) {
+            setProgress(0);
+          }
+        }, 350);
       }
       return result;
     } catch (err) {
       if (isMounted.current) {
-        setError(err.message || `Failed to ${operationName}`);
+        const isCancelled = err?.name === 'AbortError' || /abort|cancel/i.test(err?.message || '');
+        setError(isCancelled ? 'Operation cancelled' : (err.message || `Failed to ${operationName}`));
+        setProgress(0);
         setCurrentOperation(null);
       }
       throw err;

@@ -87,6 +87,7 @@ const ExportModal = memo(({
   onExport, 
   isExporting, 
   progress, 
+  operationLabel = 'Processing',
   resolutions 
 }) => {
   const [selectedResolution, setSelectedResolution] = useState('1080p');
@@ -336,7 +337,7 @@ const ExportModal = memo(({
               fontWeight: 500,
               margin: '0 0 6px 0'
             }}>
-              Exporting Video...
+              {operationLabel}
             </p>
             <p style={{
               color: '#64748b',
@@ -369,7 +370,7 @@ const ExportModal = memo(({
               margin: 0,
               fontFamily: 'monospace'
             }}>
-              {progress}%
+              {Math.round(progress)}%
             </p>
           </div>
         )}
@@ -387,6 +388,7 @@ const TopBar = ({
   onExport,
   isExporting = false,
   exportProgress = 0,
+  currentOperation = '',
   hasMediaToExport = false,
   resolutions = {},
   lastSaved = null,
@@ -643,6 +645,7 @@ const TopBar = ({
         onExport={handleExport}
         isExporting={isExporting}
         progress={exportProgress}
+        operationLabel={currentOperation ? `${currentOperation}...` : 'Exporting video...'}
         resolutions={resolutions}
       />
     </>
