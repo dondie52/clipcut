@@ -36,6 +36,33 @@ export {
 } from './performance';
 
 export {
+  initErrorTracking,
+  setupGlobalErrorHandlers,
+  captureError,
+  captureMessage,
+  setUserContext,
+  clearUserContext,
+  addBreadcrumb,
+  getErrorBoundaryConfig,
+} from './errorTracking';
+
+export {
+  // Google Analytics 4
+  initAnalytics,
+  isAnalyticsEnabled,
+  trackPageView,
+  trackEvent,
+  trackLogin,
+  trackSignup,
+  trackVideoExport,
+  trackProjectAction,
+  trackFeatureUsage,
+  trackError,
+  setUserProperties,
+  trackTiming,
+  trackOnboardingStep,
+  trackSearch,
+  // Core Web Vitals
   initCoreWebVitalsTracking,
   getAnalyticsBuffer,
   clearAnalyticsBuffer,

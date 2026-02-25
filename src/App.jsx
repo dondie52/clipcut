@@ -3,7 +3,7 @@
  * @module App
  */
 
-import { useState, useEffect, Suspense, lazy } from 'react'
+import { useState, useEffect, Suspense, lazy, useRef } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './supabase/AuthContext'
 import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
@@ -11,7 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
 import { performanceMonitor } from './utils/performance'
-import { initCoreWebVitalsTracking } from './utils/analytics'
+import { initAnalytics, trackPageView, initCoreWebVitalsTracking } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -67,11 +67,27 @@ const AppContent = () => {
   const [isMobile, setIsMobile] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+  const analyticsInitialized = useRef(false)
   
-  // Track route changes for performance monitoring
+  // Initialize Google Analytics once on mount
+  useEffect(() => {
+    if (!analyticsInitialized.current) {
+      initAnalytics()
+      analyticsInitialized.current = true
+    }
+  }, [])
+
+  // Initialize Core Web Vitals analytics reporting
+  useEffect(() => {
+    const cleanup = initCoreWebVitalsTracking()
+    return cleanup
+  }, [])
+  
+  // Track route changes for performance monitoring and analytics
   useEffect(() => {
     if (!showSplash) {
       performanceMonitor.measurePageLoad(location.pathname)
+      trackPageView(location.pathname)
     }
   }, [location.pathname, showSplash])
 
@@ -85,13 +101,6 @@ const AppContent = () => {
     checkMobile()
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
-  }, [])
-
-
-  // Initialize Core Web Vitals analytics reporting
-  useEffect(() => {
-    const cleanup = initCoreWebVitalsTracking()
-    return cleanup
   }, [])
 
   // Show splash screen on initial load
