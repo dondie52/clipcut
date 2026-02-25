@@ -37,6 +37,6 @@ export {
 
 export { logger, LOG_LEVELS } from './logger';
 
-export { trackEvent, analyticsEvents } from './analytics';
+export { trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './analytics';
 
 export { initErrorAlerts, captureError } from './errorAlerts';

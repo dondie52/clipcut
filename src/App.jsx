@@ -10,8 +10,8 @@ import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
-import { performanceMonitor, METRIC_TYPES } from './utils/performance'
-import { trackEvent, analyticsEvents } from './utils/analytics'
+import { performanceMonitor } from './utils/performance'
+import { trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -75,6 +75,11 @@ const AppContent = () => {
       trackEvent(analyticsEvents.pageView, { path: location.pathname })
     }
   }, [location.pathname, showSplash])
+
+
+  useEffect(() => {
+    initCoreWebVitalsTracking()
+  }, [])
 
   // Check for mobile viewport
   useEffect(() => {

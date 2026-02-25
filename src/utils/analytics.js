@@ -9,6 +9,8 @@ import { logger } from './logger';
 const endpoint = import.meta.env.VITE_ANALYTICS_ENDPOINT;
 const enabled = Boolean(endpoint);
 
+let coreVitalsInitialized = false;
+
 const getSessionId = () => {
   const key = 'clipcut_analytics_session_id';
   const existing = sessionStorage.getItem(key);
@@ -60,8 +62,66 @@ export const trackEvent = async (eventName, properties = {}) => {
   }
 };
 
+const trackCoreWebVitalMetric = (name, value, details = {}) => {
+  trackEvent(analyticsEvents.coreWebVital, {
+    metric: name,
+    value,
+    ...details,
+  });
+};
+
+export const initCoreWebVitalsTracking = () => {
+  if (coreVitalsInitialized || typeof window === 'undefined' || typeof PerformanceObserver === 'undefined') {
+    return;
+  }
+
+  coreVitalsInitialized = true;
+
+  try {
+    let clsValue = 0;
+
+    const lcpObserver = new PerformanceObserver((entryList) => {
+      const entries = entryList.getEntries();
+      const latestEntry = entries[entries.length - 1];
+      if (latestEntry) {
+        trackCoreWebVitalMetric('LCP', latestEntry.startTime, {
+          entryType: latestEntry.entryType,
+        });
+      }
+    });
+
+    lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+
+    const clsObserver = new PerformanceObserver((entryList) => {
+      for (const entry of entryList.getEntries()) {
+        if (!entry.hadRecentInput) {
+          clsValue += entry.value;
+        }
+      }
+
+      trackCoreWebVitalMetric('CLS', clsValue);
+    });
+
+    clsObserver.observe({ type: 'layout-shift', buffered: true });
+
+    const fidObserver = new PerformanceObserver((entryList) => {
+      for (const entry of entryList.getEntries()) {
+        const fid = entry.processingStart - entry.startTime;
+        trackCoreWebVitalMetric('FID', fid, {
+          entryType: entry.entryType,
+        });
+      }
+    });
+
+    fidObserver.observe({ type: 'first-input', buffered: true });
+  } catch (error) {
+    logger.warn('Core Web Vitals tracking unavailable', { error });
+  }
+};
+
 export const analyticsEvents = {
   pageView: 'page_view',
+  coreWebVital: 'core_web_vital',
   loginAttempt: 'login_attempt',
   loginSuccess: 'login_success',
   loginFailure: 'login_failure',
