@@ -4,6 +4,7 @@ import { signIn, resetPassword } from "../supabase/authService";
 import { validateLogin, sanitizeErrorMessage, validateEmail } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
+import { captureError, addBreadcrumb } from "../utils/errorTracking";
 
 // Rate limiter: 5 attempts per minute for login
 const loginRateLimiter = createRateLimiter(5, 60000);
@@ -18,8 +19,10 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
   const formRef = useRef(null);
+  const emailInputRef = useRef(null);
 
   // Use WebP with JPEG fallback for background images
   const backgroundImages = [
@@ -58,10 +61,17 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     setFieldErrors({});
     setResetSuccess(false);
 
+    // Track login attempt
+    trackEvent(analyticsEvents.loginAttempt, { method: 'email' });
+    addBreadcrumb({ category: 'auth', message: 'Login attempt started', level: 'info' });
+
     // Rate limiting check
     if (!loginRateLimiter.canAttempt()) {
       const waitTime = Math.ceil(loginRateLimiter.getTimeUntilReset() / 1000);
-      setError(`Too many login attempts. Please wait ${waitTime} seconds.`);
+      const errorMsg = `Too many login attempts. Please wait ${waitTime} seconds.`;
+      setError(errorMsg);
+      trackEvent(analyticsEvents.loginFailure, { reason: 'rate_limit' });
+      addBreadcrumb({ category: 'auth', message: 'Login rate limited', level: 'warning' });
       return;
     }
 
@@ -69,21 +79,27 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     const validation = validateLogin({ email: email.trim(), password });
     if (!validation.valid) {
       setFieldErrors(validation.errors);
+      trackEvent(analyticsEvents.loginFailure, { reason: 'validation_error' });
       return;
     }
 
     setLoading(true);
     loginRateLimiter.recordAttempt();
-    trackEvent(analyticsEvents.loginAttempt, { emailDomain: email.split("@")[1] || "unknown" });
-
+    
     try {
       await signIn({ email: email.trim().toLowerCase(), password });
-      trackEvent(analyticsEvents.loginSuccess);
+      trackEvent(analyticsEvents.loginSuccess, { method: 'email' });
+      addBreadcrumb({ category: 'auth', message: 'Login successful', level: 'info' });
       navigate("/dashboard");
     } catch (err) {
       // Use sanitized error message to prevent information leakage
-      trackEvent(analyticsEvents.loginFailure, { reason: err?.message || "unknown" });
-      setError(sanitizeErrorMessage(err, "Invalid email or password"));
+      const errorMsg = sanitizeErrorMessage(err, "Invalid email or password");
+      setError(errorMsg);
+      trackEvent(analyticsEvents.loginFailure, { reason: 'auth_error' });
+      captureError(err, { 
+        tags: { type: 'login_error' },
+        extra: { email: email.trim().toLowerCase() }
+      });
     } finally {
       setLoading(false);
     }
@@ -105,18 +121,28 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     if (!resetRateLimiter.canAttempt()) {
       const waitTime = Math.ceil(resetRateLimiter.getTimeUntilReset() / 1000);
       setError(`Too many reset attempts. Please wait ${waitTime} seconds.`);
+      trackEvent(analyticsEvents.passwordResetRequested, { success: false, reason: 'rate_limit' });
       return;
     }
 
     resetRateLimiter.recordAttempt();
+    setResetLoading(true);
+    trackEvent(analyticsEvents.passwordResetRequested, { success: true });
 
     try {
       await resetPassword(email.trim().toLowerCase());
-      trackEvent(analyticsEvents.passwordResetRequested);
       setResetSuccess(true);
+      addBreadcrumb({ category: 'auth', message: 'Password reset email sent', level: 'info' });
     } catch (err) {
-      // Don't reveal if email exists or not
-      setResetSuccess(true); // Always show success to prevent email enumeration
+      // Don't reveal if email exists or not - always show success to prevent email enumeration
+      setResetSuccess(true);
+      // Log error for debugging but don't expose to user
+      captureError(err, { 
+        tags: { type: 'password_reset_error' },
+        extra: { email: email.trim().toLowerCase() }
+      });
+    } finally {
+      setResetLoading(false);
     }
   };
 
@@ -263,6 +289,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <label htmlFor="login-email" style={labelStyle}>Email</label>
               <input 
+                ref={emailInputRef}
                 id="login-email"
                 type="email" 
                 placeholder="Enter your email" 
@@ -272,12 +299,19 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
                 required
                 aria-invalid={!!fieldErrors.email}
                 aria-describedby={fieldErrors.email ? "email-error" : undefined}
+                disabled={loading}
                 style={{
                   ...inputStyle,
                   borderColor: fieldErrors.email ? "rgba(239, 68, 68, 0.5)" : inputStyle.border.split(" ")[2],
+                  opacity: loading ? 0.6 : 1,
                 }}
                 onFocus={(e) => { e.target.style.borderColor = fieldErrors.email ? "rgba(239, 68, 68, 0.7)" : "rgba(117,170,219,0.4)"; e.target.style.boxShadow = "0 0 0 2px rgba(117,170,219,0.1)"; }}
                 onBlur={(e) => { e.target.style.borderColor = fieldErrors.email ? "rgba(239, 68, 68, 0.5)" : "rgba(117,170,219,0.15)"; e.target.style.boxShadow = "none"; }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !loading) {
+                    formRef.current?.requestSubmit();
+                  }
+                }}
               />
               {fieldErrors.email && (
                 <span id="email-error" style={{ fontSize: "12px", color: "#ef4444" }} role="alert">
@@ -299,12 +333,19 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
                   required
                   aria-invalid={!!fieldErrors.password}
                   aria-describedby={fieldErrors.password ? "password-error" : undefined}
+                  disabled={loading}
                   style={{
                     ...inputStyle,
                     borderColor: fieldErrors.password ? "rgba(239, 68, 68, 0.5)" : inputStyle.border.split(" ")[2],
+                    opacity: loading ? 0.6 : 1,
                   }}
                   onFocus={(e) => { e.target.style.borderColor = fieldErrors.password ? "rgba(239, 68, 68, 0.7)" : "rgba(117,170,219,0.4)"; e.target.style.boxShadow = "0 0 0 2px rgba(117,170,219,0.1)"; }}
                   onBlur={(e) => { e.target.style.borderColor = fieldErrors.password ? "rgba(239, 68, 68, 0.5)" : "rgba(117,170,219,0.15)"; e.target.style.boxShadow = "none"; }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !loading) {
+                      formRef.current?.requestSubmit();
+                    }
+                  }}
                 />
                 <button 
                   type="button" 
@@ -327,9 +368,18 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
                 <button 
                   type="button" 
                   onClick={(e) => { e.preventDefault(); handleForgotPassword(); }} 
-                  style={{ fontSize: "12px", color: "#75AADB", textDecoration: "none", cursor: "pointer", background: "none", border: "none", padding: 0 }}
+                  disabled={resetLoading || loading}
+                  style={{ 
+                    fontSize: "12px", 
+                    color: resetLoading || loading ? "rgba(117,170,219,0.5)" : "#75AADB", 
+                    textDecoration: "none", 
+                    cursor: resetLoading || loading ? "not-allowed" : "pointer", 
+                    background: "none", 
+                    border: "none", 
+                    padding: 0 
+                  }}
                 >
-                  Forgot password?
+                  {resetLoading ? "Sending..." : "Forgot password?"}
                 </button>
               </div>
             </div>
@@ -348,7 +398,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
 
           <p style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: "14px", margin: "24px 0 0 0" }}>
             Don't have an account?
-            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.registerAttempt, { source: "login_screen_link" }); onNavigateToRegister?.(); }}
+            <a href="#" onClick={(e) => { e.preventDefault(); onNavigateToRegister?.(); }}
               style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
               Sign up
             </a>

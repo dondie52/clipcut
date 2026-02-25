@@ -4,7 +4,6 @@
  * @module utils/analytics
  */
 
-import ReactGA from 'react-ga4'
 import { METRIC_TYPES } from './performance'
 import { logger } from './logger'
 
@@ -16,6 +15,33 @@ const IS_PRODUCTION = import.meta.env.PROD
 // Track initialization state
 let isInitialized = false
 
+let ReactGA = {
+  initialize: () => {},
+  send: () => {},
+  event: () => {},
+  set: () => {},
+}
+
+let gaLibraryLoaded = false
+
+async function loadGoogleAnalyticsLibrary() {
+  if (gaLibraryLoaded) return true
+
+  try {
+    const gaModulePath = 'react-ga4'
+    const gaModule = await import(/* @vite-ignore */ gaModulePath)
+    ReactGA = gaModule.default
+    gaLibraryLoaded = true
+    return true
+  } catch {
+    if (IS_PRODUCTION) {
+      console.warn('[Analytics] react-ga4 is not installed. GA tracking disabled.')
+    }
+    return false
+  }
+}
+
+
 // ============================================================================
 // Google Analytics 4 Integration
 // ============================================================================
@@ -24,7 +50,7 @@ let isInitialized = false
  * Initialize Google Analytics
  * Should be called once at app startup
  */
-export function initAnalytics() {
+export async function initAnalytics() {
   if (isInitialized) {
     return
   }
@@ -39,6 +65,11 @@ export function initAnalytics() {
   // Check for Do Not Track preference
   if (navigator.doNotTrack === '1' || window.doNotTrack === '1') {
     console.log('[Analytics] Do Not Track enabled. Analytics disabled.')
+    return
+  }
+
+  const hasGaLibrary = await loadGoogleAnalyticsLibrary()
+  if (!hasGaLibrary) {
     return
   }
 

@@ -4,18 +4,47 @@
  * @module utils/errorTracking
  */
 
-import * as Sentry from '@sentry/react'
-
 // Check if Sentry is configured
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN
 const IS_PRODUCTION = import.meta.env.PROD
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.1.0'
 
+const noop = () => {}
+const noopScope = {
+  setTag: noop,
+  setExtra: noop,
+  setLevel: noop,
+  setFingerprint: noop,
+}
+
+let SentrySDK = {
+  init: noop,
+  withScope: (callback) => callback(noopScope),
+  captureException: noop,
+  captureMessage: noop,
+  setUser: noop,
+  addBreadcrumb: noop,
+}
+
+async function loadSentryIfAvailable() {
+  try {
+    const sentryImportPath = '@sentry/react'
+    const sentryModule = await import(/* @vite-ignore */ sentryImportPath)
+    SentrySDK = sentryModule
+    return true
+  } catch {
+    if (IS_PRODUCTION) {
+      console.warn('[ErrorTracking] @sentry/react not installed. Error tracking disabled.')
+    }
+    return false
+  }
+}
+
 /**
  * Initialize Sentry error tracking
  * Should be called once at app startup (in main.jsx)
  */
-export function initErrorTracking() {
+export async function initErrorTracking() {
   if (!SENTRY_DSN) {
     if (IS_PRODUCTION) {
       console.warn('[ErrorTracking] Sentry DSN not configured. Error tracking disabled.')
@@ -23,56 +52,43 @@ export function initErrorTracking() {
     return
   }
 
-  Sentry.init({
+  const loaded = await loadSentryIfAvailable()
+  if (!loaded) return
+
+  SentrySDK.init({
     dsn: SENTRY_DSN,
     environment: IS_PRODUCTION ? 'production' : 'development',
     release: `clipcut@${APP_VERSION}`,
-    
-    // Performance monitoring sample rate (0.0 to 1.0)
     tracesSampleRate: IS_PRODUCTION ? 0.1 : 1.0,
-    
-    // Session replay for debugging (production only)
     replaysSessionSampleRate: 0.1,
     replaysOnErrorSampleRate: 1.0,
-    
-    // Filter out noisy errors
     ignoreErrors: [
-      // Browser extensions
       /chrome-extension/,
       /moz-extension/,
-      // Network errors that aren't actionable
       'Network request failed',
       'Failed to fetch',
       'Load failed',
-      // ResizeObserver errors (common, harmless)
       'ResizeObserver loop limit exceeded',
       'ResizeObserver loop completed with undelivered notifications',
     ],
-    
-    // Add breadcrumbs for better context
     beforeBreadcrumb(breadcrumb) {
-      // Filter out noisy breadcrumbs
       if (breadcrumb.category === 'console' && breadcrumb.level === 'log') {
         return null
       }
       return breadcrumb
     },
-    
-    // Process events before sending
-    beforeSend(event, hint) {
-      // Don't send events in development unless explicitly enabled
+    beforeSend(event) {
       if (!IS_PRODUCTION && !import.meta.env.VITE_SENTRY_DEBUG) {
         console.log('[Sentry] Event captured (dev mode, not sent):', event)
         return null
       }
-      
-      // Add additional context
+
       event.tags = {
         ...event.tags,
         app: 'clipcut',
         platform: 'web',
       }
-      
+
       return event
     },
   })
@@ -80,95 +96,66 @@ export function initErrorTracking() {
   console.log('[ErrorTracking] Sentry initialized')
 }
 
-/**
- * Capture an error manually
- * @param {Error} error - The error to capture
- * @param {Object} context - Additional context for the error
- */
 export function captureError(error, context = {}) {
   if (!SENTRY_DSN && IS_PRODUCTION) {
     console.error('[ErrorTracking] Error captured but Sentry not configured:', error)
     return
   }
 
-  Sentry.withScope((scope) => {
-    // Add custom context
+  SentrySDK.withScope((scope) => {
     if (context.tags) {
       Object.entries(context.tags).forEach(([key, value]) => {
         scope.setTag(key, value)
       })
     }
-    
+
     if (context.extra) {
       Object.entries(context.extra).forEach(([key, value]) => {
         scope.setExtra(key, value)
       })
     }
-    
+
     if (context.level) {
       scope.setLevel(context.level)
     }
-    
+
     if (context.fingerprint) {
       scope.setFingerprint(context.fingerprint)
     }
 
-    Sentry.captureException(error)
+    SentrySDK.captureException(error)
   })
 }
 
-/**
- * Capture a message (non-error)
- * @param {string} message - The message to capture
- * @param {string} level - Severity level ('info', 'warning', 'error')
- */
 export function captureMessage(message, level = 'info') {
-  Sentry.captureMessage(message, level)
+  SentrySDK.captureMessage(message, level)
 }
 
-/**
- * Set user context for error tracking
- * Call this after user logs in
- * @param {Object} user - User object with id, email, username
- */
 export function setUserContext(user) {
   if (!user) {
     clearUserContext()
     return
   }
 
-  Sentry.setUser({
+  SentrySDK.setUser({
     id: user.id,
     email: user.email,
     username: user.username || user.user_metadata?.username,
   })
 }
 
-/**
- * Clear user context
- * Call this when user logs out
- */
 export function clearUserContext() {
-  Sentry.setUser(null)
+  SentrySDK.setUser(null)
 }
 
-/**
- * Add a breadcrumb for debugging
- * @param {Object} breadcrumb - Breadcrumb data
- */
 export function addBreadcrumb(breadcrumb) {
-  Sentry.addBreadcrumb({
+  SentrySDK.addBreadcrumb({
     timestamp: Date.now() / 1000,
     ...breadcrumb,
   })
 }
 
-/**
- * Set up global error handlers
- * Catches uncaught errors and unhandled promise rejections
- */
 export function setupGlobalErrorHandlers() {
-  // Handle uncaught JavaScript errors
   window.onerror = (message, source, lineno, colno, error) => {
     captureError(error || new Error(message), {
       tags: { type: 'uncaught_error' },
@@ -181,17 +168,15 @@ export function setupGlobalErrorHandlers() {
         userAgent: navigator.userAgent,
       },
     })
-    
-    // Don't prevent default error handling
+
     return false
   }
 
-  // Handle unhandled promise rejections
   window.addEventListener('unhandledrejection', (event) => {
-    const error = event.reason instanceof Error 
-      ? event.reason 
+    const error = event.reason instanceof Error
+      ? event.reason
       : new Error(String(event.reason))
-    
+
     captureError(error, {
       tags: { type: 'unhandled_rejection' },
       extra: {
@@ -205,14 +190,10 @@ export function setupGlobalErrorHandlers() {
   console.log('[ErrorTracking] Global error handlers set up')
 }
 
-/**
- * Create error boundary configuration for Sentry
- * Use with Sentry.ErrorBoundary or custom ErrorBoundary
- */
 export function getErrorBoundaryConfig() {
   return {
-    fallback: null, // Use custom fallback UI
-    showDialog: IS_PRODUCTION, // Show feedback dialog in production
+    fallback: null,
+    showDialog: IS_PRODUCTION,
     dialogOptions: {
       title: 'Something went wrong',
       subtitle: 'Our team has been notified.',
@@ -220,6 +201,3 @@ export function getErrorBoundaryConfig() {
     },
   }
 }
-
-// Export Sentry for advanced usage
-export { Sentry }

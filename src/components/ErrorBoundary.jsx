@@ -6,11 +6,7 @@
  */
 
 import { Component } from 'react';
-<<<<<<< HEAD
-import { captureError, logger } from '../utils';
-=======
-import { captureError, addBreadcrumb } from '../utils/errorTracking';
->>>>>>> origin/main
+import { captureError, addBreadcrumb, logger } from '../utils';
 
 /**
  * Error boundary wrapper component
