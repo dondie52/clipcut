@@ -1,0 +1,153 @@
+{
+  "bundleSize": {
+    "initial": {
+      "limit": 200,
+      "unit": "KB",
+      "description": "Initial bundle size (gzipped)",
+      "warning": 180
+    },
+    "total": {
+      "limit": 1000,
+      "unit": "KB",
+      "description": "Total bundle size (gzipped)",
+      "warning": 900
+    },
+    "perRoute": {
+      "limit": 300,
+      "unit": "KB",
+      "description": "Per route chunk size (gzipped)",
+      "warning": 250
+    },
+    "vendor": {
+      "react": {
+        "limit": 150,
+        "unit": "KB",
+        "description": "React vendor chunk (gzipped)"
+      },
+      "router": {
+        "limit": 50,
+        "unit": "KB",
+        "description": "React Router chunk (gzipped)"
+      },
+      "supabase": {
+        "limit": 200,
+        "unit": "KB",
+        "description": "Supabase chunk (gzipped)"
+      },
+      "ffmpeg": {
+        "limit": 500,
+        "unit": "KB",
+        "description": "FFmpeg chunk (gzipped) - loaded separately"
+      }
+    }
+  },
+  "pageLoad": {
+    "firstContentfulPaint": {
+      "target": 1500,
+      "unit": "ms",
+      "description": "First Contentful Paint target",
+      "warning": 2000
+    },
+    "timeToInteractive": {
+      "target": 3000,
+      "unit": "ms",
+      "description": "Time to Interactive target",
+      "warning": 4000
+    },
+    "largestContentfulPaint": {
+      "target": 2500,
+      "unit": "ms",
+      "description": "Largest Contentful Paint target",
+      "warning": 3500
+    },
+    "firstInputDelay": {
+      "target": 100,
+      "unit": "ms",
+      "description": "First Input Delay target",
+      "warning": 200
+    },
+    "cumulativeLayoutShift": {
+      "target": 0.1,
+      "unit": "score",
+      "description": "Cumulative Layout Shift target",
+      "warning": 0.2
+    },
+    "timeToFirstByte": {
+      "target": 800,
+      "unit": "ms",
+      "description": "Time to First Byte target",
+      "warning": 1200
+    }
+  },
+  "videoProcessing": {
+    "trim": {
+      "limit": 30000,
+      "unit": "ms",
+      "description": "Trim operation time limit per minute of video",
+      "warning": 45000,
+      "perMinute": true
+    },
+    "split": {
+      "limit": 35000,
+      "unit": "ms",
+      "description": "Split operation time limit per minute of video",
+      "warning": 50000,
+      "perMinute": true
+    },
+    "merge": {
+      "limit": 40000,
+      "unit": "ms",
+      "description": "Merge operation time limit per minute of video",
+      "warning": 60000,
+      "perMinute": true
+    },
+    "export": {
+      "limit": 120000,
+      "unit": "ms",
+      "description": "Export operation time limit per 5 minutes of video",
+      "warning": 180000,
+      "per5Minutes": true
+    },
+    "thumbnail": {
+      "limit": 2000,
+      "unit": "ms",
+      "description": "Thumbnail generation time limit",
+      "warning": 3000
+    },
+    "preview": {
+      "limit": 60000,
+      "unit": "ms",
+      "description": "Preview generation time limit per minute of video",
+      "warning": 90000,
+      "perMinute": true
+    }
+  },
+  "api": {
+    "request": {
+      "limit": 2000,
+      "unit": "ms",
+      "description": "API request time limit",
+      "warning": 3000
+    },
+    "upload": {
+      "limit": 10000,
+      "unit": "ms",
+      "description": "File upload time limit per MB",
+      "warning": 15000,
+      "perMB": true
+    },
+    "download": {
+      "limit": 5000,
+      "unit": "ms",
+      "description": "File download time limit per MB",
+      "warning": 7500,
+      "perMB": true
+    }
+  },
+  "routeChange": {
+    "limit": 500,
+    "unit": "ms",
+    "description": "Route change transition time limit",
+    "warning": 750
+  }
+}
