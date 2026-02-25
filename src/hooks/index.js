@@ -11,3 +11,6 @@ export { useFFmpeg, default as useFFmpegDefault } from './useFFmpeg';
 
 // Performance monitoring hook
 export { usePerformance, useRoutePerformance } from './usePerformance';
+
+// Session timeout warning hook
+export { useSessionTimeout, default as useSessionTimeoutDefault } from './useSessionTimeout';

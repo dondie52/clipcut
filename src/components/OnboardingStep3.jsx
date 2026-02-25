@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
 
 const OnboardingStep3 = ({ onComplete, onSkip }) => {
   const [notifications, setNotifications] = useState({
@@ -12,6 +13,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
 
   const toggleNotification = (key) => {
     setNotifications((prev) => ({ ...prev, [key]: !prev[key] }));
+    trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "toggle_notification", key });
   };
 
   const resolutions = [
@@ -84,7 +86,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
               {resolutions.map((r) => {
                 const selected = defaultResolution === r.id;
                 return (
-                  <div key={r.id} onClick={() => setDefaultResolution(r.id)} style={{
+                  <div key={r.id} onClick={() => { setDefaultResolution(r.id); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "set_resolution", resolution: r.id }); }} style={{
                     border: selected ? "2px solid #75AADB" : "1px solid rgba(255,255,255,0.1)",
                     background: selected ? "rgba(117,170,219,0.1)" : "#1a2332",
                     boxShadow: selected ? "0 0 20px rgba(117,170,219,0.15)" : "none",
@@ -151,7 +153,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
                 <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)" }}>Automatically save your work to the cloud</div>
               </div>
               <div
-                onClick={() => setAutoSave(!autoSave)}
+                onClick={() => { setAutoSave(!autoSave); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "toggle_autosave", enabled: !autoSave }); }}
                 style={{
                   width: "48px", height: "28px", borderRadius: "14px",
                   background: autoSave ? "#75AADB" : "rgba(255,255,255,0.2)",
@@ -169,7 +171,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
 
           {/* Actions */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", paddingTop: "16px" }}>
-            <button onClick={onComplete} style={{
+            <button onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "complete" }); onComplete?.(); }} style={{
               width: "100%", maxWidth: "360px", background: "#75AADB", color: "#0a0a0a",
               fontWeight: 700, fontSize: "18px", padding: "16px", borderRadius: "8px",
               border: "none", cursor: "pointer", transition: "all 0.2s ease",
@@ -178,7 +180,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
               onMouseLeave={(e) => e.target.style.background = "#75AADB"}>
               Continue
             </button>
-            <a href="#" onClick={(e) => { e.preventDefault(); onSkip?.(); }} style={{
+            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "3" }); onSkip?.(); }} style={{
               color: "rgba(255,255,255,0.4)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
             }}>Skip for now</a>
           </div>

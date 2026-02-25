@@ -2,19 +2,25 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
+import { initErrorTracking, setupGlobalErrorHandlers } from './utils/errorTracking'
+import { logger } from './utils/logger'
+
+// Initialize error tracking (Sentry) before anything else
+initErrorTracking()
+setupGlobalErrorHandlers()
 
 // Register service worker with auto-update
 if (import.meta.env.PROD) {
   registerSW({
     onNeedRefresh() {
       // Optionally show a prompt to the user about the update
-      console.log('[PWA] New content available, refresh to update')
+      logger.info('[PWA] New content available, refresh to update')
     },
     onOfflineReady() {
-      console.log('[PWA] App ready to work offline')
+      logger.info('[PWA] App ready to work offline')
     },
     onRegistered(registration) {
-      console.log('[PWA] Service worker registered')
+      logger.info('[PWA] Service worker registered')
       // Check for updates every hour
       if (registration) {
         setInterval(() => {
@@ -23,7 +29,7 @@ if (import.meta.env.PROD) {
       }
     },
     onRegisterError(error) {
-      console.error('[PWA] Service worker registration failed:', error)
+      logger.error('[PWA] Service worker registration failed', { error })
     },
   })
 }

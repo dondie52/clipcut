@@ -309,73 +309,76 @@ export async function generateThumbnail(videoFile, time = 0) {
     METRIC_TYPES.VIDEO_THUMBNAIL,
     async () => {
       return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    video.preload = 'metadata';
-    video.muted = true;
-    video.playsInline = true;
-    
-    let timeout;
-    
-    const cleanup = () => {
-      if (timeout) clearTimeout(timeout);
-      if (video.src) {
-        URL.revokeObjectURL(video.src);
-      }
-      video.remove();
-      canvas.remove();
-    };
-    
-    // Set a timeout to prevent hanging
-    timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('Thumbnail generation timeout'));
-    }, 10000); // 10 second timeout
-    
-    video.onloadedmetadata = () => {
-      // Seek to the desired time
-      video.currentTime = Math.min(time, video.duration || 0);
-    };
-    
-    video.onseeked = () => {
-      try {
-        // Set canvas dimensions (max 320px width, maintain aspect ratio)
-        const maxWidth = 320;
-        const aspectRatio = video.videoWidth / video.videoHeight;
-        const width = Math.min(maxWidth, video.videoWidth);
-        const height = width / aspectRatio;
+        const video = document.createElement('video');
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
         
-        canvas.width = width;
-        canvas.height = height;
+        video.preload = 'metadata';
+        video.muted = true;
+        video.playsInline = true;
         
-        // Draw the video frame to canvas
-        ctx.drawImage(video, 0, 0, width, height);
+        let timeout;
         
-        // Convert canvas to blob
-        canvas.toBlob((blob) => {
-          if (blob) {
-            cleanup();
-            resolve(blob);
-          } else {
-            cleanup();
-            reject(new Error('Failed to generate thumbnail'));
+        const cleanup = () => {
+          if (timeout) clearTimeout(timeout);
+          if (video.src) {
+            URL.revokeObjectURL(video.src);
           }
-        }, 'image/jpeg', 0.85);
-      } catch (error) {
-        cleanup();
-        reject(error);
-      }
-    };
-    
-    video.onerror = () => {
-      cleanup();
-      reject(new Error('Failed to load video for thumbnail'));
-    };
-    
-    video.src = URL.createObjectURL(videoFile);
-  });
+          video.remove();
+          canvas.remove();
+        };
+        
+        // Set a timeout to prevent hanging
+        timeout = setTimeout(() => {
+          cleanup();
+          reject(new Error('Thumbnail generation timeout'));
+        }, 10000); // 10 second timeout
+        
+        video.onloadedmetadata = () => {
+          // Seek to the desired time
+          video.currentTime = Math.min(time, video.duration || 0);
+        };
+        
+        video.onseeked = () => {
+          try {
+            // Set canvas dimensions (max 320px width, maintain aspect ratio)
+            const maxWidth = 320;
+            const aspectRatio = video.videoWidth / video.videoHeight;
+            const width = Math.min(maxWidth, video.videoWidth);
+            const height = width / aspectRatio;
+            
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Draw the video frame to canvas
+            ctx.drawImage(video, 0, 0, width, height);
+            
+            // Convert canvas to blob
+            canvas.toBlob((blob) => {
+              if (blob) {
+                cleanup();
+                resolve(blob);
+              } else {
+                cleanup();
+                reject(new Error('Failed to generate thumbnail'));
+              }
+            }, 'image/jpeg', 0.85);
+          } catch (error) {
+            cleanup();
+            reject(error);
+          }
+        };
+        
+        video.onerror = () => {
+          cleanup();
+          reject(new Error('Failed to load video for thumbnail'));
+        };
+        
+        video.src = URL.createObjectURL(videoFile);
+      });
+    },
+    { time }
+  );
 }
 
 /**

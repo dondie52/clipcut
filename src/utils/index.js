@@ -34,3 +34,41 @@ export {
   trackFileUpload,
   trackUserInteraction,
 } from './performance';
+
+export { logger, LOG_LEVELS } from './logger';
+
+export {
+  initErrorTracking,
+  setupGlobalErrorHandlers,
+  captureError,
+  captureMessage,
+  setUserContext,
+  clearUserContext,
+  addBreadcrumb,
+  getErrorBoundaryConfig,
+} from './errorTracking';
+
+export {
+  // Google Analytics 4
+  initAnalytics,
+  isAnalyticsEnabled,
+  trackPageView,
+  trackEvent,
+  trackCustomEvent,
+  trackLogin,
+  trackSignup,
+  trackVideoExport,
+  trackProjectAction,
+  trackFeatureUsage,
+  trackError,
+  setUserProperties,
+  trackTiming,
+  trackOnboardingStep,
+  trackSearch,
+  // Core Web Vitals
+  initCoreWebVitalsTracking,
+  getAnalyticsBuffer,
+  clearAnalyticsBuffer,
+  // Custom event tracking
+  analyticsEvents,
+} from './analytics';

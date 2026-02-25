@@ -9,6 +9,8 @@ import {
   PASSWORD_REQUIREMENTS 
 } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
+import { captureError, addBreadcrumb } from "../utils/errorTracking";
 
 // Rate limiter: 3 registration attempts per 2 minutes
 const registerRateLimiter = createRateLimiter(3, 120000);
@@ -24,7 +26,9 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const formRef = useRef(null);
+  const usernameInputRef = useRef(null);
 
   // Use the enhanced password strength validation
   const getStrength = (pwd) => {
@@ -46,10 +50,17 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
     setError("");
     setFieldErrors({});
 
+    // Track registration attempt
+    trackEvent(analyticsEvents.registerAttempt, { method: 'email' });
+    addBreadcrumb({ category: 'auth', message: 'Registration attempt started', level: 'info' });
+
     // Rate limiting check
     if (!registerRateLimiter.canAttempt()) {
       const waitTime = Math.ceil(registerRateLimiter.getTimeUntilReset() / 1000);
-      setError(`Too many registration attempts. Please wait ${waitTime} seconds.`);
+      const errorMsg = `Too many registration attempts. Please wait ${waitTime} seconds.`;
+      setError(errorMsg);
+      trackEvent(analyticsEvents.registerFailure, { reason: 'rate_limit' });
+      addBreadcrumb({ category: 'auth', message: 'Registration rate limited', level: 'warning' });
       return;
     }
 
@@ -63,6 +74,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
 
     if (!validation.valid) {
       setFieldErrors(validation.errors);
+      trackEvent(analyticsEvents.registerFailure, { reason: 'validation_error' });
       return;
     }
 
@@ -75,10 +87,18 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
         password, 
         username: username.trim() 
       });
+      trackEvent(analyticsEvents.registerSuccess, { method: 'email' });
+      addBreadcrumb({ category: 'auth', message: 'Registration successful', level: 'info' });
       navigate("/onboarding/1");
     } catch (err) {
       // Use sanitized error message
-      setError(sanitizeErrorMessage(err, "Failed to create account. Please try again."));
+      const errorMsg = sanitizeErrorMessage(err, "Failed to create account. Please try again.");
+      setError(errorMsg);
+      trackEvent(analyticsEvents.registerFailure, { reason: 'auth_error' });
+      captureError(err, { 
+        tags: { type: 'registration_error' },
+        extra: { email: email.trim().toLowerCase(), username: username.trim() }
+      });
     } finally {
       setLoading(false);
     }
@@ -87,10 +107,24 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   const handleGoogleSignIn = async () => {
     setError("");
     setFieldErrors({});
+    setGoogleLoading(true);
+    
+    trackEvent(analyticsEvents.googleSignInAttempt, {});
+    addBreadcrumb({ category: 'auth', message: 'Google sign-in attempt', level: 'info' });
+    
     try {
       await signInWithGoogle();
+      trackEvent(analyticsEvents.registerSuccess, { method: 'google' });
+      addBreadcrumb({ category: 'auth', message: 'Google sign-in successful', level: 'info' });
     } catch (err) {
-      setError(sanitizeErrorMessage(err, "Failed to sign in with Google"));
+      const errorMsg = sanitizeErrorMessage(err, "Failed to sign in with Google");
+      setError(errorMsg);
+      trackEvent(analyticsEvents.registerFailure, { reason: 'google_auth_error' });
+      captureError(err, { 
+        tags: { type: 'google_auth_error' }
+      });
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -196,6 +230,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <label htmlFor="register-username" style={labelStyle}>Username</label>
               <input 
+                ref={usernameInputRef}
                 id="register-username"
                 type="text" 
                 placeholder="Enter your username" 
@@ -207,12 +242,19 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
                 maxLength={30}
                 aria-invalid={!!fieldErrors.username}
                 aria-describedby={fieldErrors.username ? "username-error" : "username-hint"}
+                disabled={loading || googleLoading}
                 style={{
                   ...inputStyle,
                   borderColor: fieldErrors.username ? "rgba(239, 68, 68, 0.5)" : undefined,
+                  opacity: loading || googleLoading ? 0.6 : 1,
                 }}
                 onFocus={(e) => focusHandler(e, !!fieldErrors.username)} 
-                onBlur={(e) => blurHandler(e, !!fieldErrors.username)} 
+                onBlur={(e) => blurHandler(e, !!fieldErrors.username)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !loading && !googleLoading) {
+                    formRef.current?.requestSubmit();
+                  }
+                }}
               />
               <span id="username-hint" style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>
                 3-30 characters, letters, numbers, and underscores only
@@ -237,12 +279,19 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
                 required
                 aria-invalid={!!fieldErrors.email}
                 aria-describedby={fieldErrors.email ? "email-error" : undefined}
+                disabled={loading || googleLoading}
                 style={{
                   ...inputStyle,
                   borderColor: fieldErrors.email ? "rgba(239, 68, 68, 0.5)" : undefined,
+                  opacity: loading || googleLoading ? 0.6 : 1,
                 }}
                 onFocus={(e) => focusHandler(e, !!fieldErrors.email)} 
-                onBlur={(e) => blurHandler(e, !!fieldErrors.email)} 
+                onBlur={(e) => blurHandler(e, !!fieldErrors.email)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !loading && !googleLoading) {
+                    formRef.current?.requestSubmit();
+                  }
+                }}
               />
               {fieldErrors.email && (
                 <span id="email-error" style={{ fontSize: "12px", color: "#ef4444" }} role="alert">
@@ -266,12 +315,19 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
                   minLength={PASSWORD_REQUIREMENTS.minLength}
                   aria-invalid={!!fieldErrors.password || (password && !strength.isValid)}
                   aria-describedby="password-requirements password-strength"
+                  disabled={loading || googleLoading}
                   style={{
                     ...inputStyle,
                     borderColor: fieldErrors.password ? "rgba(239, 68, 68, 0.5)" : undefined,
+                    opacity: loading || googleLoading ? 0.6 : 1,
                   }}
                   onFocus={(e) => focusHandler(e, !!fieldErrors.password)} 
-                  onBlur={(e) => blurHandler(e, !!fieldErrors.password)} 
+                  onBlur={(e) => blurHandler(e, !!fieldErrors.password)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !loading && !googleLoading) {
+                      formRef.current?.requestSubmit();
+                    }
+                  }}
                 />
                 <button 
                   type="button" 
@@ -329,12 +385,19 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
                   required
                   aria-invalid={!!fieldErrors.confirmPassword}
                   aria-describedby={fieldErrors.confirmPassword ? "confirm-password-error" : undefined}
+                  disabled={loading || googleLoading}
                   style={{
                     ...inputStyle,
                     borderColor: fieldErrors.confirmPassword ? "rgba(239, 68, 68, 0.5)" : undefined,
+                    opacity: loading || googleLoading ? 0.6 : 1,
                   }}
                   onFocus={(e) => focusHandler(e, !!fieldErrors.confirmPassword)} 
-                  onBlur={(e) => blurHandler(e, !!fieldErrors.confirmPassword)} 
+                  onBlur={(e) => blurHandler(e, !!fieldErrors.confirmPassword)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !loading && !googleLoading) {
+                      formRef.current?.requestSubmit();
+                    }
+                  }}
                 />
                 <button 
                   type="button" 
@@ -374,16 +437,24 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
           </div>
 
           {/* Google */}
-          <button type="button" onClick={handleGoogleSignIn} style={btnGoogle}
-            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.95)"}
-            onMouseLeave={(e) => e.currentTarget.style.background = "white"}>
+          <button 
+            type="button" 
+            onClick={handleGoogleSignIn} 
+            disabled={loading || googleLoading}
+            style={{
+              ...btnGoogle,
+              opacity: loading || googleLoading ? 0.6 : 1,
+              cursor: loading || googleLoading ? "not-allowed" : "pointer",
+            }}
+            onMouseEnter={(e) => !loading && !googleLoading && (e.currentTarget.style.background = "rgba(255,255,255,0.95)")}
+            onMouseLeave={(e) => !loading && !googleLoading && (e.currentTarget.style.background = "white")}>
             <svg width="18" height="18" viewBox="0 0 24 24">
               <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4" />
               <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853" />
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.66l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
             </svg>
-            <span>Continue with Google</span>
+            <span>{googleLoading ? "Connecting..." : "Continue with Google"}</span>
           </button>
 
           {/* Footer */}

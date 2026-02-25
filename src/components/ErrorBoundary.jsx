@@ -1,10 +1,12 @@
 /**
  * Error Boundary Component
  * Catches JavaScript errors anywhere in the child component tree and displays a fallback UI.
+ * Reports errors to Sentry for production monitoring.
  * @module components/ErrorBoundary
  */
 
 import { Component } from 'react';
+import { captureError, addBreadcrumb, logger } from '../utils';
 
 /**
  * Error boundary wrapper component
@@ -16,7 +18,8 @@ class ErrorBoundary extends Component {
     this.state = { 
       hasError: false, 
       error: null,
-      errorInfo: null 
+      errorInfo: null,
+      eventId: null
     };
   }
 
@@ -26,13 +29,29 @@ class ErrorBoundary extends Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log error to console in development
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    logger.error('ErrorBoundary caught an error', { error, errorInfo });
+    captureError(error, { source: 'ErrorBoundary', componentStack: errorInfo?.componentStack });
     
     this.setState({ errorInfo });
     
-    // You could also log to an error reporting service here
-    // e.g., Sentry, LogRocket, etc.
+    // Add breadcrumb for context
+    addBreadcrumb({
+      category: 'error_boundary',
+      message: `Error caught: ${error.message}`,
+      level: 'error',
+    });
+    
+    // Report error to Sentry
+    captureError(error, {
+      tags: {
+        type: 'error_boundary',
+        boundary: this.props.name || 'root',
+      },
+      extra: {
+        componentStack: errorInfo?.componentStack,
+        url: window.location.href,
+      },
+    });
   }
 
   handleReset = () => {

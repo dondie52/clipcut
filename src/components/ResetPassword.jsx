@@ -4,11 +4,19 @@
  * @module components/ResetPassword
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { updatePassword } from "../supabase/authService";
-import { validatePassword, getPasswordStrengthInfo, sanitizeErrorMessage } from "../utils/validation";
+import { 
+  validatePassword, 
+  validatePasswordMatch, 
+  sanitizeErrorMessage,
+  getPasswordStrengthInfo,
+  PASSWORD_REQUIREMENTS 
+} from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { trackEvent, analyticsEvents } from "../utils/analytics";
+import { captureError, addBreadcrumb } from "../utils/errorTracking";
 
 // Rate limiter: 3 password reset attempts per 10 minutes
 const resetRateLimiter = createRateLimiter(3, 600000);
@@ -21,9 +29,9 @@ const ResetPassword = () => {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
-  const [fieldErrors, setFieldErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const formRef = useRef(null);
 
   // Check if we have the required token/hash from the URL
   useEffect(() => {
@@ -50,33 +58,35 @@ const ResetPassword = () => {
   };
   const strength = getStrength(password);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError("");
-    setFieldErrors({});
     setSuccess(false);
+
+    trackEvent('password_reset_complete_attempt', {});
+    addBreadcrumb({ category: 'auth', message: 'Password reset submission started', level: 'info' });
 
     // Rate limiting check
     if (!resetRateLimiter.canAttempt()) {
       const waitTime = Math.ceil(resetRateLimiter.getTimeUntilReset() / 60);
-      setError(`Too many attempts. Please wait ${waitTime} minutes.`);
+      const errorMsg = `Too many attempts. Please wait ${waitTime} minutes.`;
+      setError(errorMsg);
+      trackEvent('password_reset_complete_failure', { reason: 'rate_limit' });
       return;
     }
 
     // Validation
-    if (!password) {
-      setFieldErrors({ password: "Password is required" });
-      return;
-    }
-
     const passwordValidation = validatePassword(password);
     if (!passwordValidation.valid) {
-      setFieldErrors({ password: passwordValidation.error });
+      setError(passwordValidation.error);
+      trackEvent('password_reset_complete_failure', { reason: 'validation_error' });
       return;
     }
 
-    if (password !== confirmPassword) {
-      setFieldErrors({ confirmPassword: "Passwords do not match" });
+    const matchValidation = validatePasswordMatch(password, confirmPassword);
+    if (!matchValidation.valid) {
+      setError(matchValidation.error);
+      trackEvent('password_reset_complete_failure', { reason: 'password_mismatch' });
       return;
     }
 
@@ -86,12 +96,16 @@ const ResetPassword = () => {
     try {
       await updatePassword(password);
       setSuccess(true);
-      // Redirect to login after 2 seconds
-      setTimeout(() => {
-        navigate("/login");
-      }, 2000);
+      trackEvent('password_reset_complete_success', {});
+      addBreadcrumb({ category: 'auth', message: 'Password reset successful', level: 'info' });
+      setTimeout(() => navigate("/login", { replace: true }), 2000);
     } catch (err) {
-      setError(sanitizeErrorMessage(err, "Failed to reset password. The link may have expired."));
+      const errorMsg = sanitizeErrorMessage(err, "Failed to reset password. The link may have expired.");
+      setError(errorMsg);
+      trackEvent('password_reset_complete_failure', { reason: 'auth_error' });
+      captureError(err, { 
+        tags: { type: 'password_reset_error' }
+      });
     } finally {
       setLoading(false);
     }
@@ -165,7 +179,7 @@ const ResetPassword = () => {
           </div>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }} noValidate>
+        <form ref={formRef} onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }} noValidate>
           {/* Password */}
           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
             <label htmlFor="reset-password" style={labelStyle}>New Password</label>
@@ -175,16 +189,22 @@ const ResetPassword = () => {
                 type={showPassword ? "text" : "password"} 
                 placeholder="Enter your new password"
                 value={password} 
-                onChange={(e) => { setPassword(e.target.value); setFieldErrors(prev => ({ ...prev, password: undefined })); }}
+                onChange={(e) => setPassword(e.target.value)}
                 autoComplete="new-password"
                 required
-                aria-invalid={!!fieldErrors.password || (password && !strength.isValid)}
+                minLength={PASSWORD_REQUIREMENTS.minLength}
+                disabled={loading}
+                aria-invalid={!!error && (error.includes('Password') || !strength.isValid)}
+                aria-describedby="password-requirements password-strength"
                 style={{
                   ...inputStyle,
-                  borderColor: fieldErrors.password ? "rgba(239, 68, 68, 0.5)" : undefined,
+                  opacity: loading ? 0.6 : 1,
                 }}
-                onFocus={(e) => focusHandler(e, !!fieldErrors.password)} 
-                onBlur={(e) => blurHandler(e, !!fieldErrors.password)} 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !loading) {
+                    formRef.current?.requestSubmit();
+                  }
+                }}
               />
               <button 
                 type="button" 
@@ -197,9 +217,12 @@ const ResetPassword = () => {
                 </span>
               </button>
             </div>
+            <span id="password-requirements" style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>
+              Min {PASSWORD_REQUIREMENTS.minLength} chars, uppercase, lowercase, number, special character
+            </span>
             {/* Strength bar */}
             {password && (
-              <div>
+              <div id="password-strength" aria-live="polite">
                 <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
                   {[1, 2, 3, 4].map((i) => (
                     <div key={i} style={{
@@ -211,13 +234,11 @@ const ResetPassword = () => {
                 </div>
                 <span style={{ fontSize: "11px", color: strength.color, marginTop: "4px", display: "block" }}>
                   {strength.label}
+                  {strength.error && !strength.isValid && (
+                    <span style={{ display: "block", marginTop: "2px" }}>{strength.error}</span>
+                  )}
                 </span>
               </div>
-            )}
-            {fieldErrors.password && (
-              <span style={{ fontSize: "12px", color: "#ef4444" }} role="alert">
-                {fieldErrors.password}
-              </span>
             )}
           </div>
 
@@ -230,16 +251,20 @@ const ResetPassword = () => {
                 type={showConfirmPassword ? "text" : "password"} 
                 placeholder="Confirm your new password"
                 value={confirmPassword} 
-                onChange={(e) => { setConfirmPassword(e.target.value); setFieldErrors(prev => ({ ...prev, confirmPassword: undefined })); }}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 autoComplete="new-password"
                 required
-                aria-invalid={!!fieldErrors.confirmPassword}
+                disabled={loading}
+                aria-invalid={!!error && error.includes("don't match")}
                 style={{
                   ...inputStyle,
-                  borderColor: fieldErrors.confirmPassword ? "rgba(239, 68, 68, 0.5)" : undefined,
+                  opacity: loading ? 0.6 : 1,
                 }}
-                onFocus={(e) => focusHandler(e, !!fieldErrors.confirmPassword)} 
-                onBlur={(e) => blurHandler(e, !!fieldErrors.confirmPassword)} 
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !loading) {
+                    formRef.current?.requestSubmit();
+                  }
+                }}
               />
               <button 
                 type="button" 
@@ -252,11 +277,6 @@ const ResetPassword = () => {
                 </span>
               </button>
             </div>
-            {fieldErrors.confirmPassword && (
-              <span style={{ fontSize: "12px", color: "#ef4444" }} role="alert">
-                {fieldErrors.confirmPassword}
-              </span>
-            )}
           </div>
 
           {/* Submit Button */}
@@ -291,15 +311,6 @@ const ResetPassword = () => {
       </div>
     </div>
   );
-};
-
-const focusHandler = (e, hasError = false) => { 
-  e.target.style.borderColor = hasError ? "rgba(239, 68, 68, 0.7)" : "rgba(117,170,219,0.4)"; 
-  e.target.style.boxShadow = "0 0 0 2px rgba(117,170,219,0.08)"; 
-};
-const blurHandler = (e, hasError = false) => { 
-  e.target.style.borderColor = hasError ? "rgba(239, 68, 68, 0.5)" : "rgba(255,255,255,0.08)"; 
-  e.target.style.boxShadow = "none"; 
 };
 
 const labelStyle = { fontSize: "14px", fontWeight: 600, color: "rgba(255,255,255,0.7)" };
