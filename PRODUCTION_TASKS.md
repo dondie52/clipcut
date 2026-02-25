@@ -247,7 +247,7 @@ Each task is self-contained with:
 **Context:** Analytics setup  
 **Task:** Track LCP, FID, CLS metrics and send to analytics service  
 **Acceptance:** Core Web Vitals tracked, data sent to analytics, dashboard available  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ---
 
