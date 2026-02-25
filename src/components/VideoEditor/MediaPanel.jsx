@@ -254,6 +254,7 @@ const MediaItem = memo(({
             src={item.thumbnail}
             alt={item.name}
             loading="lazy"
+            decoding="async"
             style={{
               width: '100%',
               height: '100%',

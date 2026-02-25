@@ -143,6 +143,7 @@ const OptimizedImage = memo(({
         <img
           src={placeholder}
           alt=""
+          aria-hidden="true"
           style={{ ...imgStyle, opacity: 1, filter: 'blur(10px)' }}
         />
       )}

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
 import { listProjects as listCloudProjects, deleteProject as deleteCloudProject } from "../services/projectService";
+import OptimizedImage from "./OptimizedImage";
 
 /* ========== CSS ========== */
 const DASH_CSS = `
@@ -188,6 +189,7 @@ const DASH_CSS = `
     background: #151b24; border: 1px solid rgba(255,255,255,0.06);
     display: flex; align-items: center; justify-content: center;
     transition: all 0.2s ease; position: relative;
+    min-height: 180px;
   }
   .project-card:hover .project-thumb button {
     opacity: 1 !important;
@@ -546,7 +548,13 @@ const Dashboard = () => {
               >
                 <div className="project-thumb">
                   {project.thumbnail ? (
-                    <img src={project.thumbnail} alt={project.name} />
+                    <OptimizedImage
+                      src={project.thumbnail}
+                      fallbackSrc={project.thumbnail}
+                      alt={project.name}
+                      placeholder="#151b24"
+                      style={{ width: "100%", height: "100%" }}
+                    />
                   ) : (
                     <I i="movie" s={40} c="rgba(255,255,255,0.15)" />
                   )}
