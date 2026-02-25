@@ -367,21 +367,21 @@ Each task is self-contained with:
 **Context:** Error boundary component  
 **Task:** Enhance error boundary to report errors to Sentry  
 **Acceptance:** Errors caught and reported, user sees friendly message, errors logged  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ### MON-003: Track JavaScript Errors
 **Files:** `src/utils/errorTracking.js`, `src/main.jsx`  
 **Context:** Error tracking setup  
 **Task:** Set up global error handlers for uncaught errors  
 **Acceptance:** All JS errors tracked, context included, errors visible in dashboard  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ### MON-004: Track Unhandled Promise Rejections
 **Files:** `src/utils/errorTracking.js`, `src/main.jsx`  
 **Context:** Error tracking setup  
 **Task:** Add handler for unhandled promise rejections  
 **Acceptance:** Promise rejections tracked, context included, errors visible  
-**Status:** [ ] Not Started
+**Status:** [x] Complete
 
 ### MON-005: Set Up Google Analytics
 **Files:** `src/utils/analytics.js`, `src/App.jsx`  
