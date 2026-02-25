@@ -197,18 +197,22 @@ export default defineConfig({
         entryFileNames: 'assets/[hash].js',
         // Manual chunk splitting for optimal caching
         manualChunks: (id) => {
+          // Router chunk: React Router (match first to avoid matching `react` prefix)
+          if (id.includes('node_modules/react-router') || id.includes('node_modules/react-router-dom')) {
+            return 'vendor-router'
+          }
           // Vendor chunk: React and React-DOM
-          if (id.includes('node_modules/react') || 
+          if (id.includes('node_modules/react/') ||
+              id.includes('node_modules/react-dom/') ||
               id.includes('node_modules/react-dom') ||
               id.includes('node_modules/scheduler')) {
             return 'vendor-react'
           }
-          // Router chunk: React Router
-          if (id.includes('node_modules/react-router')) {
-            return 'vendor-router'
-          }
           // Supabase chunk: Supabase client and dependencies
           if (id.includes('node_modules/@supabase')) {
+            return 'vendor-supabase'
+          }
+          if (id.includes('node_modules/tslib') || id.includes('node_modules/iceberg-js')) {
             return 'vendor-supabase'
           }
           // FFmpeg chunk: FFmpeg WASM and utilities
