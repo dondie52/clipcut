@@ -34,3 +34,31 @@ export {
   trackFileUpload,
   trackUserInteraction,
 } from './performance';
+
+export {
+  initErrorTracking,
+  setupGlobalErrorHandlers,
+  captureError,
+  captureMessage,
+  setUserContext,
+  clearUserContext,
+  addBreadcrumb,
+  getErrorBoundaryConfig,
+} from './errorTracking';
+
+export {
+  initAnalytics,
+  isAnalyticsEnabled,
+  trackPageView,
+  trackEvent,
+  trackLogin,
+  trackSignup,
+  trackVideoExport,
+  trackProjectAction,
+  trackFeatureUsage,
+  trackError,
+  setUserProperties,
+  trackTiming,
+  trackOnboardingStep,
+  trackSearch,
+} from './analytics';

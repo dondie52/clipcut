@@ -3,7 +3,7 @@
  * @module App
  */
 
-import { useState, useEffect, Suspense, lazy } from 'react'
+import { useState, useEffect, Suspense, lazy, useRef } from 'react'
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import { AuthProvider } from './supabase/AuthContext'
 import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
@@ -11,6 +11,7 @@ import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
 import { performanceMonitor, METRIC_TYPES } from './utils/performance'
+import { initAnalytics, trackPageView } from './utils/analytics'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -66,11 +67,21 @@ const AppContent = () => {
   const [isMobile, setIsMobile] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
+  const analyticsInitialized = useRef(false)
   
-  // Track route changes for performance monitoring
+  // Initialize analytics once on mount
+  useEffect(() => {
+    if (!analyticsInitialized.current) {
+      initAnalytics()
+      analyticsInitialized.current = true
+    }
+  }, [])
+  
+  // Track route changes for performance monitoring and analytics
   useEffect(() => {
     if (!showSplash) {
       performanceMonitor.measurePageLoad(location.pathname)
+      trackPageView(location.pathname)
     }
   }, [location.pathname, showSplash])
 
