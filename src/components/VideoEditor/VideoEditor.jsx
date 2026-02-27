@@ -7,6 +7,7 @@ import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject } from '../../services/projectService';
+import { getCachedThumbnail, cacheThumbnail, clearVideoThumbnails, createMediaCacheKey } from '../../utils/thumbnailCache';
 import { 
   MAX_UNDO_HISTORY, 
   AUTO_SAVE_INTERVAL, 
@@ -351,6 +352,7 @@ const VideoEditor = () => {
   const [loadMsg, setLoadMsg] = useState("");
   const [loadSub, setLoadSub] = useState("");
   const convertingBlobUrls = useRef(new Set());
+  const thumbnailUrlsRef = useRef(new Set());
 
   // Toasts
   const [toast, setToast] = useState(null);
@@ -412,6 +414,24 @@ const VideoEditor = () => {
     setSelectedClipId(clip.id);
   }, [clips, setClips]);
 
+  const setMediaThumbnail = useCallback((mediaId, thumbnailUrl) => {
+    setMediaItems((prev) => prev.map((m) => {
+      if (m.id !== mediaId) return m;
+      if (m.thumbnail && m.thumbnail !== thumbnailUrl) {
+        const oldUrl = m.thumbnail;
+        requestAnimationFrame(() => {
+          URL.revokeObjectURL(oldUrl);
+          thumbnailUrlsRef.current.delete(oldUrl);
+        });
+      }
+      return { ...m, thumbnail: thumbnailUrl, isProcessing: false };
+    }));
+
+    setClips((prev) => prev.map((c) => (
+      c.mediaId === mediaId ? { ...c, thumbnail: thumbnailUrl } : c
+    )));
+  }, [setClips]);
+
   // ---- Import ----
   const importMedia = useCallback(async (files) => {
     setIsImporting(true);
@@ -424,15 +444,29 @@ const VideoEditor = () => {
         const id = genId();
         const blobUrl = URL.createObjectURL(file);
         const isAudio = file.type.startsWith("audio/");
-        setMediaItems(p => [...p, { id, name: file.name, file, blobUrl, thumbnail: null, duration: 0, width: 0, height: 0, type: isAudio ? "audio" : "video", isProcessing: true }]);
+        const thumbnailKey = createMediaCacheKey(file);
+        setMediaItems(p => [...p, { id, name: file.name, file, thumbnailKey, blobUrl, thumbnail: null, duration: 0, width: 0, height: 0, type: isAudio ? "audio" : "video", isProcessing: true }]);
         try {
           const info = await ffmpeg.getVideoInfo(file);
-          setMediaItems(p => p.map(m => m.id === id ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false } : m));
+          setMediaItems(p => p.map(m => m.id === id ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: isAudio } : m));
           if (!isAudio) {
-            ffmpeg.generateThumbnail(file, 0).then(b => {
-              const u = URL.createObjectURL(b);
-              setMediaItems(p => p.map(m => m.id === id ? { ...m, thumbnail: u } : m));
-            }).catch(() => {});
+            const cachedThumbnail = await getCachedThumbnail(thumbnailKey, 0);
+            if (cachedThumbnail) {
+              const cachedUrl = URL.createObjectURL(cachedThumbnail);
+              thumbnailUrlsRef.current.add(cachedUrl);
+              setMediaThumbnail(id, cachedUrl);
+            } else {
+              try {
+                const generatedThumbnail = await ffmpeg.generateThumbnail(file, 0);
+                const generatedUrl = URL.createObjectURL(generatedThumbnail);
+                thumbnailUrlsRef.current.add(generatedUrl);
+                setMediaThumbnail(id, generatedUrl);
+                await cacheThumbnail(thumbnailKey, 0, generatedThumbnail);
+              } catch (thumbnailError) {
+                console.warn('Thumbnail generation failed:', thumbnailError);
+                setMediaItems(p => p.map(m => m.id === id ? { ...m, isProcessing: false } : m));
+              }
+            }
           }
         } catch (e) {
           console.error("Error processing:", e);
@@ -442,14 +476,29 @@ const VideoEditor = () => {
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
     } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [ffmpeg, notify]);
+  }, [ffmpeg, notify, setMediaThumbnail]);
+
 
   // ---- Remove media ----
   const removeMedia = useCallback((id) => {
-    setMediaItems(p => { const item = p.find(m => m.id === id); if (item) requestAnimationFrame(() => { if (item.blobUrl) URL.revokeObjectURL(item.blobUrl); if (item.thumbnail) URL.revokeObjectURL(item.thumbnail); }); return p.filter(m => m.id !== id); });
+    setMediaItems((p) => {
+      const item = p.find((m) => m.id === id);
+      if (item) {
+        requestAnimationFrame(() => {
+          if (item.blobUrl) URL.revokeObjectURL(item.blobUrl);
+          if (item.thumbnail) {
+            URL.revokeObjectURL(item.thumbnail);
+            thumbnailUrlsRef.current.delete(item.thumbnail);
+          }
+        });
+        if (item.thumbnailKey) clearVideoThumbnails(item.thumbnailKey);
+      }
+      return p.filter((m) => m.id !== id);
+    });
     setClips(p => p.filter(c => c.mediaId !== id));
     if (selectedMediaId === id) setSelectedMediaId(null);
   }, [selectedMediaId, setClips]);
+
 
   // ---- Split ----
   const splitClip = useCallback(async (clipId, splitTime) => {
@@ -696,8 +745,14 @@ const VideoEditor = () => {
 
   // ---- Cleanup ----
   useEffect(() => () => {
-    mediaItems.forEach(m => { if (m.blobUrl) URL.revokeObjectURL(m.blobUrl); if (m.thumbnail) URL.revokeObjectURL(m.thumbnail); });
+    mediaItems.forEach((m) => {
+      if (m.blobUrl) URL.revokeObjectURL(m.blobUrl);
+      if (m.thumbnail) URL.revokeObjectURL(m.thumbnail);
+      if (m.thumbnailKey) clearVideoThumbnails(m.thumbnailKey);
+    });
     clips.forEach(c => { if (c.blobUrl) URL.revokeObjectURL(c.blobUrl); });
+    thumbnailUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    thumbnailUrlsRef.current.clear();
   }, []); // eslint-disable-line
 
   return (

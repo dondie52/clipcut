@@ -9,6 +9,21 @@ const STORE_NAME = 'thumbnails';
 
 let dbPromise = null;
 
+
+/**
+ * Build a stable media cache key from a File-like object
+ * @param {{name?: string, size?: number, lastModified?: number, type?: string}} file
+ * @returns {string}
+ */
+export function createMediaCacheKey(file = {}) {
+  return [
+    file.name || 'unknown',
+    file.size || 0,
+    file.lastModified || 0,
+    file.type || 'application/octet-stream',
+  ].join(':');
+}
+
 /**
  * Open the IndexedDB database
  * @returns {Promise<IDBDatabase>}

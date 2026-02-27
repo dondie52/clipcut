@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, memo } from 'react';
+import { useRef, useState, useEffect, useCallback, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
@@ -145,6 +145,11 @@ const MediaItem = memo(({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isThumbnailLoaded, setIsThumbnailLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsThumbnailLoaded(false);
+  }, [item.thumbnail]);
   
   const formatDuration = useCallback((seconds) => {
     if (!seconds || !isFinite(seconds)) return '0:00';
@@ -249,27 +254,34 @@ const MediaItem = memo(({
           background: '#0a0a0a'
         }}
       >
+        {(item.isProcessing || (item.thumbnail && !isThumbnailLoaded)) && (
+          <div 
+            className="thumbnail-loading"
+            style={{
+              width: '100%',
+              height: '100%',
+              position: 'absolute',
+              inset: 0
+            }}
+          />
+        )}
+
         {item.thumbnail ? (
           <img
             src={item.thumbnail}
             alt={item.name}
             loading="lazy"
+            onLoad={() => setIsThumbnailLoaded(true)}
             style={{
               width: '100%',
               height: '100%',
               objectFit: 'cover',
-              display: 'block'
+              display: 'block',
+              opacity: isThumbnailLoaded ? 1 : 0,
+              transition: 'opacity 0.12s ease'
             }}
           />
-        ) : item.isProcessing ? (
-          <div 
-            className="thumbnail-loading"
-            style={{
-              width: '100%',
-              height: '100%'
-            }}
-          />
-        ) : (
+        ) : !item.isProcessing ? (
           <div style={{
             width: '100%',
             height: '100%',
@@ -280,7 +292,7 @@ const MediaItem = memo(({
           }}>
             <Icon i={item.type === 'audio' ? 'music_note' : 'movie'} s={24} c="#475569" />
           </div>
-        )}
+        ) : null}
         
         {/* Duration badge */}
         <span style={{
