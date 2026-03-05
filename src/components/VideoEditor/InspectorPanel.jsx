@@ -1,18 +1,18 @@
-import { useState, useCallback, memo } from 'react';
+import { useCallback, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS } from './constants';
+import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { Section, Row, Slider, SmallInput, Hr, EffectCard, ColorPicker } from './InspectorComponents';
 
 /* ========== CSS ANIMATIONS ========== */
 const INSPECTOR_CSS = `
   ${SCROLLBAR_CSS}
-  
+
   .inspector-tab {
     position: relative;
     transition: all 0.15s ease;
   }
-  
+
   .inspector-tab::after {
     content: '';
     position: absolute;
@@ -24,81 +24,134 @@ const INSPECTOR_CSS = `
     transform: scaleX(0);
     transition: transform 0.2s ease;
   }
-  
+
   .inspector-tab.active::after {
     transform: scaleX(1);
   }
-  
+
   .inspector-tab:hover:not(.active) {
     color: #94a3b8 !important;
     background: rgba(255, 255, 255, 0.03);
   }
-  
+
   .inspector-subtab {
     transition: all 0.15s ease;
   }
-  
+
   .inspector-subtab:hover:not(.active) {
     background: rgba(255, 255, 255, 0.05) !important;
   }
-  
+
   .add-effect-btn {
     transition: all 0.15s ease;
   }
-  
+
   .add-effect-btn:hover {
     background: rgba(117, 170, 219, 0.15) !important;
     border-color: #75aadb !important;
   }
+
+  .coming-soon-badge {
+    display: inline-block;
+    background: rgba(117, 170, 219, 0.15);
+    color: #75aadb;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
 `;
 
+/* ========== HELPER: safely read clip property ========== */
+const cp = (clip, key) => clip?.[key] ?? DEFAULT_CLIP_PROPERTIES[key];
+
+/* ========== COMING SOON PLACEHOLDER ========== */
+const ComingSoonPlaceholder = memo(({ icon, title, description }) => (
+  <div style={{
+    display: 'flex', flexDirection: 'column', alignItems: 'center',
+    justifyContent: 'center', padding: '32px 20px', textAlign: 'center',
+    color: '#475569', gap: '12px'
+  }}>
+    <div style={{
+      width: '56px', height: '56px', borderRadius: '16px',
+      background: 'rgba(117, 170, 219, 0.08)', display: 'flex',
+      alignItems: 'center', justifyContent: 'center'
+    }}>
+      <Icon i={icon} s={28} c="#334155" />
+    </div>
+    <div>
+      <p style={{ fontSize: '13px', fontWeight: 600, margin: '0 0 4px 0', color: '#94a3b8' }}>
+        {title}
+      </p>
+      <p style={{ fontSize: '11px', color: '#475569', margin: '0 0 8px 0', lineHeight: 1.4 }}>
+        {description}
+      </p>
+      <span className="coming-soon-badge">Coming Soon</span>
+    </div>
+  </div>
+));
+ComingSoonPlaceholder.displayName = 'ComingSoonPlaceholder';
+
 /* ========== INSPECTOR PANEL COMPONENT (RIGHT SIDEBAR) ========== */
-const InspectorPanel = ({ 
-  rightTab, 
-  onRightTabChange, 
-  rightSubTab, 
+const InspectorPanel = ({
+  rightTab,
+  onRightTabChange,
+  rightSubTab,
   onRightSubTabChange,
   selectedClip,
   onClipUpdate
 }) => {
-  // Local state for inspector values
-  const [filterName, setFilterName] = useState('90s');
-  const [filterStrength, setFilterStrength] = useState(50);
-  const [effects, setEffects] = useState([
-    { id: 1, name: 'Motion Blur', enabled: true }
-  ]);
-  const [zoom, setZoom] = useState(50);
-  const [positionX, setPositionX] = useState('0');
-  const [positionY, setPositionY] = useState('0');
-  const [rotation, setRotation] = useState(0);
-  const [opacity, setOpacity] = useState(100);
-  const [volume, setVolume] = useState(100);
-  const [speed, setSpeed] = useState(100);
-  
+  // Helper to update a clip property
+  const update = useCallback((key, value) => {
+    if (!selectedClip) return;
+    onClipUpdate(selectedClip.id, { [key]: value });
+  }, [selectedClip, onClipUpdate]);
+
   // Effect handlers
   const handleToggleEffect = useCallback((effectId) => {
-    setEffects(prev => prev.map(e => 
+    if (!selectedClip) return;
+    const effects = (selectedClip.effects || []).map(e =>
       e.id === effectId ? { ...e, enabled: !e.enabled } : e
-    ));
-  }, []);
-  
+    );
+    onClipUpdate(selectedClip.id, { effects });
+  }, [selectedClip, onClipUpdate]);
+
   const handleDeleteEffect = useCallback((effectId) => {
-    setEffects(prev => prev.filter(e => e.id !== effectId));
-  }, []);
-  
+    if (!selectedClip) return;
+    const effects = (selectedClip.effects || []).filter(e => e.id !== effectId);
+    onClipUpdate(selectedClip.id, { effects });
+  }, [selectedClip, onClipUpdate]);
+
   const handleAddEffect = useCallback(() => {
+    if (!selectedClip) return;
     const newEffect = {
       id: Date.now(),
       name: 'New Effect',
-      enabled: true
+      enabled: true,
+      type: 'blur',
+      params: { radius: 5 }
     };
-    setEffects(prev => [...prev, newEffect]);
-  }, []);
-  
+    onClipUpdate(selectedClip.id, { effects: [...(selectedClip.effects || []), newEffect] });
+  }, [selectedClip, onClipUpdate]);
+
+  const handleAddPresetEffect = useCallback((preset) => {
+    if (!selectedClip) return;
+    const newEffect = {
+      id: Date.now(),
+      name: preset.name,
+      enabled: true,
+      type: preset.type,
+      params: { ...preset.params }
+    };
+    onClipUpdate(selectedClip.id, { effects: [...(selectedClip.effects || []), newEffect] });
+  }, [selectedClip, onClipUpdate]);
+
   // Keyboard navigation for tabs
   const handleTabKeyDown = useCallback((e, tabs, currentTab, onChange) => {
     const currentIndex = tabs.findIndex(t => t.toLowerCase() === currentTab);
-    
+
     if (e.key === 'ArrowRight') {
       e.preventDefault();
       const nextIndex = (currentIndex + 1) % tabs.length;
@@ -109,20 +162,24 @@ const InspectorPanel = ({
       onChange(tabs[prevIndex].toLowerCase());
     }
   }, []);
-  
+
   const mainTabs = ["Video", "Audio", "Speed", "Animate", "Adjust"];
   const subTabs = ["Basic", "Cutout", "Mask", "Canvas"];
-  
+
+  const hasClip = !!selectedClip;
+  const clipEffects = selectedClip?.effects || [];
+  const clipSpeed = Math.round(cp(selectedClip, 'speed') * 100);
+
   return (
-    <aside 
+    <aside
       style={styles.rightPanel}
       role="complementary"
       aria-label="Inspector panel"
     >
       <style>{INSPECTOR_CSS}</style>
-      
+
       {/* Main tabs */}
-      <nav 
+      <nav
         style={{
           display: "flex",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
@@ -154,9 +211,9 @@ const InspectorPanel = ({
           </button>
         ))}
       </nav>
-      
+
       {/* Sub tabs */}
-      <nav 
+      <nav
         style={{
           display: "flex",
           height: "32px",
@@ -190,9 +247,9 @@ const InspectorPanel = ({
           </button>
         ))}
       </nav>
-      
+
       {/* Content */}
-      <div 
+      <div
         style={{
           flex: 1,
           overflowY: "auto",
@@ -200,272 +257,15 @@ const InspectorPanel = ({
           display: "flex",
           flexDirection: "column",
           gap: "20px"
-        }} 
+        }}
         className="cs"
         id={`panel-${rightTab}`}
         role="tabpanel"
         aria-label={`${rightTab} settings`}
       >
-        {/* Video Tab Content */}
-        {rightTab === 'video' && (
-          <>
-            {/* Filters Section */}
-            <Section t="Filters">
-              <Row 
-                l="Name" 
-                v={filterName} 
-                vc="#75aadb" 
-                editable 
-                onChange={setFilterName}
-              />
-              <Slider 
-                l="Strength" 
-                value={filterStrength}
-                onChange={setFilterStrength}
-                defaultValue={50}
-              />
-            </Section>
-            
-            <Hr />
-            
-            {/* Effects Section */}
-            <Section t="Effects">
-              <div 
-                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-                role="list"
-                aria-label="Applied effects"
-              >
-                {effects.map((effect, index) => (
-                  <EffectCard
-                    key={effect.id}
-                    number={index + 1}
-                    name={effect.name}
-                    enabled={effect.enabled}
-                    onToggle={() => handleToggleEffect(effect.id)}
-                    onEdit={() => {}}
-                    onDelete={() => handleDeleteEffect(effect.id)}
-                  />
-                ))}
-              </div>
-              
-              <button
-                onClick={handleAddEffect}
-                className="add-effect-btn"
-                style={{
-                  width: '100%',
-                  padding: '10px',
-                  background: 'transparent',
-                  border: '1px dashed rgba(255, 255, 255, 0.1)',
-                  borderRadius: '4px',
-                  color: '#64748b',
-                  fontSize: '11px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px'
-                }}
-                aria-label="Add new effect"
-              >
-                <Icon i="add" s={16} c="#64748b" />
-                Add Effect
-              </button>
-            </Section>
-            
-            <Hr />
-            
-            {/* Position & Size Section */}
-            <Section t="Position & Size">
-              <Slider 
-                l="Zoom" 
-                value={zoom}
-                onChange={setZoom}
-                defaultValue={50}
-              />
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "4px" }}>
-                <SmallInput 
-                  l="Position X" 
-                  v={positionX}
-                  type="number"
-                  onChange={setPositionX}
-                />
-                <SmallInput 
-                  l="Position Y" 
-                  v={positionY}
-                  type="number"
-                  onChange={setPositionY}
-                />
-              </div>
-              <Slider 
-                l="Rotation" 
-                value={rotation}
-                onChange={setRotation}
-                min={-180}
-                max={180}
-                defaultValue={0}
-                unit="°"
-              />
-              <Slider 
-                l="Opacity" 
-                value={opacity}
-                onChange={setOpacity}
-                defaultValue={100}
-              />
-            </Section>
-          </>
-        )}
-        
-        {/* Audio Tab Content */}
-        {rightTab === 'audio' && (
-          <>
-            <Section t="Volume">
-              <Slider 
-                l="Volume" 
-                value={volume}
-                onChange={setVolume}
-                defaultValue={100}
-              />
-              <Row l="Mute" v="Off" />
-            </Section>
-            
-            <Hr />
-            
-            <Section t="Audio Effects">
-              <div 
-                style={{
-                  padding: '20px',
-                  textAlign: 'center',
-                  color: '#475569',
-                  fontSize: '12px'
-                }}
-              >
-                <Icon i="music_note" s={32} c="#334155" />
-                <p style={{ margin: '12px 0 0 0' }}>No audio effects applied</p>
-              </div>
-            </Section>
-          </>
-        )}
-        
-        {/* Speed Tab Content */}
-        {rightTab === 'speed' && (
-          <>
-            <Section t="Playback Speed">
-              <Slider 
-                l="Speed" 
-                value={speed}
-                onChange={setSpeed}
-                min={25}
-                max={400}
-                defaultValue={100}
-              />
-              <div style={{ 
-                display: 'flex', 
-                gap: '8px', 
-                flexWrap: 'wrap',
-                marginTop: '8px'
-              }}>
-                {[25, 50, 100, 150, 200].map(s => (
-                  <button
-                    key={s}
-                    onClick={() => setSpeed(s)}
-                    style={{
-                      background: speed === s ? 'rgba(117, 170, 219, 0.2)' : 'rgba(30, 41, 59, 0.5)',
-                      border: speed === s ? '1px solid #75aadb' : '1px solid rgba(255, 255, 255, 0.1)',
-                      borderRadius: '4px',
-                      padding: '4px 12px',
-                      color: speed === s ? '#75aadb' : '#94a3b8',
-                      fontSize: '11px',
-                      fontWeight: 500,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {s}%
-                  </button>
-                ))}
-              </div>
-            </Section>
-            
-            <Hr />
-            
-            <Section t="Time Remapping">
-              <Row l="Duration" v="00:05.00" />
-              <Row l="Frames" v="150" />
-            </Section>
-          </>
-        )}
-        
-        {/* Animate Tab Content */}
-        {rightTab === 'animate' && (
-          <>
-            <Section t="Keyframes">
-              <div 
-                style={{
-                  padding: '20px',
-                  textAlign: 'center',
-                  color: '#475569',
-                  fontSize: '12px'
-                }}
-              >
-                <Icon i="animation" s={32} c="#334155" />
-                <p style={{ margin: '12px 0 4px 0' }}>No keyframes added</p>
-                <p style={{ fontSize: '11px', color: '#334155', margin: 0 }}>
-                  Select a property and click the diamond icon to add keyframes
-                </p>
-              </div>
-            </Section>
-            
-            <Hr />
-            
-            <Section t="Presets">
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: '1fr 1fr',
-                gap: '8px'
-              }}>
-                {['Fade In', 'Fade Out', 'Scale Up', 'Slide Left'].map(preset => (
-                  <button
-                    key={preset}
-                    style={{
-                      background: 'rgba(30, 41, 59, 0.5)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      borderRadius: '4px',
-                      padding: '8px',
-                      color: '#94a3b8',
-                      fontSize: '10px',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-            </Section>
-          </>
-        )}
-        
-        {/* Adjust Tab Content */}
-        {rightTab === 'adjust' && (
-          <>
-            <Section t="Color Correction">
-              <Slider l="Brightness" defaultValue={50} />
-              <Slider l="Contrast" defaultValue={50} />
-              <Slider l="Saturation" defaultValue={50} />
-              <Slider l="Temperature" defaultValue={50} />
-            </Section>
-            
-            <Hr />
-            
-            <Section t="Color Grading">
-              <ColorPicker label="Shadows" value="#1a1a2e" />
-              <ColorPicker label="Midtones" value="#4a4a5e" />
-              <ColorPicker label="Highlights" value="#ffffff" />
-            </Section>
-          </>
-        )}
-        
         {/* Empty state for no clip selected */}
-        {!selectedClip && (
-          <div 
+        {!hasClip && (
+          <div
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -485,6 +285,456 @@ const InspectorPanel = ({
               Properties will appear here
             </p>
           </div>
+        )}
+
+        {/* === BASIC SUB-TAB CONTENT === */}
+        {hasClip && rightSubTab === 'basic' && (
+          <>
+            {/* Video Tab Content */}
+            {rightTab === 'video' && (
+              <>
+                {/* Filters Section */}
+                <Section t="Filters">
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    {FILTER_PRESETS.map(f => (
+                      <button
+                        key={f.name}
+                        onClick={() => update('filterName', f.name === 'None' ? null : f.name)}
+                        style={{
+                          background: cp(selectedClip, 'filterName') === f.name || (!cp(selectedClip, 'filterName') && f.name === 'None')
+                            ? 'rgba(117, 170, 219, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                          border: cp(selectedClip, 'filterName') === f.name || (!cp(selectedClip, 'filterName') && f.name === 'None')
+                            ? '1px solid #75aadb' : '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '4px',
+                          padding: '4px 10px',
+                          color: cp(selectedClip, 'filterName') === f.name || (!cp(selectedClip, 'filterName') && f.name === 'None')
+                            ? '#75aadb' : '#94a3b8',
+                          fontSize: '10px',
+                          fontWeight: 500,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        {f.name}
+                      </button>
+                    ))}
+                  </div>
+                  <Slider
+                    l="Strength"
+                    value={cp(selectedClip, 'filterStrength')}
+                    onChange={(val) => update('filterStrength', val)}
+                    defaultValue={50}
+                    disabled={!cp(selectedClip, 'filterName')}
+                  />
+                </Section>
+
+                <Hr />
+
+                {/* Effects Section */}
+                <Section t="Effects">
+                  <div
+                    style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
+                    role="list"
+                    aria-label="Applied effects"
+                  >
+                    {clipEffects.map((effect, index) => (
+                      <EffectCard
+                        key={effect.id}
+                        number={index + 1}
+                        name={effect.name}
+                        enabled={effect.enabled}
+                        onToggle={() => handleToggleEffect(effect.id)}
+                        onEdit={() => {
+                          // Toggle effect params — for now cycle through presets
+                          const preset = EFFECT_PRESETS.find(p => p.name === effect.name);
+                          if (preset) {
+                            const newRadius = (effect.params?.radius || 5) === 5 ? 10 : 5;
+                            const effects = clipEffects.map(e =>
+                              e.id === effect.id ? { ...e, params: { ...e.params, radius: newRadius } } : e
+                            );
+                            onClipUpdate(selectedClip.id, { effects });
+                          }
+                        }}
+                        onDelete={() => handleDeleteEffect(effect.id)}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Add from presets */}
+                  <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' }}>
+                    {EFFECT_PRESETS.map(preset => (
+                      <button
+                        key={preset.name}
+                        onClick={() => handleAddPresetEffect(preset)}
+                        style={{
+                          background: 'rgba(30, 41, 59, 0.5)',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '4px',
+                          padding: '4px 8px',
+                          color: '#64748b',
+                          fontSize: '10px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        + {preset.name}
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleAddEffect}
+                    className="add-effect-btn"
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      background: 'transparent',
+                      border: '1px dashed rgba(255, 255, 255, 0.1)',
+                      borderRadius: '4px',
+                      color: '#64748b',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px'
+                    }}
+                    aria-label="Add new effect"
+                  >
+                    <Icon i="add" s={16} c="#64748b" />
+                    Add Effect
+                  </button>
+                </Section>
+
+                <Hr />
+
+                {/* Position & Size Section */}
+                <Section t="Position & Size">
+                  <Slider
+                    l="Zoom"
+                    value={Math.round(cp(selectedClip, 'scale') * 100)}
+                    onChange={(val) => update('scale', val / 100)}
+                    defaultValue={100}
+                    min={10}
+                    max={300}
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "4px" }}>
+                    <SmallInput
+                      l="Position X"
+                      v={String(cp(selectedClip, 'positionX'))}
+                      type="number"
+                      onChange={(val) => update('positionX', Number(val) || 0)}
+                    />
+                    <SmallInput
+                      l="Position Y"
+                      v={String(cp(selectedClip, 'positionY'))}
+                      type="number"
+                      onChange={(val) => update('positionY', Number(val) || 0)}
+                    />
+                  </div>
+                  <Slider
+                    l="Rotation"
+                    value={cp(selectedClip, 'rotation')}
+                    onChange={(val) => update('rotation', val)}
+                    min={-180}
+                    max={180}
+                    defaultValue={0}
+                    unit="°"
+                  />
+                  <Slider
+                    l="Opacity"
+                    value={Math.round(cp(selectedClip, 'opacity') * 100)}
+                    onChange={(val) => update('opacity', val / 100)}
+                    defaultValue={100}
+                  />
+                </Section>
+              </>
+            )}
+
+            {/* Audio Tab Content */}
+            {rightTab === 'audio' && (
+              <>
+                <Section t="Volume">
+                  <Slider
+                    l="Volume"
+                    value={Math.round(cp(selectedClip, 'volume') * 100)}
+                    onChange={(val) => update('volume', val / 100)}
+                    defaultValue={100}
+                    min={0}
+                    max={200}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', color: '#cbd5e1' }}>Mute</span>
+                    <button
+                      onClick={() => update('isMuted', !cp(selectedClip, 'isMuted'))}
+                      style={{
+                        background: cp(selectedClip, 'isMuted') ? 'rgba(239, 68, 68, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                        border: cp(selectedClip, 'isMuted') ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
+                        borderRadius: '4px',
+                        padding: '4px 12px',
+                        color: cp(selectedClip, 'isMuted') ? '#ef4444' : '#94a3b8',
+                        fontSize: '11px',
+                        fontWeight: 500,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <Icon i={cp(selectedClip, 'isMuted') ? 'volume_off' : 'volume_up'} s={14} c={cp(selectedClip, 'isMuted') ? '#ef4444' : '#94a3b8'} />
+                      {cp(selectedClip, 'isMuted') ? 'Muted' : 'On'}
+                    </button>
+                  </div>
+                </Section>
+
+                <Hr />
+
+                <Section t="Audio Effects">
+                  <div
+                    style={{
+                      padding: '20px',
+                      textAlign: 'center',
+                      color: '#475569',
+                      fontSize: '12px'
+                    }}
+                  >
+                    <Icon i="music_note" s={32} c="#334155" />
+                    <p style={{ margin: '12px 0 0 0' }}>No audio effects applied</p>
+                  </div>
+                </Section>
+              </>
+            )}
+
+            {/* Speed Tab Content */}
+            {rightTab === 'speed' && (
+              <>
+                <Section t="Playback Speed">
+                  <Slider
+                    l="Speed"
+                    value={clipSpeed}
+                    onChange={(val) => update('speed', val / 100)}
+                    min={25}
+                    max={400}
+                    defaultValue={100}
+                  />
+                  <div style={{
+                    display: 'flex',
+                    gap: '8px',
+                    flexWrap: 'wrap',
+                    marginTop: '8px'
+                  }}>
+                    {SPEED_PRESETS.map(s => {
+                      const pct = Math.round(s.value * 100);
+                      return (
+                        <button
+                          key={s.label}
+                          onClick={() => update('speed', s.value)}
+                          style={{
+                            background: clipSpeed === pct ? 'rgba(117, 170, 219, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                            border: clipSpeed === pct ? '1px solid #75aadb' : '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '4px',
+                            padding: '4px 12px',
+                            color: clipSpeed === pct ? '#75aadb' : '#94a3b8',
+                            fontSize: '11px',
+                            fontWeight: 500,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {s.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Section>
+
+                <Hr />
+
+                <Section t="Time Remapping">
+                  <Row l="Duration" v={selectedClip.duration ? `${selectedClip.duration.toFixed(2)}s` : '--'} />
+                  <Row l="Frames" v={selectedClip.duration ? String(Math.round(selectedClip.duration * 30)) : '--'} />
+                </Section>
+              </>
+            )}
+
+            {/* Animate Tab Content */}
+            {rightTab === 'animate' && (
+              <>
+                <Section t="Keyframes">
+                  <div
+                    style={{
+                      padding: '20px',
+                      textAlign: 'center',
+                      color: '#475569',
+                      fontSize: '12px'
+                    }}
+                  >
+                    <Icon i="animation" s={32} c="#334155" />
+                    <p style={{ margin: '12px 0 4px 0' }}>No keyframes added</p>
+                    <p style={{ fontSize: '11px', color: '#334155', margin: 0 }}>
+                      Select a property and click the diamond icon to add keyframes
+                    </p>
+                  </div>
+                </Section>
+
+                <Hr />
+
+                <Section t="Presets">
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr',
+                    gap: '8px'
+                  }}>
+                    {ANIMATION_PRESETS.map(preset => {
+                      const isActive = preset.key === 'fadeIn' ? cp(selectedClip, 'fadeIn') > 0
+                        : preset.key === 'fadeOut' ? cp(selectedClip, 'fadeOut') > 0
+                        : !!selectedClip[preset.key];
+                      return (
+                        <button
+                          key={preset.name}
+                          onClick={() => {
+                            if (preset.key === 'fadeIn' || preset.key === 'fadeOut') {
+                              update(preset.key, isActive ? 0 : preset.value);
+                            } else {
+                              update(preset.key, !isActive);
+                            }
+                          }}
+                          style={{
+                            background: isActive ? 'rgba(117, 170, 219, 0.2)' : 'rgba(30, 41, 59, 0.5)',
+                            border: isActive ? '1px solid #75aadb' : '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '4px',
+                            padding: '8px',
+                            color: isActive ? '#75aadb' : '#94a3b8',
+                            fontSize: '10px',
+                            fontWeight: isActive ? 600 : 400,
+                            cursor: 'pointer'
+                          }}
+                        >
+                          {preset.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {(cp(selectedClip, 'fadeIn') > 0 || cp(selectedClip, 'fadeOut') > 0) && (
+                    <div style={{ marginTop: '8px' }}>
+                      {cp(selectedClip, 'fadeIn') > 0 && (
+                        <Slider
+                          l="Fade In Duration"
+                          value={cp(selectedClip, 'fadeIn') * 10}
+                          onChange={(val) => update('fadeIn', val / 10)}
+                          min={1}
+                          max={50}
+                          defaultValue={10}
+                          unit="s"
+                          v={`${cp(selectedClip, 'fadeIn').toFixed(1)}s`}
+                        />
+                      )}
+                      {cp(selectedClip, 'fadeOut') > 0 && (
+                        <Slider
+                          l="Fade Out Duration"
+                          value={cp(selectedClip, 'fadeOut') * 10}
+                          onChange={(val) => update('fadeOut', val / 10)}
+                          min={1}
+                          max={50}
+                          defaultValue={10}
+                          unit="s"
+                          v={`${cp(selectedClip, 'fadeOut').toFixed(1)}s`}
+                        />
+                      )}
+                    </div>
+                  )}
+                </Section>
+              </>
+            )}
+
+            {/* Adjust Tab Content */}
+            {rightTab === 'adjust' && (
+              <>
+                <Section t="Color Correction">
+                  <Slider
+                    l="Brightness"
+                    value={Math.round(cp(selectedClip, 'brightness') * 50 + 50)}
+                    onChange={(val) => update('brightness', (val - 50) / 50)}
+                    defaultValue={50}
+                  />
+                  <Slider
+                    l="Contrast"
+                    value={Math.round(cp(selectedClip, 'contrast') * 50 + 50)}
+                    onChange={(val) => update('contrast', (val - 50) / 50)}
+                    defaultValue={50}
+                  />
+                  <Slider
+                    l="Saturation"
+                    value={Math.round(cp(selectedClip, 'saturation') * 50)}
+                    onChange={(val) => update('saturation', val / 50)}
+                    defaultValue={50}
+                  />
+                  <Slider
+                    l="Temperature"
+                    value={Math.round(cp(selectedClip, 'temperature') * 50 + 50)}
+                    onChange={(val) => update('temperature', (val - 50) / 50)}
+                    defaultValue={50}
+                  />
+                </Section>
+
+                <Hr />
+
+                <Section t="Color Grading">
+                  <ColorPicker
+                    label="Shadows"
+                    value={selectedClip.colorGrading?.shadows ?? '#1a1a2e'}
+                    onChange={(val) => onClipUpdate(selectedClip.id, {
+                      colorGrading: { ...(selectedClip.colorGrading || DEFAULT_CLIP_PROPERTIES.colorGrading), shadows: val }
+                    })}
+                  />
+                  <ColorPicker
+                    label="Midtones"
+                    value={selectedClip.colorGrading?.midtones ?? '#4a4a5e'}
+                    onChange={(val) => onClipUpdate(selectedClip.id, {
+                      colorGrading: { ...(selectedClip.colorGrading || DEFAULT_CLIP_PROPERTIES.colorGrading), midtones: val }
+                    })}
+                  />
+                  <ColorPicker
+                    label="Highlights"
+                    value={selectedClip.colorGrading?.highlights ?? '#ffffff'}
+                    onChange={(val) => onClipUpdate(selectedClip.id, {
+                      colorGrading: { ...(selectedClip.colorGrading || DEFAULT_CLIP_PROPERTIES.colorGrading), highlights: val }
+                    })}
+                  />
+                </Section>
+              </>
+            )}
+          </>
+        )}
+
+        {/* === CUTOUT SUB-TAB === */}
+        {hasClip && rightSubTab === 'cutout' && (
+          <ComingSoonPlaceholder
+            icon="content_cut"
+            title="Background Removal"
+            description="Automatically remove or replace video backgrounds with AI-powered cutout tools"
+          />
+        )}
+
+        {/* === MASK SUB-TAB === */}
+        {hasClip && rightSubTab === 'mask' && (
+          <ComingSoonPlaceholder
+            icon="gradient"
+            title="Masking Tools"
+            description="Create custom shapes, feathered edges, and animated masks to reveal or hide parts of your video"
+          />
+        )}
+
+        {/* === CANVAS SUB-TAB === */}
+        {hasClip && rightSubTab === 'canvas' && (
+          <Section t="Canvas Settings">
+            <Row l="Resolution" v="1920 x 1080" />
+            <Row l="Frame Rate" v="30 fps" />
+            <Row l="Aspect Ratio" v="16:9" />
+            <Hr />
+            <ColorPicker
+              label="Background Color"
+              value="#000000"
+              presets={['#000000', '#ffffff', '#0a0a0a', '#1a2332', '#75aadb', '#1e293b']}
+            />
+          </Section>
         )}
       </div>
     </aside>

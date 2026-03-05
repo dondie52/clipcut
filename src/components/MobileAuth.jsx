@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { sanitizeUsername } from "../utils/validation";
+import PasswordStrengthBar from "./shared/PasswordStrengthBar";
 
 const MobileAuth = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -8,17 +10,6 @@ const MobileAuth = () => {
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-
-  const getPasswordStrength = (pwd) => {
-    if (!pwd) return { segments: 0, color: "#333", label: "" };
-    if (pwd.length < 4) return { segments: 1, color: "#ef4444", label: "Weak" };
-    if (pwd.length < 7) return { segments: 2, color: "#f59e0b", label: "Fair" };
-    if (/[A-Z]/.test(pwd) && /[0-9]/.test(pwd) && /[^A-Za-z0-9]/.test(pwd))
-      return { segments: 4, color: "#22c55e", label: "Strong" };
-    return { segments: 3, color: "#75AADB", label: "Good" };
-  };
-
-  const strength = getPasswordStrength(password);
 
   return (
     <div style={{
@@ -80,15 +71,18 @@ const MobileAuth = () => {
             <h2 style={{ fontSize: "24px", fontWeight: 700, color: "white", margin: "0 0 4px 0" }}>
               {isLogin ? "Welcome back" : "Create account"}
             </h2>
-            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: "0 0 24px 0" }}>
+            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.6)", margin: "0 0 24px 0" }}>
               {isLogin ? "Please enter your details to sign in." : "Start editing videos for free."}
             </p>
 
             <form onSubmit={(e) => e.preventDefault()} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               {!isLogin && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <label style={mLabelStyle}>USERNAME</label>
-                  <input type="text" placeholder="Choose a username" value={username} onChange={(e) => setUsername(e.target.value)} style={mInputStyle}
+                  <label htmlFor="mobile-username" style={mLabelStyle}>USERNAME</label>
+                  <input id="mobile-username" type="text" placeholder="Choose a username" value={username} onChange={(e) => {
+                    const sanitized = sanitizeUsername(e.target.value);
+                    setUsername(sanitized);
+                  }} autoComplete="username" style={mInputStyle}
                     onFocus={(e) => e.target.style.borderColor = "rgba(117,170,219,0.4)"}
                     onBlur={(e) => e.target.style.borderColor = "rgba(117,170,219,0.15)"}
                   />
@@ -96,42 +90,30 @@ const MobileAuth = () => {
               )}
 
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={mLabelStyle}>EMAIL</label>
-                <input type="email" placeholder="Enter your email" value={email} onChange={(e) => setEmail(e.target.value)} style={mInputStyle}
+                <label htmlFor="mobile-email" style={mLabelStyle}>EMAIL</label>
+                <input id="mobile-email" type="email" placeholder="Enter your email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" style={mInputStyle}
                   onFocus={(e) => e.target.style.borderColor = "rgba(117,170,219,0.4)"}
                   onBlur={(e) => e.target.style.borderColor = "rgba(117,170,219,0.15)"}
                 />
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={mLabelStyle}>PASSWORD</label>
+                <label htmlFor="mobile-password" style={mLabelStyle}>PASSWORD</label>
                 <div style={{ position: "relative" }}>
-                  <input type={showPassword ? "text" : "password"} placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} style={mInputStyle}
+                  <input id="mobile-password" type={showPassword ? "text" : "password"} placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={isLogin ? "current-password" : "new-password"} style={mInputStyle}
                     onFocus={(e) => e.target.style.borderColor = "rgba(117,170,219,0.4)"}
                     onBlur={(e) => e.target.style.borderColor = "rgba(117,170,219,0.15)"}
                   />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} style={{
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"} style={{
                     position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
                     background: "none", border: "none", cursor: "pointer", color: showPassword ? "#75AADB" : "rgba(255,255,255,0.3)",
+                    padding: "8px", minWidth: "36px", minHeight: "36px",
                   }}>
                     <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>{showPassword ? "visibility_off" : "visibility"}</span>
                   </button>
                 </div>
 
-                {!isLogin && password && (
-                  <div>
-                    <div style={{ display: "flex", gap: "3px", marginTop: "4px" }}>
-                      {[1, 2, 3, 4].map((i) => (
-                        <div key={i} style={{
-                          flex: 1, height: "3px", borderRadius: "2px",
-                          background: strength.segments >= i ? strength.color : "rgba(255,255,255,0.08)",
-                          transition: "all 0.3s ease",
-                        }} />
-                      ))}
-                    </div>
-                    <span style={{ fontSize: "10px", color: strength.color, marginTop: "3px", display: "block" }}>{strength.label}</span>
-                  </div>
-                )}
+                {!isLogin && <PasswordStrengthBar password={password} />}
 
                 {isLogin && (
                   <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "2px" }}>
@@ -142,15 +124,16 @@ const MobileAuth = () => {
 
               {!isLogin && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <label style={mLabelStyle}>CONFIRM PASSWORD</label>
+                  <label htmlFor="mobile-confirm-password" style={mLabelStyle}>CONFIRM PASSWORD</label>
                   <div style={{ position: "relative" }}>
-                    <input type={showConfirmPassword ? "text" : "password"} placeholder="Confirm password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={mInputStyle}
+                    <input id="mobile-confirm-password" type={showConfirmPassword ? "text" : "password"} placeholder="Confirm password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" style={mInputStyle}
                       onFocus={(e) => e.target.style.borderColor = "rgba(117,170,219,0.4)"}
                       onBlur={(e) => e.target.style.borderColor = "rgba(117,170,219,0.15)"}
                     />
-                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} style={{
+                    <button type="button" onClick={() => setShowConfirmPassword(!showConfirmPassword)} aria-label={showConfirmPassword ? "Hide password" : "Show password"} style={{
                       position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
                       background: "none", border: "none", cursor: "pointer", color: showConfirmPassword ? "#75AADB" : "rgba(255,255,255,0.3)",
+                      padding: "8px", minWidth: "36px", minHeight: "36px",
                     }}>
                       <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>{showConfirmPassword ? "visibility_off" : "visibility"}</span>
                     </button>
@@ -170,7 +153,7 @@ const MobileAuth = () => {
             {/* Divider */}
             <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "24px 0" }}>
               <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.08)" }} />
-              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px" }}>
+              <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px" }}>
                 or continue with
               </span>
               <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.08)" }} />
@@ -195,7 +178,7 @@ const MobileAuth = () => {
 
           {/* Footer */}
           <div style={{ padding: "20px 0 48px", textAlign: "center" }}>
-            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: 0 }}>
+            <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.6)", margin: 0 }}>
               {isLogin ? "Don't have an account?" : "Already have an account?"}
               <a href="#" onClick={(e) => { e.preventDefault(); setIsLogin(!isLogin); setPassword(""); setConfirmPassword(""); }}
                 style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>

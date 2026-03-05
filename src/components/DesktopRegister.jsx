@@ -1,16 +1,17 @@
 import { useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { signUp, signInWithGoogle } from "../supabase/authService";
-import { 
-  validateRegistration, 
-  validatePassword, 
-  getPasswordStrengthInfo,
-  sanitizeErrorMessage,
-  PASSWORD_REQUIREMENTS 
+import { getUserFriendlyMessage } from "../utils/errorHandling";
+import {
+  validateRegistration,
+  sanitizeUsername,
+  PASSWORD_REQUIREMENTS
 } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { captureError, addBreadcrumb } from "../utils/errorTracking";
+import BotswanaStripe from "./shared/BotswanaStripe";
+import PasswordStrengthBar, { getStrength } from "./shared/PasswordStrengthBar";
 
 // Rate limiter: 3 registration attempts per 2 minutes
 const registerRateLimiter = createRateLimiter(3, 120000);
@@ -30,19 +31,6 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   const formRef = useRef(null);
   const usernameInputRef = useRef(null);
 
-  // Use the enhanced password strength validation
-  const getStrength = (pwd) => {
-    if (!pwd) return { segments: 0, color: "#333", label: "" };
-    const result = validatePassword(pwd);
-    const info = getPasswordStrengthInfo(result.strength);
-    return { 
-      segments: result.strength, 
-      color: info.color, 
-      label: info.label,
-      isValid: result.valid,
-      error: result.error
-    };
-  };
   const strength = getStrength(password);
 
   const handleSubmit = async (e) => {
@@ -64,12 +52,15 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
       return;
     }
 
+    // Sanitize username before validation
+    const sanitizedUsername = sanitizeUsername(username);
+
     // Client-side validation with enhanced requirements
     const validation = validateRegistration({
       email: email.trim(),
       password,
       confirmPassword,
-      username: username.trim(),
+      username: sanitizedUsername,
     });
 
     if (!validation.valid) {
@@ -85,17 +76,16 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
       await signUp({ 
         email: email.trim().toLowerCase(), 
         password, 
-        username: username.trim() 
+        username: sanitizedUsername 
       });
       trackEvent(analyticsEvents.registerSuccess, { method: 'email' });
       addBreadcrumb({ category: 'auth', message: 'Registration successful', level: 'info' });
       navigate("/onboarding/1");
     } catch (err) {
-      // Use sanitized error message
-      const errorMsg = sanitizeErrorMessage(err, "Failed to create account. Please try again.");
+      const errorMsg = getUserFriendlyMessage(err, 'auth');
       setError(errorMsg);
       trackEvent(analyticsEvents.registerFailure, { reason: 'auth_error' });
-      captureError(err, { 
+      captureError(err, {
         tags: { type: 'registration_error' },
         extra: { email: email.trim().toLowerCase(), username: username.trim() }
       });
@@ -117,10 +107,10 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
       trackEvent(analyticsEvents.registerSuccess, { method: 'google' });
       addBreadcrumb({ category: 'auth', message: 'Google sign-in successful', level: 'info' });
     } catch (err) {
-      const errorMsg = sanitizeErrorMessage(err, "Failed to sign in with Google");
+      const errorMsg = getUserFriendlyMessage(err, 'auth');
       setError(errorMsg);
       trackEvent(analyticsEvents.registerFailure, { reason: 'google_auth_error' });
-      captureError(err, { 
+      captureError(err, {
         tags: { type: 'google_auth_error' }
       });
     } finally {
@@ -134,7 +124,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   };
 
   return (
-    <div style={{
+    <main style={{
       width: "100vw", height: "100vh", display: "flex",
       fontFamily: "'Spline Sans', sans-serif", overflow: "hidden", position: "relative",
     }}>
@@ -182,7 +172,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
 
           {/* Subtitle */}
           <p style={{
-            fontSize: "17px", color: "rgba(255,255,255,0.45)",
+            fontSize: "17px", color: "rgba(255,255,255,0.6)",
             lineHeight: 1.6, margin: 0, maxWidth: "380px",
           }}>
             Professional tools, cloud collaboration, and AI-powered workflows in a single browser tab.
@@ -203,7 +193,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
           <h2 style={{ fontSize: "28px", fontWeight: 700, color: "white", margin: "0 0 6px 0" }}>
             Create your account
           </h2>
-          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: "0 0 32px 0" }}>
+          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.6)", margin: "0 0 32px 0" }}>
             Start editing for free
           </p>
 
@@ -235,7 +225,11 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
                 type="text" 
                 placeholder="Enter your username" 
                 value={username}
-                onChange={(e) => { setUsername(e.target.value); clearFieldError('username'); }}
+                onChange={(e) => { 
+                  const sanitized = sanitizeUsername(e.target.value);
+                  setUsername(sanitized);
+                  clearFieldError('username');
+                }}
                 autoComplete="username"
                 required
                 minLength={3}
@@ -344,26 +338,9 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
               <span id="password-requirements" style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>
                 Min {PASSWORD_REQUIREMENTS.minLength} chars, uppercase, lowercase, number, special character
               </span>
-              {/* Strength bar */}
-              {password && (
-                <div id="password-strength" aria-live="polite">
-                  <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} style={{
-                        flex: 1, height: "3px", borderRadius: "2px",
-                        background: strength.segments >= i ? strength.color : "rgba(255,255,255,0.06)",
-                        transition: "all 0.3s ease",
-                      }} />
-                    ))}
-                  </div>
-                  <span style={{ fontSize: "11px", color: strength.color, marginTop: "4px", display: "block" }}>
-                    {strength.label}
-                    {strength.error && !strength.isValid && (
-                      <span style={{ display: "block", marginTop: "2px" }}>{strength.error}</span>
-                    )}
-                  </span>
-                </div>
-              )}
+              <div id="password-strength">
+                <PasswordStrengthBar password={password} />
+              </div>
               {fieldErrors.password && (
                 <span style={{ fontSize: "12px", color: "#ef4444" }} role="alert">
                   {fieldErrors.password}
@@ -432,7 +409,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
           {/* Divider */}
           <div style={{ display: "flex", alignItems: "center", gap: "16px", margin: "28px 0" }}>
             <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
-            <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.3)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px" }}>or</span>
+            <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.5)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "2px" }}>or</span>
             <div style={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.06)" }} />
           </div>
 
@@ -458,7 +435,7 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
           </button>
 
           {/* Footer */}
-          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: "14px", margin: "24px 0 0 0" }}>
+          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.6)", fontSize: "14px", margin: "24px 0 0 0" }}>
             Already have an account?
             <a href="#" onClick={(e) => { e.preventDefault(); onNavigateToLogin?.(); }} style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
               Sign in
@@ -467,15 +444,8 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
         </div>
       </div>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "6px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 2, background: "#75AADB" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 2, background: "#75AADB" }} />
-      </div>
-    </div>
+      <BotswanaStripe />
+    </main>
   );
 };
 
@@ -495,8 +465,10 @@ const inputStyle = {
   outline: "none", transition: "all 0.2s ease", boxSizing: "border-box",
 };
 const eyeBtnStyle = {
-  position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
+  position: "absolute", right: "6px", top: "50%", transform: "translateY(-50%)",
   background: "none", border: "none", cursor: "pointer", color: "rgba(255,255,255,0.3)",
+  padding: "8px", minWidth: "44px", minHeight: "44px",
+  display: "flex", alignItems: "center", justifyContent: "center",
 };
 const btnPrimary = {
   width: "100%", background: "#75AADB", color: "#0a0a0a", fontWeight: 700, fontSize: "16px",

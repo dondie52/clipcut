@@ -4,6 +4,8 @@ import { useAuth } from "../supabase/AuthContext";
 import { listProjects as listCloudProjects, deleteProject as deleteCloudProject } from "../services/projectService";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
+import { sanitizeSearchQuery } from "../utils/validation";
+import { getUserFriendlyMessage } from "../utils/errorHandling";
 
 /* ========== CSS ========== */
 const DASH_CSS = `
@@ -47,6 +49,7 @@ const DASH_CSS = `
     border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 500;
     color: rgba(255,255,255,0.55); transition: all 0.15s ease;
     border: none; background: none; width: 100%; text-align: left;
+    min-height: 44px;
   }
   .nav-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.8); }
   .nav-item.active {
@@ -56,12 +59,12 @@ const DASH_CSS = `
   .nav-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 8px 14px; }
 
   /* Main area */
-  .dash-main {
+  main.dash-main {
     flex: 1; overflow-y: auto; overflow-x: hidden;
     scrollbar-width: thin; scrollbar-color: #1e293b transparent;
   }
-  .dash-main::-webkit-scrollbar { width: 6px; }
-  .dash-main::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  main.dash-main::-webkit-scrollbar { width: 6px; }
+  main.dash-main::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
 
   /* Hero banner */
   .hero-banner {
@@ -171,6 +174,7 @@ const DASH_CSS = `
     border-radius: 7px; background: rgba(26,35,50,0.5); border: 1px solid rgba(255,255,255,0.08);
     color: rgba(255,255,255,0.6); font-size: 12px; font-weight: 500; cursor: pointer;
     font-family: inherit; transition: all 0.12s ease;
+    min-height: 36px;
   }
   .toolbar-btn:hover { background: rgba(26,35,50,0.8); color: rgba(255,255,255,0.85); }
   .toolbar-btn .material-symbols-outlined { font-size: 16px; }
@@ -335,30 +339,33 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   // Load projects from cloud or localStorage
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
+    setLoadError(null);
     try {
       // Try to load from cloud if user is authenticated
       const cloudProjects = await listCloudProjects(user?.id);
-      
+
       // Format cloud projects
       const formattedProjects = cloudProjects.map(p => ({
         id: p.id,
         name: p.name,
         thumbnail: p.thumbnail_url,
-        duration: p.duration_seconds > 0 
+        duration: p.duration_seconds > 0
           ? `${Math.floor(p.duration_seconds / 60)}:${String(Math.floor(p.duration_seconds % 60)).padStart(2, '0')}`
           : '0:00',
         resolution: p.resolution || '1080p',
         savedAt: p.updated_at || p.created_at,
         isCloud: !p._source || p._source !== 'localStorage',
       }));
-      
+
       setProjects(formattedProjects);
     } catch (e) {
       logger.error('Failed to load projects', { error: e });
+      setLoadError(getUserFriendlyMessage(e, 'project'));
       setProjects([]);
     } finally {
       setIsLoading(false);
@@ -418,11 +425,16 @@ const Dashboard = () => {
 
   const handleToolClick = useCallback((tool) => {
     trackEvent(analyticsEvents.dashboardToolSelect, { tool: tool.icon });
+    // Long to Shorts has its own dedicated page
+    if (tool.label && tool.label.includes('shorts')) {
+      navigate("/long-to-shorts");
+      return;
+    }
     // Navigate to editor with tool flag
-    navigate("/editor", { 
-      state: { 
+    navigate("/editor", {
+      state: {
         tool: tool.icon,
-      } 
+      }
     });
   }, [navigate]);
 
@@ -435,13 +447,15 @@ const Dashboard = () => {
         setProjects(prev => prev.filter(p => p.id !== projectId));
       } catch (err) {
         logger.error('Failed to delete project', { error: err, projectId });
-        alert('Failed to delete project. Please try again.');
+        alert(getUserFriendlyMessage(err, 'project'));
       }
     }
   }, [user?.id]);
 
+  // Sanitize search query before filtering
+  const sanitizedQuery = sanitizeSearchQuery(searchQuery);
   const filteredProjects = projects.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
+    p.name.toLowerCase().includes(sanitizedQuery.toLowerCase())
   );
 
   return (
@@ -462,7 +476,7 @@ const Dashboard = () => {
       <Sidebar activeNav={activeNav} onNavChange={setActiveNav} />
 
       {/* Main content */}
-      <div className="dash-main">
+      <main className="dash-main">
         {/* ===== HERO BANNER ===== */}
         <div className="hero-banner" onClick={handleNewProject}>
           <div className="hero-inner">
@@ -528,6 +542,7 @@ const Dashboard = () => {
             <input
               type="text"
               placeholder="Search projects..."
+              aria-label="Search projects"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -543,8 +558,50 @@ const Dashboard = () => {
           </button>
         </div>
 
+        {/* Loading skeleton */}
+        {isLoading && !loadError && (
+          <div className="projects-grid">
+            {[1, 2, 3, 4].map(i => (
+              <div key={i} className="project-card" style={{ pointerEvents: 'none' }}>
+                <div className="project-thumb" style={{
+                  background: 'linear-gradient(90deg, #151b24 25%, #1a2332 50%, #151b24 75%)',
+                  backgroundSize: '200% 100%',
+                  animation: 'shimmer 1.5s ease-in-out infinite',
+                }} />
+                <div className="project-info">
+                  <div style={{ width: '70%', height: '13px', borderRadius: '4px', background: '#1a2332', marginBottom: '6px' }} />
+                  <div style={{ width: '40%', height: '11px', borderRadius: '4px', background: '#151b24' }} />
+                </div>
+              </div>
+            ))}
+            <style>{`@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }`}</style>
+          </div>
+        )}
+
+        {/* Load error banner */}
+        {loadError && (
+          <div style={{
+            margin: '0 24px 16px', padding: '14px 18px', borderRadius: '10px',
+            background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)',
+            display: 'flex', alignItems: 'center', gap: '12px',
+          }}>
+            <I i="cloud_off" s={22} c="#ef4444" />
+            <span style={{ flex: 1, fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>{loadError}</span>
+            <button
+              onClick={loadProjects}
+              style={{
+                background: 'rgba(117,170,219,0.15)', border: '1px solid rgba(117,170,219,0.3)',
+                borderRadius: '7px', padding: '6px 14px', color: '#75AADB', fontSize: '12px',
+                fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         {/* Projects grid */}
-        {filteredProjects.length > 0 ? (
+        {!isLoading && filteredProjects.length > 0 ? (
           <div className="projects-grid">
             {filteredProjects.map((project) => (
               <div
@@ -560,12 +617,13 @@ const Dashboard = () => {
                   )}
                   <button
                     onClick={(e) => handleDeleteProject(e, project.id)}
+                    aria-label={`Delete project ${project.name}`}
                     style={{
                       position: "absolute",
                       top: "8px",
                       right: "8px",
-                      width: "28px",
-                      height: "28px",
+                      width: "32px",
+                      height: "32px",
                       borderRadius: "50%",
                       background: "rgba(239,68,68,0.9)",
                       border: "none",
@@ -592,16 +650,16 @@ const Dashboard = () => {
               </div>
             ))}
           </div>
-        ) : (
+        ) : !isLoading && !loadError ? (
           <div className="empty-state">
             <I i="movie_edit" s={56} />
             <p>No projects yet. Click <strong>Create project</strong> to get started!</p>
           </div>
-        )}
-      </div>
+        ) : null}
+      </main>
 
       {/* Botswana flag stripe */}
-      <div className="bw-stripe">
+      <div className="bw-stripe" role="presentation">
         <div style={{ background: "#75AADB" }} />
         <div style={{ background: "white" }} />
         <div style={{ background: "#000" }} />

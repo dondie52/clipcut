@@ -267,38 +267,45 @@ export const Row = memo(({ l, v, vc = "#cbd5e1", editable = false, onChange }) =
 Row.displayName = 'Row';
 
 /* ========== FUNCTIONAL SLIDER COMPONENT ========== */
-export const Slider = memo(({ 
-  l, 
-  v, 
-  min = 0, 
-  max = 100, 
+export const Slider = memo(({
+  l,
+  v,
+  min = 0,
+  max = 100,
   step = 1,
   unit = '%',
   value: controlledValue,
   onChange,
+  onChangeCommit,
   onReset,
-  defaultValue = 50
+  defaultValue = 50,
+  disabled = false
 }) => {
   const [internalValue, setInternalValue] = useState(
     controlledValue !== undefined ? controlledValue : defaultValue
   );
-  
+
   const currentValue = controlledValue !== undefined ? controlledValue : internalValue;
   const displayValue = v !== undefined ? v : `${currentValue}${unit}`;
-  
+
   const handleChange = useCallback((e) => {
     const newValue = Number(e.target.value);
     setInternalValue(newValue);
     onChange?.(newValue);
   }, [onChange]);
-  
+
+  const handlePointerUp = useCallback(() => {
+    onChangeCommit?.(controlledValue !== undefined ? controlledValue : internalValue);
+  }, [onChangeCommit, controlledValue, internalValue]);
+
   const handleReset = useCallback((e) => {
     e.stopPropagation();
     setInternalValue(defaultValue);
     onChange?.(defaultValue);
+    onChangeCommit?.(defaultValue);
     onReset?.();
-  }, [defaultValue, onChange, onReset]);
-  
+  }, [defaultValue, onChange, onChangeCommit, onReset]);
+
   return (
     <div className="slider-row">
       <div style={{
@@ -311,7 +318,7 @@ export const Slider = memo(({
       }}>
         <span>{l}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ 
+          <span style={{
             color: currentValue !== defaultValue ? '#75aadb' : '#64748b',
             fontWeight: currentValue !== defaultValue ? 500 : 400
           }}>
@@ -338,18 +345,22 @@ export const Slider = memo(({
           )}
         </div>
       </div>
-      <input 
-        type="range" 
+      <input
+        type="range"
         min={min}
         max={max}
         step={step}
         value={currentValue}
         onChange={handleChange}
+        onPointerUp={handlePointerUp}
+        onKeyUp={handlePointerUp}
+        disabled={disabled}
         className="inspector-slider"
-        style={{ 
-          width: "100%", 
+        style={{
+          width: "100%",
           accentColor: "#75aadb",
-          cursor: 'pointer'
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.5 : 1
         }}
         aria-label={`${l}: ${displayValue}`}
         aria-valuemin={min}
@@ -533,7 +544,7 @@ export const ColorPicker = memo(({
   label, 
   value = '#ffffff', 
   onChange,
-  presets = ['#ffffff', '#000000', '#75aadb', '#ef4444', '#22c55e', '#eab308', '#a855f7', '#ec4899']
+  presets = ['#ffffff', '#000000', '#75aadb', '#ef4444', '#22c55e', '#eab308', '#5a8cbf', '#3b82f6']
 }) => {
   const [showPicker, setShowPicker] = useState(false);
   

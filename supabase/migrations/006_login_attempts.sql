@@ -29,6 +29,7 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Create trigger to automatically update updated_at
+DROP TRIGGER IF EXISTS update_login_attempts_updated_at ON login_attempts;
 CREATE TRIGGER update_login_attempts_updated_at
   BEFORE UPDATE ON login_attempts
   FOR EACH ROW

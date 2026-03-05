@@ -7,16 +7,18 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { updatePassword } from "../supabase/authService";
-import { 
-  validatePassword, 
-  validatePasswordMatch, 
-  sanitizeErrorMessage,
-  getPasswordStrengthInfo,
-  PASSWORD_REQUIREMENTS 
+import { getUserFriendlyMessage } from "../utils/errorHandling";
+import {
+  validatePassword,
+  validatePasswordMatch,
+  PASSWORD_REQUIREMENTS,
+  sanitizeUrlParam
 } from "../utils/validation";
 import { createRateLimiter } from "../utils/rateLimiter";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { captureError, addBreadcrumb } from "../utils/errorTracking";
+import BotswanaStripe from "./shared/BotswanaStripe";
+import PasswordStrengthBar, { getStrength } from "./shared/PasswordStrengthBar";
 
 // Rate limiter: 3 password reset attempts per 10 minutes
 const resetRateLimiter = createRateLimiter(3, 600000);
@@ -35,27 +37,27 @@ const ResetPassword = () => {
 
   // Check if we have the required token/hash from the URL
   useEffect(() => {
-    const accessToken = searchParams.get("access_token");
-    const type = searchParams.get("type");
+    const accessTokenParam = searchParams.get("access_token");
+    const typeParam = searchParams.get("type");
     
-    if (!accessToken || type !== "recovery") {
+    // Validate and sanitize access_token (should be JWT format)
+    const accessTokenValidation = sanitizeUrlParam(accessTokenParam || '', { 
+      type: 'jwt',
+      maxLength: 1000 
+    });
+    
+    // Validate and sanitize type parameter (should be enum: "recovery")
+    const typeValidation = sanitizeUrlParam(typeParam || '', { 
+      type: 'enum',
+      allowedValues: ['recovery'],
+      maxLength: 50 
+    });
+    
+    if (!accessTokenValidation.valid || !typeValidation.valid) {
       setError("Invalid or missing reset token. Please request a new password reset link.");
     }
   }, [searchParams]);
 
-  // Password strength calculation
-  const getStrength = (pwd) => {
-    if (!pwd) return { segments: 0, color: "#333", label: "" };
-    const result = validatePassword(pwd);
-    const info = getPasswordStrengthInfo(result.strength);
-    return { 
-      segments: result.strength, 
-      color: info.color, 
-      label: info.label,
-      isValid: result.valid,
-      error: result.error
-    };
-  };
   const strength = getStrength(password);
 
   const handleSubmit = async (event) => {
@@ -100,7 +102,7 @@ const ResetPassword = () => {
       addBreadcrumb({ category: 'auth', message: 'Password reset successful', level: 'info' });
       setTimeout(() => navigate("/login", { replace: true }), 2000);
     } catch (err) {
-      const errorMsg = sanitizeErrorMessage(err, "Failed to reset password. The link may have expired.");
+      const errorMsg = getUserFriendlyMessage(err, 'auth');
       setError(errorMsg);
       trackEvent('password_reset_complete_failure', { reason: 'auth_error' });
       captureError(err, { 
@@ -220,26 +222,9 @@ const ResetPassword = () => {
             <span id="password-requirements" style={{ fontSize: "11px", color: "rgba(255,255,255,0.4)" }}>
               Min {PASSWORD_REQUIREMENTS.minLength} chars, uppercase, lowercase, number, special character
             </span>
-            {/* Strength bar */}
-            {password && (
-              <div id="password-strength" aria-live="polite">
-                <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} style={{
-                      flex: 1, height: "3px", borderRadius: "2px",
-                      background: strength.segments >= i ? strength.color : "rgba(255,255,255,0.06)",
-                      transition: "all 0.3s ease",
-                    }} />
-                  ))}
-                </div>
-                <span style={{ fontSize: "11px", color: strength.color, marginTop: "4px", display: "block" }}>
-                  {strength.label}
-                  {strength.error && !strength.isValid && (
-                    <span style={{ display: "block", marginTop: "2px" }}>{strength.error}</span>
-                  )}
-                </span>
-              </div>
-            )}
+            <div id="password-strength">
+              <PasswordStrengthBar password={password} />
+            </div>
           </div>
 
           {/* Confirm Password */}
@@ -301,14 +286,7 @@ const ResetPassword = () => {
         </p>
       </div>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "6px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 2, background: "#75AADB" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 2, background: "#75AADB" }} />
-      </div>
+      <BotswanaStripe />
     </div>
   );
 };

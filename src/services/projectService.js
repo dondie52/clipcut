@@ -7,6 +7,29 @@
 import { supabase, isSupabaseConfigured } from "../supabase/supabaseClient";
 import { uploadFile, compressImage } from "../utils/fileUpload";
 import { trackAPIRequest, trackFileUpload, METRIC_TYPES } from "../utils/performance";
+import { sanitizeTextInput, sanitizeFileName } from "../utils/validation";
+import { retryWithBackoff, getUserFriendlyMessage } from "../utils/errorHandling";
+import { logger } from "../utils/logger";
+import { createRateLimiter } from "../utils/rateLimiter";
+
+/**
+ * Rate limiters for API operations
+ */
+const apiRateLimiter = createRateLimiter(30, 60000); // 30 API calls per minute
+const uploadRateLimiter = createRateLimiter(10, 60000); // 10 uploads per minute
+
+/**
+ * Check rate limiter and throw if exceeded
+ * @param {Object} limiter - Rate limiter instance
+ * @param {string} operation - Operation name for error message
+ */
+function checkRateLimit(limiter, operation) {
+  if (!limiter.canAttempt()) {
+    const waitTime = Math.ceil(limiter.getTimeUntilReset() / 1000);
+    throw new Error(`Too many ${operation} requests. Please wait ${waitTime} seconds before trying again.`);
+  }
+  limiter.recordAttempt();
+}
 
 /**
  * File upload security constants
@@ -41,7 +64,9 @@ function isAllowedMediaType(mimeType) {
  * @returns {string} Unique filename
  */
 function generateUniqueFilename(originalName) {
-  const ext = originalName.split(".").pop();
+  // Sanitize the original filename first
+  const sanitized = sanitizeFileName(originalName);
+  const ext = sanitized.split(".").pop();
   const timestamp = Date.now();
   const random = Math.random().toString(36).substring(2, 8);
   return `${timestamp}_${random}.${ext}`;
@@ -66,11 +91,16 @@ export async function saveProject(userId, projectData) {
     return saveProjectToLocalStorage(projectData);
   }
 
+  checkRateLimit(apiRateLimiter, 'save');
+
   const { name, id, clips, duration, resolution, thumbnail } = projectData;
+  
+  // Sanitize project name before saving (max 100 chars, remove HTML, trim)
+  const sanitizedName = sanitizeTextInput(name || "Untitled Project", { maxLength: 100 });
 
   // Prepare project data for database (without large binary data)
   const dbProjectData = {
-    name,
+    name: sanitizedName,
     project_data: {
       clips: clips.map((c) => ({
         id: c.id,
@@ -168,18 +198,29 @@ export async function loadProject(projectId, userId) {
     return loadProjectFromLocalStorage(projectId);
   }
 
-  const data = await trackAPIRequest(
-    'projects/load',
-    async () => {
-      const result = await supabase
-        .from("projects")
-        .select("*")
-        .eq("id", projectId)
-        .single();
-      if (result.error) throw result.error;
-      return result.data;
-    },
-    { projectId, operation: 'load' }
+  checkRateLimit(apiRateLimiter, 'load');
+
+  const data = await retryWithBackoff(
+    () => trackAPIRequest(
+      'projects/load',
+      async () => {
+        const result = await supabase
+          .from("projects")
+          .select("*")
+          .eq("id", projectId)
+          .single();
+        if (result.error) throw result.error;
+        return result.data;
+      },
+      { projectId, operation: 'load' }
+    ),
+    {
+      maxRetries: 2,
+      baseDelay: 1000,
+      onRetry: ({ attempt }) => {
+        logger.warn(`Retrying loadProject (attempt ${attempt})`);
+      },
+    }
   );
 
   // Verify ownership or public access
@@ -206,21 +247,32 @@ export async function listProjects(userId, options = {}) {
     return listProjectsFromLocalStorage();
   }
 
+  checkRateLimit(apiRateLimiter, 'list');
+
   const { limit = 50, offset = 0, orderBy = "updated_at", ascending = false } = options;
 
-  const data = await trackAPIRequest(
-    'projects/list',
-    async () => {
-      const result = await supabase
-        .from("projects")
-        .select("id, name, thumbnail_url, duration_seconds, resolution, created_at, updated_at")
-        .eq("user_id", userId)
-        .order(orderBy, { ascending })
-        .range(offset, offset + limit - 1);
-      if (result.error) throw result.error;
-      return result.data || [];
-    },
-    { operation: 'list', limit, offset }
+  const data = await retryWithBackoff(
+    () => trackAPIRequest(
+      'projects/list',
+      async () => {
+        const result = await supabase
+          .from("projects")
+          .select("id, name, thumbnail_url, duration_seconds, resolution, created_at, updated_at")
+          .eq("user_id", userId)
+          .order(orderBy, { ascending })
+          .range(offset, offset + limit - 1);
+        if (result.error) throw result.error;
+        return result.data || [];
+      },
+      { operation: 'list', limit, offset }
+    ),
+    {
+      maxRetries: 2,
+      baseDelay: 1000,
+      onRetry: ({ attempt, delay }) => {
+        logger.warn(`Retrying listProjects (attempt ${attempt}, waiting ${Math.round(delay)}ms)`);
+      },
+    }
   );
 
   return data;
@@ -237,6 +289,8 @@ export async function deleteProject(projectId, userId) {
   if (!isSupabaseConfigured()) {
     return deleteProjectFromLocalStorage(projectId);
   }
+
+  checkRateLimit(apiRateLimiter, 'delete');
 
   // First get the project to find associated files
   const { data: project, error: fetchError } = await supabase
@@ -327,13 +381,16 @@ export async function uploadProjectMedia(userId, projectId, file, options = {}) 
   // Support legacy API where options was just onProgress function
   const progressCallback = typeof options === 'function' ? options : onProgress;
 
+  // Rate limit file uploads
+  checkRateLimit(uploadRateLimiter, 'upload');
+
   // Validate file
   if (file.size > UPLOAD_LIMITS.MAX_FILE_SIZE) {
-    throw new Error(`File too large. Maximum size is ${UPLOAD_LIMITS.MAX_FILE_SIZE / (1024 * 1024)}MB`);
+    throw new Error(`This file exceeds the maximum upload size (${UPLOAD_LIMITS.MAX_FILE_SIZE / (1024 * 1024)} MB). Try compressing or trimming it first.`);
   }
 
   if (!isAllowedMediaType(file.type)) {
-    throw new Error("File type not allowed");
+    throw new Error("This file format is not supported. Accepted formats: MP4, WebM, MOV, AVI, MP3, WAV, JPEG, PNG.");
   }
 
   // Compress images before upload if enabled
@@ -355,26 +412,36 @@ export async function uploadProjectMedia(userId, projectId, file, options = {}) 
   const filename = generateUniqueFilename(file.name);
   const storagePath = `${userId}/${projectId}/${filename}`;
 
-  // Use chunked upload utility for large files with progress tracking
+  // Use chunked upload utility for large files with progress tracking and retry
   try {
-    await trackFileUpload(
-      filename,
-      fileToUpload.size,
-      async () => {
-        await uploadFile(fileToUpload, "projects", storagePath, {
-          onProgress: progressCallback,
-          signal,
-          resumable: true,
-        });
-      },
-      { projectId, userId, operation: 'media' }
+    await retryWithBackoff(
+      () => trackFileUpload(
+        filename,
+        fileToUpload.size,
+        async () => {
+          await uploadFile(fileToUpload, "projects", storagePath, {
+            onProgress: progressCallback,
+            signal,
+            resumable: true,
+          });
+        },
+        { projectId, userId, operation: 'media' }
+      ),
+      {
+        maxRetries: 2,
+        baseDelay: 2000,
+        signal,
+        onRetry: ({ attempt, delay }) => {
+          logger.warn(`Retrying media upload (attempt ${attempt}, waiting ${Math.round(delay)}ms)`);
+          progressCallback(0); // Reset progress for retry
+        },
+      }
     );
   } catch (error) {
-    // Handle abort separately
     if (error.name === 'AbortError') {
       throw error;
     }
-    throw new Error(`Upload failed: ${error.message}`);
+    throw new Error(getUserFriendlyMessage(error, 'upload'));
   }
 
   return storagePath;
@@ -439,9 +506,11 @@ async function uploadProjectThumbnail(userId, projectId, thumbnail) {
  */
 function saveProjectToLocalStorage(projectData) {
   const id = projectData.id || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  // Sanitize project name before saving to localStorage
+  const sanitizedName = sanitizeTextInput(projectData.name || "Untitled Project", { maxLength: 100 });
   const project = {
     id,
-    name: projectData.name,
+    name: sanitizedName,
     project_data: {
       clips: projectData.clips.map((c) => ({
         id: c.id,

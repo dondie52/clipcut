@@ -5,6 +5,8 @@ import { validateLogin, sanitizeErrorMessage, validateEmail } from "../utils/val
 import { createRateLimiter } from "../utils/rateLimiter";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { captureError, addBreadcrumb } from "../utils/errorTracking";
+import { getUserFriendlyMessage, isNetworkError } from "../utils/errorHandling";
+import BotswanaStripe from "./shared/BotswanaStripe";
 
 // Rate limiter: 5 attempts per minute for login
 const loginRateLimiter = createRateLimiter(5, 60000);
@@ -75,8 +77,11 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
       return;
     }
 
+    // Sanitize email: trim and lowercase before validation
+    const sanitizedEmail = email.trim().toLowerCase();
+
     // Client-side validation
-    const validation = validateLogin({ email: email.trim(), password });
+    const validation = validateLogin({ email: sanitizedEmail, password });
     if (!validation.valid) {
       setFieldErrors(validation.errors);
       trackEvent(analyticsEvents.loginFailure, { reason: 'validation_error' });
@@ -87,18 +92,19 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     loginRateLimiter.recordAttempt();
     
     try {
-      await signIn({ email: email.trim().toLowerCase(), password });
+      await signIn({ email: sanitizedEmail, password });
       trackEvent(analyticsEvents.loginSuccess, { method: 'email' });
       addBreadcrumb({ category: 'auth', message: 'Login successful', level: 'info' });
       navigate("/dashboard");
     } catch (err) {
-      // Use sanitized error message to prevent information leakage
-      const errorMsg = sanitizeErrorMessage(err, "Invalid email or password");
+      const errorMsg = getUserFriendlyMessage(err, 'auth');
       setError(errorMsg);
-      trackEvent(analyticsEvents.loginFailure, { reason: 'auth_error' });
-      captureError(err, { 
+      trackEvent(analyticsEvents.loginFailure, {
+        reason: isNetworkError(err) ? 'network_error' : 'auth_error',
+      });
+      captureError(err, {
         tags: { type: 'login_error' },
-        extra: { email: email.trim().toLowerCase() }
+        extra: { email: sanitizedEmail }
       });
     } finally {
       setLoading(false);
@@ -110,8 +116,11 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     setFieldErrors({});
     setResetSuccess(false);
 
+    // Sanitize email: trim and lowercase before validation
+    const sanitizedEmail = email.trim().toLowerCase();
+
     // Validate email
-    const emailValidation = validateEmail(email.trim());
+    const emailValidation = validateEmail(sanitizedEmail);
     if (!emailValidation.valid) {
       setFieldErrors({ email: emailValidation.error });
       return;
@@ -130,7 +139,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
     trackEvent(analyticsEvents.passwordResetRequested, { success: true });
 
     try {
-      await resetPassword(email.trim().toLowerCase());
+      await resetPassword(sanitizedEmail);
       setResetSuccess(true);
       addBreadcrumb({ category: 'auth', message: 'Password reset email sent', level: 'info' });
     } catch (err) {
@@ -139,7 +148,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
       // Log error for debugging but don't expose to user
       captureError(err, { 
         tags: { type: 'password_reset_error' },
-        extra: { email: email.trim().toLowerCase() }
+        extra: { email: sanitizedEmail }
       });
     } finally {
       setResetLoading(false);
@@ -148,7 +157,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
 
 
   return (
-    <div style={{
+    <main style={{
       width: "100vw", height: "100vh", display: "flex",
       fontFamily: "'Spline Sans', sans-serif", overflow: "hidden", position: "relative",
     }}>
@@ -207,7 +216,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
             Tools for the Next Generation of{" "}<span style={{ color: "#75AADB" }}>Botswana Creators</span>
           </h1>
 
-          <p style={{ fontSize: "17px", color: "rgba(255,255,255,0.45)", lineHeight: 1.6, margin: 0, maxWidth: "380px" }}>
+          <p style={{ fontSize: "17px", color: "rgba(255,255,255,0.6)", lineHeight: 1.6, margin: 0, maxWidth: "380px" }}>
             Professional video editing tools with cloud collaboration, available across web, desktop, and mobile platforms.
           </p>
         </div>
@@ -248,7 +257,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
           <h2 style={{ fontSize: "28px", fontWeight: 700, color: "white", margin: "0 0 6px 0" }}>
             Welcome back
           </h2>
-          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.4)", margin: "0 0 32px 0" }}>
+          <p style={{ fontSize: "14px", color: "rgba(255,255,255,0.6)", margin: "0 0 32px 0" }}>
             Sign in to continue editing
           </p>
 
@@ -347,13 +356,15 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
                     }
                   }}
                 />
-                <button 
-                  type="button" 
-                  onClick={() => setShowPassword(!showPassword)} 
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   style={{
-                    position: "absolute", right: "14px", top: "50%", transform: "translateY(-50%)",
+                    position: "absolute", right: "6px", top: "50%", transform: "translateY(-50%)",
                     background: "none", border: "none", cursor: "pointer", color: showPassword ? "#75AADB" : "rgba(255,255,255,0.3)",
+                    padding: "8px", minWidth: "44px", minHeight: "44px",
+                    display: "flex", alignItems: "center", justifyContent: "center",
                   }}
                 >
                   <span className="material-symbols-outlined" style={{ fontSize: "20px" }}>{showPassword ? "visibility_off" : "visibility"}</span>
@@ -396,7 +407,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
           </form>
 
 
-          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.4)", fontSize: "14px", margin: "24px 0 0 0" }}>
+          <p style={{ textAlign: "center", color: "rgba(255,255,255,0.6)", fontSize: "14px", margin: "24px 0 0 0" }}>
             Don't have an account?
             <a href="#" onClick={(e) => { e.preventDefault(); onNavigateToRegister?.(); }}
               style={{ color: "#75AADB", fontWeight: 700, textDecoration: "none", marginLeft: "6px" }}>
@@ -406,15 +417,8 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
         </div>
       </div>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "6px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 2, background: "#75AADB" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 2, background: "#75AADB" }} />
-      </div>
-    </div>
+      <BotswanaStripe />
+    </main>
   );
 };
 

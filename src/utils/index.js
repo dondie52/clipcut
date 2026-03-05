@@ -61,10 +61,7 @@ export {
   trackProjectAction,
   trackFeatureUsage,
   trackError,
-  setUserProperties,
-  trackTiming,
   trackOnboardingStep,
-  trackSearch,
   // Core Web Vitals
   initCoreWebVitalsTracking,
   getAnalyticsBuffer,
@@ -72,3 +69,28 @@ export {
   // Custom event tracking
   analyticsEvents,
 } from './analytics';
+
+export {
+  isNetworkError,
+  isAuthError,
+  isFFmpegError,
+  isUploadError,
+  isRetryable,
+  getUserFriendlyMessage,
+  retryWithBackoff,
+  onNetworkStatusChange,
+} from './errorHandling';
+
+export {
+  validateFileType,
+  validateFileSize,
+  validateFile,
+  validateFiles,
+  isMediaFile,
+  getAcceptString,
+  formatFileSize,
+  getAllAllowedMimeTypes,
+  getAllAllowedExtensions,
+  FILE_TYPES,
+  SIZE_LIMITS,
+} from './fileValidation';

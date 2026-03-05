@@ -58,6 +58,31 @@ export function validateEmail(email) {
 }
 
 /**
+ * Sanitize username input
+ * Trims whitespace, removes invalid characters, and limits length
+ * @param {string} username - Username to sanitize
+ * @returns {string} Sanitized username
+ */
+export function sanitizeUsername(username) {
+  if (!username || typeof username !== 'string') {
+    return '';
+  }
+
+  // Trim whitespace
+  let sanitized = username.trim();
+
+  // Remove any characters that aren't alphanumeric or underscore
+  sanitized = sanitized.replace(/[^a-zA-Z0-9_]/g, '');
+
+  // Limit length
+  if (sanitized.length > USERNAME_REQUIREMENTS.maxLength) {
+    sanitized = sanitized.substring(0, USERNAME_REQUIREMENTS.maxLength);
+  }
+
+  return sanitized;
+}
+
+/**
  * Validate username
  * @param {string} username - Username to validate
  * @returns {{ valid: boolean, error?: string }}
@@ -336,4 +361,211 @@ export function validateLogin({ email, password }) {
     valid: Object.keys(errors).length === 0,
     errors,
   };
+}
+
+/**
+ * Sanitize text input for general text fields (project names, display names, bios)
+ * Removes control characters, limits length, trims whitespace, and preserves allowed characters
+ * @param {string} input - Text input to sanitize
+ * @param {Object} [options] - Sanitization options
+ * @param {number} [options.maxLength=1000] - Maximum length allowed
+ * @param {boolean} [options.allowNewlines=false] - Whether to allow newline characters
+ * @returns {string} Sanitized text
+ */
+export function sanitizeTextInput(input, options = {}) {
+  if (!input || typeof input !== 'string') {
+    return '';
+  }
+
+  const {
+    maxLength = 100,
+    allowNewlines = false,
+  } = options;
+
+  // Trim whitespace
+  let sanitized = input.trim();
+
+  // Remove control characters (except newlines if allowed)
+  // Control characters are: \x00-\x1F and \x7F (except \n, \r, \t if needed)
+  if (allowNewlines) {
+    // Keep newlines (\n) and carriage returns (\r), remove other control chars
+    sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  } else {
+    // Remove all control characters including newlines
+    sanitized = sanitized.replace(/[\x00-\x1F\x7F]/g, '');
+  }
+
+  // Remove HTML tags to prevent XSS
+  sanitized = sanitized.replace(/<[^>]*>/g, '');
+
+  // Limit length
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength);
+  }
+
+  // Trim again after processing
+  sanitized = sanitized.trim();
+
+  return sanitized;
+}
+
+/**
+ * Sanitize filename for safe storage
+ * Prevents path traversal attacks and removes dangerous characters
+ * @param {string} fileName - Original filename
+ * @returns {string} Sanitized filename
+ */
+export function sanitizeFileName(fileName) {
+  if (!fileName || typeof fileName !== 'string') {
+    return 'file';
+  }
+
+  // Remove path traversal attempts (../, ..\, etc.)
+  let sanitized = fileName
+    .replace(/\.\./g, '') // Remove .. sequences
+    .replace(/[\/\\]/g, '_') // Replace path separators with underscore
+    .replace(/^\.+|\.+$/g, ''); // Remove leading/trailing dots
+
+  // Remove or replace special characters, keep only alphanumeric, dots, hyphens, underscores
+  sanitized = sanitized.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+  // Normalize multiple consecutive dots to single dot
+  sanitized = sanitized.replace(/\.{2,}/g, '.');
+
+  // Normalize multiple consecutive underscores/hyphens
+  sanitized = sanitized.replace(/[_-]{2,}/g, '_');
+
+  // Limit length (max 255 chars for filesystem compatibility)
+  if (sanitized.length > 255) {
+    // Preserve extension if present
+    const lastDot = sanitized.lastIndexOf('.');
+    if (lastDot > 0 && lastDot < sanitized.length - 1) {
+      const name = sanitized.substring(0, lastDot);
+      const ext = sanitized.substring(lastDot);
+      const maxNameLength = 255 - ext.length;
+      sanitized = name.substring(0, maxNameLength) + ext;
+    } else {
+      sanitized = sanitized.substring(0, 255);
+    }
+  }
+
+  // Ensure filename is not empty
+  if (sanitized.length === 0 || sanitized === '.') {
+    sanitized = 'file';
+  }
+
+  return sanitized;
+}
+
+/**
+ * Sanitize search query input
+ * Removes HTML tags, limits length, escapes regex special characters, and trims whitespace
+ * @param {string} query - Search query to sanitize
+ * @param {Object} [options] - Sanitization options
+ * @param {number} [options.maxLength=200] - Maximum length allowed
+ * @param {boolean} [options.escapeRegex=false] - Whether to escape regex special characters
+ * @returns {string} Sanitized search query
+ */
+export function sanitizeSearchQuery(query, options = {}) {
+  if (!query || typeof query !== 'string') {
+    return '';
+  }
+
+  const {
+    maxLength = 200,
+    escapeRegex = false,
+  } = options;
+
+  // Trim whitespace
+  let sanitized = query.trim();
+
+  // Remove HTML tags to prevent XSS
+  sanitized = sanitized.replace(/<[^>]*>/g, '');
+
+  // Remove control characters
+  sanitized = sanitized.replace(/[\x00-\x1F\x7F]/g, '');
+
+  // Escape regex special characters if needed
+  if (escapeRegex) {
+    // Escape special regex characters: . * + ? ^ $ { } [ ] \ | ( )
+    sanitized = sanitized.replace(/[.*+?^${}()[\]\\|]/g, '\\$&');
+  }
+
+  // Limit length
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength);
+  }
+
+  // Trim again after processing
+  sanitized = sanitized.trim();
+
+  return sanitized;
+}
+
+/**
+ * UUID v4 validation regex
+ */
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * JWT token validation regex (simplified - checks basic structure)
+ */
+const JWT_REGEX = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/;
+
+/**
+ * Sanitize URL parameter for safe use
+ * Validates format (UUID, enum values, etc.), removes dangerous characters, and limits length
+ * @param {string} param - URL parameter value to sanitize
+ * @param {Object} [options] - Sanitization options
+ * @param {string} [options.type='string'] - Expected type: 'uuid', 'jwt', 'enum', or 'string'
+ * @param {string[]} [options.allowedValues] - Allowed enum values (required if type is 'enum')
+ * @param {number} [options.maxLength=500] - Maximum length allowed
+ * @returns {{ valid: boolean, sanitized: string, error?: string }}
+ */
+export function sanitizeUrlParam(param, options = {}) {
+  if (!param || typeof param !== 'string') {
+    return { valid: false, sanitized: '', error: 'Parameter is required' };
+  }
+
+  const {
+    type = 'string',
+    allowedValues = [],
+    maxLength = 500,
+  } = options;
+
+  // Trim whitespace
+  let sanitized = param.trim();
+
+  // Remove control characters and dangerous characters
+  sanitized = sanitized.replace(/[\x00-\x1F\x7F<>"']/g, '');
+
+  // Limit length
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength);
+  }
+
+  // Validate based on type
+  if (type === 'uuid') {
+    if (!UUID_REGEX.test(sanitized)) {
+      return { valid: false, sanitized: '', error: 'Invalid UUID format' };
+    }
+  } else if (type === 'jwt') {
+    if (!JWT_REGEX.test(sanitized)) {
+      return { valid: false, sanitized: '', error: 'Invalid JWT format' };
+    }
+  } else if (type === 'enum') {
+    if (allowedValues.length === 0) {
+      return { valid: false, sanitized: '', error: 'Allowed values must be specified for enum type' };
+    }
+    if (!allowedValues.includes(sanitized)) {
+      return { valid: false, sanitized: '', error: `Value must be one of: ${allowedValues.join(', ')}` };
+    }
+  }
+
+  // Additional validation: ensure no path traversal attempts
+  if (sanitized.includes('..') || sanitized.includes('../') || sanitized.includes('..\\')) {
+    return { valid: false, sanitized: '', error: 'Invalid parameter: path traversal detected' };
+  }
+
+  return { valid: true, sanitized };
 }

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
+import BotswanaStripe from "./shared/BotswanaStripe";
 
-const OnboardingStep2 = ({ onContinue, onSkip }) => {
+const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
   const [skillLevel, setSkillLevel] = useState("intermediate");
   const [purposes, setPurposes] = useState(["youtube", "business"]);
 
@@ -56,7 +57,7 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
             <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.6)" }}>Step 2 of 3</span>
           </div>
           <div style={{ height: "6px", width: "100%", background: "rgba(255,255,255,0.1)", borderRadius: "99px", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: "100%", background: "#75AADB", borderRadius: "99px", transition: "width 0.5s ease" }} />
+            <div style={{ height: "100%", width: "66.66%", background: "#75AADB", borderRadius: "99px", transition: "width 0.5s ease" }} />
           </div>
         </div>
       </header>
@@ -82,11 +83,11 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
             <h3 style={{ fontSize: "20px", fontWeight: 700, color: "rgba(255,255,255,0.9)", margin: "0 0 20px 0" }}>
               Your skill level
             </h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }} role="radiogroup" aria-label="Your skill level">
               {skills.map((s) => {
                 const selected = skillLevel === s.id;
                 return (
-                  <div key={s.id} onClick={() => setSkillLevel(s.id)} style={{
+                  <div key={s.id} role="radio" aria-checked={selected} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSkillLevel(s.id); } }} onClick={() => setSkillLevel(s.id)} style={{
                     border: selected ? "2px solid #75AADB" : "1px solid rgba(255,255,255,0.1)",
                     background: selected ? "rgba(117,170,219,0.1)" : "#1a2332",
                     boxShadow: selected ? "0 0 20px rgba(117,170,219,0.15)" : "none",
@@ -119,7 +120,7 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
               {purposeOptions.map((p) => {
                 const selected = purposes.includes(p.id);
                 return (
-                  <button key={p.id} onClick={() => togglePurpose(p.id)} style={{
+                  <button key={p.id} aria-pressed={selected} onClick={() => togglePurpose(p.id)} style={{
                     padding: "16px 24px", borderRadius: "8px", cursor: "pointer",
                     fontSize: "16px", fontWeight: 600, transition: "all 0.2s ease",
                     border: selected ? "1px solid #75AADB" : "1px solid rgba(255,255,255,0.1)",
@@ -142,23 +143,19 @@ const OnboardingStep2 = ({ onContinue, onSkip }) => {
             }}
               onMouseEnter={(e) => e.target.style.background = "#8bbae3"}
               onMouseLeave={(e) => e.target.style.background = "#75AADB"}>
-              Complete Setup
+              Continue
             </button>
             <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2" }); onSkip?.(); }} style={{
-              color: "rgba(255,255,255,0.4)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
-            }}>Skip for now</a>
+              color: "rgba(255,255,255,0.6)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
+            }}>Skip this step</a>
+            <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2", action: "skip_all" }); onSkipAll?.(); }} style={{
+              color: "rgba(255,255,255,0.35)", fontSize: "13px", fontWeight: 400, textDecoration: "none",
+            }}>Skip onboarding</a>
           </div>
         </div>
       </main>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "4px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 1, background: "#75AADB" }} />
-        <div style={{ flex: 1, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 1, background: "white" }} />
-        <div style={{ flex: 1, background: "#75AADB" }} />
-      </div>
+      <BotswanaStripe height="4px" />
     </div>
   );
 };
