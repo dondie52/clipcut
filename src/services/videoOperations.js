@@ -531,6 +531,68 @@ export async function preloadVideoFrames(videoFile, frameCount = 10) {
 }
 
 /**
+ * Crop and trim a video segment to vertical 9:16 (1080x1920) for shorts
+ * If the source is already portrait, only trims without cropping.
+ * @param {File|Blob} inputFile - Input video file
+ * @param {number} startTime - Start time in seconds
+ * @param {number} duration - Duration in seconds
+ * @param {Function} onProgress - Progress callback
+ * @returns {Promise<Blob>} Vertical video as Blob
+ */
+export async function cropToVertical(inputFile, startTime, duration, onProgress = null) {
+  return trackVideoOperation(
+    'VIDEO_CROP_VERTICAL',
+    async () => {
+      await loadFFmpeg();
+
+      if (onProgress) setProgressCallback(onProgress);
+
+      const inputName = 'input_vertical.mp4';
+      const outputName = 'output_vertical.mp4';
+
+      try {
+        await writeFile(inputName, inputFile);
+
+        // Detect if video is already portrait
+        const info = await getVideoInfo(inputFile);
+        const isPortrait = info.height > info.width;
+
+        // Center crop to 9:16 then scale, or just scale if already portrait
+        const vf = isPortrait
+          ? 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2'
+          : 'crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920';
+
+        await exec([
+          '-ss', formatTime(startTime),
+          '-i', inputName,
+          '-t', formatTime(duration),
+          '-vf', vf,
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', '26',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-movflags', '+faststart',
+          '-threads', '0',
+          outputName
+        ]);
+
+        const data = await readFile(outputName);
+        return toBlob(data, 'video/mp4');
+      } finally {
+        clearProgressCallback();
+        await cleanup([inputName, outputName]);
+      }
+    },
+    {
+      startTime,
+      duration,
+      fileSize: inputFile.size,
+    }
+  );
+}
+
+/**
  * Convert video to a different format
  * @param {File|Blob} inputFile - Input video file
  * @param {string} format - Output format ('mp4', 'webm')

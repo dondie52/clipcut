@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
+import BotswanaStripe from "./shared/BotswanaStripe";
 
 const OnboardingStep3 = ({ onComplete, onSkip }) => {
   const [notifications, setNotifications] = useState({
@@ -82,11 +83,11 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
             <h3 style={{ fontSize: "20px", fontWeight: 700, color: "rgba(255,255,255,0.9)", margin: "0 0 20px 0" }}>
               Default export resolution
             </h3>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }} role="radiogroup" aria-label="Default export resolution">
               {resolutions.map((r) => {
                 const selected = defaultResolution === r.id;
                 return (
-                  <div key={r.id} onClick={() => { setDefaultResolution(r.id); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "set_resolution", resolution: r.id }); }} style={{
+                  <div key={r.id} role="radio" aria-checked={selected} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDefaultResolution(r.id); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "set_resolution", resolution: r.id }); } }} onClick={() => { setDefaultResolution(r.id); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "set_resolution", resolution: r.id }); }} style={{
                     border: selected ? "2px solid #75AADB" : "1px solid rgba(255,255,255,0.1)",
                     background: selected ? "rgba(117,170,219,0.1)" : "#1a2332",
                     boxShadow: selected ? "0 0 20px rgba(117,170,219,0.15)" : "none",
@@ -122,12 +123,17 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
                     <div style={{ fontSize: "16px", fontWeight: 600, color: "white", marginBottom: "4px" }}>{n.label}</div>
                     <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)" }}>{n.desc}</div>
                   </div>
-                  <div
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={notifications[n.key]}
+                    aria-label={n.label}
                     onClick={() => toggleNotification(n.key)}
                     style={{
                       width: "48px", height: "28px", borderRadius: "14px",
                       background: notifications[n.key] ? "#75AADB" : "rgba(255,255,255,0.2)",
                       cursor: "pointer", position: "relative", transition: "all 0.2s ease",
+                      border: "none", padding: "8px 0", boxSizing: "content-box",
                     }}
                   >
                     <div style={{
@@ -135,7 +141,7 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
                       width: "24px", height: "24px", borderRadius: "50%", background: "white",
                       transition: "all 0.2s ease", boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
                     }} />
-                  </div>
+                  </button>
                 </div>
               ))}
             </div>
@@ -152,12 +158,17 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
                 <div style={{ fontSize: "16px", fontWeight: 600, color: "white", marginBottom: "4px" }}>Auto-save projects</div>
                 <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.5)" }}>Automatically save your work to the cloud</div>
               </div>
-              <div
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoSave}
+                aria-label="Auto-save projects"
                 onClick={() => { setAutoSave(!autoSave); trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "toggle_autosave", enabled: !autoSave }); }}
                 style={{
                   width: "48px", height: "28px", borderRadius: "14px",
                   background: autoSave ? "#75AADB" : "rgba(255,255,255,0.2)",
                   cursor: "pointer", position: "relative", transition: "all 0.2s ease",
+                  border: "none", padding: "8px 0", boxSizing: "content-box",
                 }}
               >
                 <div style={{
@@ -165,36 +176,29 @@ const OnboardingStep3 = ({ onComplete, onSkip }) => {
                   width: "24px", height: "24px", borderRadius: "50%", background: "white",
                   transition: "all 0.2s ease", boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
                 }} />
-              </div>
+              </button>
             </div>
           </section>
 
           {/* Actions */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "20px", paddingTop: "16px" }}>
-            <button onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "3", action: "complete" }); onComplete?.(); }} style={{
+            <button onClick={() => { trackEvent(analyticsEvents.onboardingComplete, { step: "3" }); onComplete?.(); }} style={{
               width: "100%", maxWidth: "360px", background: "#75AADB", color: "#0a0a0a",
               fontWeight: 700, fontSize: "18px", padding: "16px", borderRadius: "8px",
               border: "none", cursor: "pointer", transition: "all 0.2s ease",
             }}
               onMouseEnter={(e) => e.target.style.background = "#8bbae3"}
               onMouseLeave={(e) => e.target.style.background = "#75AADB"}>
-              Continue
+              Get Started
             </button>
             <a href="#" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "3" }); onSkip?.(); }} style={{
-              color: "rgba(255,255,255,0.4)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
+              color: "rgba(255,255,255,0.6)", fontSize: "14px", fontWeight: 500, textDecoration: "none",
             }}>Skip for now</a>
           </div>
         </div>
       </main>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "4px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 1, background: "#75AADB" }} />
-        <div style={{ flex: 1, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 1, background: "white" }} />
-        <div style={{ flex: 1, background: "#75AADB" }} />
-      </div>
+      <BotswanaStripe height="4px" />
     </div>
   );
 };

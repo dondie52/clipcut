@@ -1,11 +1,17 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
+import { sanitizeTextInput } from "../utils/validation";
+import BotswanaStripe from "./shared/BotswanaStripe";
 
-const OnboardingStep1 = ({ onContinue, onSkip }) => {
+const OnboardingStep1 = ({ onContinue, onSkip, onSkipAll }) => {
   const [displayName, setDisplayName] = useState("");
   const [bio, setBio] = useState("");
   const [avatarPreview, setAvatarPreview] = useState(null);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    trackEvent(analyticsEvents.onboardingStart);
+  }, []);
 
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
@@ -25,42 +31,42 @@ const OnboardingStep1 = ({ onContinue, onSkip }) => {
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
 
-      {/* Header */}
+      {/* Header with progress */}
       <header style={{
-        padding: "24px 32px", display: "flex", alignItems: "center", gap: "8px",
-        position: "absolute", top: 0, left: 0, zIndex: 10,
+        width: "100%", borderBottom: "1px solid rgba(255,255,255,0.1)",
+        padding: "16px 24px", display: "flex", alignItems: "center", justifyContent: "space-between",
       }}>
-        <div style={{ position: "relative" }}>
-          <span className="material-symbols-outlined" style={{
-            fontSize: "28px", color: "#75AADB", fontVariationSettings: "'FILL' 1",
-          }}>movie</span>
-          <span className="material-symbols-outlined" style={{
-            position: "absolute", bottom: "-2px", right: "-4px", fontSize: "12px",
-            color: "white", background: "#0a0a0a", borderRadius: "50%", padding: "1px",
-          }}>content_cut</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ position: "relative" }}>
+            <span className="material-symbols-outlined" style={{
+              fontSize: "28px", color: "#75AADB", fontVariationSettings: "'FILL' 1",
+            }}>movie</span>
+            <span className="material-symbols-outlined" style={{
+              position: "absolute", bottom: "-2px", right: "-4px", fontSize: "12px",
+              color: "white", background: "#0a0a0a", borderRadius: "50%", padding: "1px",
+            }}>content_cut</span>
+          </div>
+          <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
         </div>
-        <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
+
+        {/* Progress bar */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "300px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: "12px", fontWeight: 500, color: "rgba(255,255,255,0.6)" }}>Onboarding Progress</span>
+            <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.6)" }}>Step 1 of 3</span>
+          </div>
+          <div style={{ height: "6px", width: "100%", background: "rgba(255,255,255,0.1)", borderRadius: "99px", overflow: "hidden" }}>
+            <div style={{ height: "100%", width: "33.33%", background: "#75AADB", borderRadius: "99px", transition: "width 0.5s ease" }} />
+          </div>
+        </div>
       </header>
 
       {/* Main content */}
       <main style={{
         flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
-        justifyContent: "center", padding: "80px 16px 60px",
+        justifyContent: "center", padding: "48px 24px 60px",
       }}>
         <div style={{ width: "100%", maxWidth: "420px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-          {/* Progress */}
-          <div style={{ width: "100%", marginBottom: "48px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: "8px" }}>
-              <span style={{ fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "2px", color: "#75AADB" }}>
-                Step 1 of 3
-              </span>
-              <span style={{ fontSize: "11px", color: "rgba(117,170,219,0.6)" }}>33% Complete</span>
-            </div>
-            <div style={{ height: "6px", width: "100%", background: "rgba(117,170,219,0.1)", borderRadius: "99px", overflow: "hidden" }}>
-              <div style={{ height: "100%", width: "33.33%", background: "#75AADB", borderRadius: "99px", transition: "width 0.5s ease" }} />
-            </div>
-          </div>
-
           {/* Heading */}
           <div style={{ textAlign: "center", marginBottom: "40px" }}>
             <h1 style={{ fontSize: "30px", fontWeight: 700, color: "white", margin: "0 0 8px 0" }}>Set up your profile</h1>
@@ -70,6 +76,10 @@ const OnboardingStep1 = ({ onContinue, onSkip }) => {
           {/* Avatar upload */}
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: "32px" }}>
             <div
+              role="button"
+              tabIndex={0}
+              aria-label="Upload profile photo"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileRef.current?.click(); } }}
               onClick={() => fileRef.current?.click()}
               style={{
                 width: "128px", height: "128px", borderRadius: "50%",
@@ -101,16 +111,22 @@ const OnboardingStep1 = ({ onContinue, onSkip }) => {
           {/* Form fields */}
           <form onSubmit={(e) => e.preventDefault()} style={{ width: "100%", display: "flex", flexDirection: "column", gap: "20px" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <label style={labelStyle}>Display Name</label>
-              <input type="text" placeholder="Enter your display name" value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)} style={inputStyle}
+              <label htmlFor="onboarding-display-name" style={labelStyle}>Display Name</label>
+              <input id="onboarding-display-name" type="text" placeholder="Enter your display name" value={displayName}
+                onChange={(e) => {
+                  const sanitized = sanitizeTextInput(e.target.value, { maxLength: 100 });
+                  setDisplayName(sanitized);
+                }} autoComplete="name" style={inputStyle}
                 onFocus={focusHandler} onBlur={blurHandler} />
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <label style={labelStyle}>Bio</label>
-              <textarea placeholder="Tell us about your editing style..." value={bio}
-                onChange={(e) => setBio(e.target.value)} rows={3}
+              <label htmlFor="onboarding-bio" style={labelStyle}>Bio</label>
+              <textarea id="onboarding-bio" placeholder="Tell us about your editing style..." value={bio}
+                onChange={(e) => {
+                  const sanitized = sanitizeTextInput(e.target.value, { maxLength: 500, allowNewlines: true });
+                  setBio(sanitized);
+                }} rows={3}
                 style={{ ...inputStyle, resize: "none", minHeight: "80px" }}
                 onFocus={focusHandler} onBlur={blurHandler} />
             </div>
@@ -126,21 +142,20 @@ const OnboardingStep1 = ({ onContinue, onSkip }) => {
                 width: "100%", background: "none", border: "none", cursor: "pointer",
                 color: "rgba(117,170,219,0.6)", fontSize: "14px", fontWeight: 500, padding: "8px",
               }}>
-                Skip for now
+                Skip this step
+              </button>
+              <button type="button" onClick={() => { trackEvent(analyticsEvents.onboardingSkip, { step: "1", action: "skip_all" }); onSkipAll?.(); }} style={{
+                width: "100%", background: "none", border: "none", cursor: "pointer",
+                color: "rgba(255,255,255,0.35)", fontSize: "13px", fontWeight: 400, padding: "4px",
+              }}>
+                Skip onboarding
               </button>
             </div>
           </form>
         </div>
       </main>
 
-      {/* Botswana Flag Stripe */}
-      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "6px", display: "flex", zIndex: 50 }}>
-        <div style={{ flex: 2, background: "#75AADB" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 1, background: "#000" }} />
-        <div style={{ flex: 0.4, background: "white" }} />
-        <div style={{ flex: 2, background: "#75AADB" }} />
-      </div>
+      <BotswanaStripe />
     </div>
   );
 };

@@ -5,6 +5,7 @@
  */
 
 import { supabase } from "./supabaseClient";
+import { sanitizeFileName, sanitizeTextInput } from "../utils/validation";
 
 /**
  * File upload security constants
@@ -64,19 +65,6 @@ function validateFileUpload(file) {
   return { valid: true };
 }
 
-/**
- * Sanitize filename for safe storage
- * @param {string} fileName - Original filename
- * @returns {string} Sanitized filename
- */
-function sanitizeFileName(fileName) {
-  // Remove path traversal attempts and special characters
-  return fileName
-    .replace(/[^a-zA-Z0-9._-]/g, '_')
-    .replace(/\.{2,}/g, '.')
-    .replace(/^\.+|\.+$/g, '')
-    .substring(0, 100); // Limit length
-}
 
 /**
  * Sign up a new user with email and password
@@ -315,11 +303,14 @@ export async function uploadAvatar(userId, file) {
     throw new Error(validation.error);
   }
 
-  // Get sanitized extension
-  const originalExt = file.name.split(".").pop()?.toLowerCase() || 'jpg';
+  // Sanitize the original filename before extracting extension
+  const sanitizedOriginalName = sanitizeFileName(file.name);
+  
+  // Get sanitized extension from sanitized filename
+  const originalExt = sanitizedOriginalName.split(".").pop()?.toLowerCase() || 'jpg';
   const safeExt = UPLOAD_SECURITY.ALLOWED_EXTENSIONS.includes(originalExt) ? originalExt : 'jpg';
   
-  // Use a secure, predictable filename pattern
+  // Use a secure, predictable filename pattern (path traversal already prevented by userId validation)
   const fileName = `${userId}/avatar.${safeExt}`;
 
   // Upload with content type explicitly set
@@ -355,11 +346,15 @@ export async function uploadAvatar(userId, file) {
  * @throws {Error} If save fails
  */
 export async function saveOnboardingData(userId, onboardingData) {
+  // Sanitize displayName and bio before saving to database
+  const sanitizedDisplayName = sanitizeTextInput(onboardingData.displayName || '', { maxLength: 100 });
+  const sanitizedBio = sanitizeTextInput(onboardingData.bio || '', { maxLength: 500, allowNewlines: true });
+
   const { data, error } = await supabase
     .from("profiles")
     .update({
-      display_name: onboardingData.displayName,
-      bio: onboardingData.bio,
+      display_name: sanitizedDisplayName,
+      bio: sanitizedBio,
       skill_level: onboardingData.skillLevel,
       purposes: onboardingData.purposes,
       default_resolution: onboardingData.defaultResolution,
@@ -432,77 +427,24 @@ export async function isEmailVerified(userId) {
  */
 export async function recordFailedLoginAttempt(email) {
   const MAX_ATTEMPTS = 5;
-  const LOCKOUT_DURATION_MS = 30 * 60 * 1000; // 30 minutes
 
   try {
-    // Try to get user ID from email (if user exists)
-    const { data: users } = await supabase.auth.admin?.listUsers();
-    const user = users?.users?.find(u => u.email === email);
-    const userId = user?.id || null;
+    const { data, error } = await supabase.rpc('record_failed_login_attempt', {
+      p_email: email,
+    });
 
-    // Get or create login attempt record
-    const { data: existing, error: fetchError } = await supabase
-      .from("login_attempts")
-      .select("*")
-      .eq("email", email)
-      .maybeSingle();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      // Table might not exist, return safe default
+    if (error) {
+      console.warn('Account lockout tracking not available:', error);
       return { locked: false, attemptsRemaining: MAX_ATTEMPTS };
     }
 
-    const now = new Date();
-    let attempts = existing ? existing.failed_attempts + 1 : 1;
-    let lockedUntil = existing?.locked_until ? new Date(existing.locked_until) : null;
-
-    // Check if still locked
-    if (lockedUntil && now < lockedUntil) {
-      return {
-        locked: true,
-        lockedUntil: lockedUntil.toISOString(),
-        attemptsRemaining: 0,
-      };
-    }
-
-    // Reset if lockout expired
-    if (lockedUntil && now >= lockedUntil) {
-      attempts = 1;
-      lockedUntil = null;
-    }
-
-    // Lock if max attempts reached
-    if (attempts >= MAX_ATTEMPTS) {
-      lockedUntil = new Date(now.getTime() + LOCKOUT_DURATION_MS);
-    }
-
-    // Upsert the record
-    const { error: upsertError } = await supabase
-      .from("login_attempts")
-      .upsert({
-        id: existing?.id,
-        user_id: userId,
-        email,
-        failed_attempts: attempts,
-        locked_until: lockedUntil?.toISOString() || null,
-        last_attempt: now.toISOString(),
-      }, {
-        onConflict: 'email',
-      });
-
-    if (upsertError) {
-      // Table might not exist, return safe default
-      return { locked: false, attemptsRemaining: MAX_ATTEMPTS - attempts };
-    }
-
     return {
-      locked: attempts >= MAX_ATTEMPTS,
-      lockedUntil: lockedUntil?.toISOString() || null,
-      attemptsRemaining: Math.max(0, MAX_ATTEMPTS - attempts),
-      attempts: attempts,
+      locked: data.locked,
+      lockedUntil: data.locked_until || null,
+      attemptsRemaining: data.attempts_remaining,
+      attempts: data.attempts || 0,
     };
   } catch (err) {
-    // If table doesn't exist or other error, return safe default
     console.warn('Account lockout tracking not available:', err);
     return { locked: false, attemptsRemaining: MAX_ATTEMPTS };
   }
@@ -514,12 +456,8 @@ export async function recordFailedLoginAttempt(email) {
  */
 export async function clearFailedLoginAttempts(email) {
   try {
-    await supabase
-      .from("login_attempts")
-      .delete()
-      .eq("email", email);
+    await supabase.rpc('clear_failed_login_attempts', { p_email: email });
   } catch (err) {
-    // Ignore errors if table doesn't exist
     console.warn('Failed to clear login attempts:', err);
   }
 }
@@ -531,30 +469,18 @@ export async function clearFailedLoginAttempts(email) {
  */
 export async function checkAccountLockout(email) {
   try {
-    const { data, error } = await supabase
-      .from("login_attempts")
-      .select("*")
-      .eq("email", email)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc('check_account_lockout', {
+      p_email: email,
+    });
 
     if (error || !data) {
       return { locked: false, attemptsRemaining: 5 };
     }
 
-    const now = new Date();
-    const lockedUntil = data.locked_until ? new Date(data.locked_until) : null;
-
-    if (lockedUntil && now < lockedUntil) {
-      return {
-        locked: true,
-        lockedUntil: lockedUntil.toISOString(),
-        attemptsRemaining: 0,
-      };
-    }
-
     return {
-      locked: false,
-      attemptsRemaining: Math.max(0, 5 - data.failed_attempts),
+      locked: data.locked,
+      lockedUntil: data.locked_until || null,
+      attemptsRemaining: data.attempts_remaining,
     };
   } catch (err) {
     return { locked: false, attemptsRemaining: 5 };

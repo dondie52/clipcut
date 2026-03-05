@@ -2,6 +2,7 @@ import { useRef, useState, useCallback, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
+import { validateFiles, getAcceptString } from '../../utils/fileValidation';
 
 /* ========== CSS ANIMATIONS ========== */
 const MEDIA_PANEL_CSS = `
@@ -513,7 +514,13 @@ const MediaPanel = ({
   const handleFileChange = useCallback((e) => {
     const files = Array.from(e.target.files || []);
     if (files.length > 0 && onImportMedia) {
-      onImportMedia(files);
+      const { validFiles, errors } = validateFiles(files, { allowedCategories: ['video', 'audio'] });
+      if (errors.length > 0) {
+        alert(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
+      }
+      if (validFiles.length > 0) {
+        onImportMedia(validFiles);
+      }
     }
     // Reset input
     e.target.value = '';
@@ -538,13 +545,16 @@ const MediaPanel = ({
     e.preventDefault();
     e.stopPropagation();
     setDragOver(false);
-    
-    const files = Array.from(e.dataTransfer.files).filter(
-      file => file.type.startsWith('video/') || file.type.startsWith('audio/')
-    );
-    
-    if (files.length > 0 && onImportMedia) {
-      onImportMedia(files);
+
+    const droppedFiles = Array.from(e.dataTransfer.files);
+    const { validFiles, errors } = validateFiles(droppedFiles, { allowedCategories: ['video', 'audio'] });
+
+    if (errors.length > 0) {
+      alert(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
+    }
+
+    if (validFiles.length > 0 && onImportMedia) {
+      onImportMedia(validFiles);
     }
   }, [onImportMedia]);
   
@@ -587,166 +597,208 @@ const MediaPanel = ({
               </button>
             ))}
           </div>
-          <div style={{ display: "flex", gap: "4px" }} role="group" aria-label="View mode">
-            <button
-              onClick={() => setViewMode('list')}
-              className="view-toggle-btn"
-              style={{ 
-                ...styles.ghost,
-                background: viewMode === 'list' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
-              }}
-              aria-label="List view"
-              aria-pressed={viewMode === 'list'}
-              title="List view"
-            >
-              <Icon i="list" s={18} c={viewMode === 'list' ? '#75aadb' : '#475569'} />
-            </button>
-            <button
-              onClick={() => setViewMode('grid')}
-              className="view-toggle-btn"
-              style={{ 
-                ...styles.ghost,
-                background: viewMode === 'grid' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
-              }}
-              aria-label="Grid view"
-              aria-pressed={viewMode === 'grid'}
-              title="Grid view"
-            >
-              <Icon i="grid_view" s={18} c={viewMode === 'grid' ? '#75aadb' : '#cbd5e1'} />
-            </button>
-          </div>
-        </div>
-        
-        {/* Import button / Drop zone */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="video/*,audio/*"
-          multiple
-          onChange={handleFileChange}
-          style={{ display: 'none' }}
-          aria-hidden="true"
-        />
-        
-        <button 
-          onClick={handleImportClick}
-          onKeyDown={handleKeyDown}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          disabled={isImporting}
-          className={`import-btn ${dragOver ? 'import-btn-dragover' : ''}`}
-          style={{
-            ...styles.importBtn,
-            borderColor: dragOver ? '#75aadb' : 'rgba(255,255,255,0.08)',
-            background: dragOver ? 'rgba(117,170,219,0.1)' : 'transparent',
-            opacity: isImporting ? 0.6 : 1,
-            cursor: isImporting ? 'wait' : 'pointer'
-          }}
-          aria-label={isImporting ? 'Importing media...' : 'Import media files'}
-          title="Click to browse or drag & drop files"
-        >
-          {isImporting ? (
-            <>
-              <div style={{
-                width: '26px',
-                height: '26px',
-                border: '2px solid #75aadb',
-                borderTopColor: 'transparent',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }} />
-              <span style={{ fontSize: "12px", color: "#75aadb", fontWeight: 500 }}>Importing...</span>
-            </>
-          ) : (
-            <>
-              <div style={{
-                width: '40px',
-                height: '40px',
-                borderRadius: '50%',
-                background: dragOver ? 'rgba(117, 170, 219, 0.2)' : 'rgba(100, 116, 139, 0.1)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.2s ease'
-              }}>
-                <Icon i={dragOver ? "file_download" : "add_circle"} s={24} c={dragOver ? "#75aadb" : "#64748b"} />
-              </div>
-              <span style={{ 
-                fontSize: "12px", 
-                color: dragOver ? "#75aadb" : "#64748b",
-                fontWeight: dragOver ? 500 : 400,
-                transition: 'all 0.2s ease'
-              }}>
-                {dragOver ? 'Release to import' : 'Import'}
-              </span>
-              <span style={{ 
-                fontSize: "10px", 
-                color: "#475569"
-              }}>
-                or drag & drop
-              </span>
-            </>
-          )}
-          {mediaItems.length > 0 && !isImporting && (
-            <div style={{
-              position: "absolute",
-              top: "8px",
-              right: "8px",
-              minWidth: "20px",
-              height: "20px",
-              background: "#75aadb",
-              borderRadius: "10px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "10px",
-              fontWeight: 700,
-              color: "#0a0a0a",
-              padding: "0 6px",
-              boxShadow: '0 2px 8px rgba(117, 170, 219, 0.3)'
-            }}>
-              {mediaItems.length}
+          {mediaTab === 'local' && (
+            <div style={{ display: "flex", gap: "4px" }} role="group" aria-label="View mode">
+              <button
+                onClick={() => setViewMode('list')}
+                className="view-toggle-btn"
+                style={{
+                  ...styles.ghost,
+                  background: viewMode === 'list' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
+                }}
+                aria-label="List view"
+                aria-pressed={viewMode === 'list'}
+                title="List view"
+              >
+                <Icon i="list" s={18} c={viewMode === 'list' ? '#75aadb' : '#475569'} />
+              </button>
+              <button
+                onClick={() => setViewMode('grid')}
+                className="view-toggle-btn"
+                style={{
+                  ...styles.ghost,
+                  background: viewMode === 'grid' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
+                }}
+                aria-label="Grid view"
+                aria-pressed={viewMode === 'grid'}
+                title="Grid view"
+              >
+                <Icon i="grid_view" s={18} c={viewMode === 'grid' ? '#75aadb' : '#cbd5e1'} />
+              </button>
             </div>
           )}
-        </button>
-      </div>
-      
-      {/* Media grid */}
-      <div 
-        style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }} 
-        className="cs"
-        role="tabpanel"
-        id={`${mediaTab}-panel`}
-        aria-label={`${mediaTab} media`}
-      >
-        {mediaItems.length === 0 ? (
-          <EmptyState />
-        ) : (
-          <div 
-            style={{ 
-              display: viewMode === 'grid' ? "grid" : "flex",
-              gridTemplateColumns: viewMode === 'grid' ? "1fr 1fr" : undefined,
-              flexDirection: viewMode === 'list' ? 'column' : undefined,
-              gap: "10px" 
-            }}
-            role="list"
-            aria-label="Imported media items"
-          >
-            {mediaItems.map((item, index) => (
-              <MediaItem
-                key={item.id}
-                item={item}
-                isSelected={selectedMediaId === item.id}
-                onSelect={onSelectMedia}
-                onAddToTimeline={onAddToTimeline}
-                onRemove={onRemoveMedia}
-                index={index}
-              />
-            ))}
-          </div>
+        </div>
+
+        {mediaTab === 'local' && (
+          <>
+            {/* Import button / Drop zone */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={getAcceptString(['video', 'audio'])}
+              multiple
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+              aria-hidden="true"
+            />
+
+            <button
+              onClick={handleImportClick}
+              onKeyDown={handleKeyDown}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              disabled={isImporting}
+              className={`import-btn ${dragOver ? 'import-btn-dragover' : ''}`}
+              style={{
+                ...styles.importBtn,
+                borderColor: dragOver ? '#75aadb' : 'rgba(255,255,255,0.08)',
+                background: dragOver ? 'rgba(117,170,219,0.1)' : 'transparent',
+                opacity: isImporting ? 0.6 : 1,
+                cursor: isImporting ? 'wait' : 'pointer'
+              }}
+              aria-label={isImporting ? 'Importing media...' : 'Import media files'}
+              title="Click to browse or drag & drop files"
+            >
+              {isImporting ? (
+                <>
+                  <div style={{
+                    width: '26px',
+                    height: '26px',
+                    border: '2px solid #75aadb',
+                    borderTopColor: 'transparent',
+                    borderRadius: '50%',
+                    animation: 'spin 1s linear infinite'
+                  }} />
+                  <span style={{ fontSize: "12px", color: "#75aadb", fontWeight: 500 }}>Importing...</span>
+                </>
+              ) : (
+                <>
+                  <div style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '50%',
+                    background: dragOver ? 'rgba(117, 170, 219, 0.2)' : 'rgba(100, 116, 139, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease'
+                  }}>
+                    <Icon i={dragOver ? "file_download" : "add_circle"} s={24} c={dragOver ? "#75aadb" : "#64748b"} />
+                  </div>
+                  <span style={{
+                    fontSize: "12px",
+                    color: dragOver ? "#75aadb" : "#64748b",
+                    fontWeight: dragOver ? 500 : 400,
+                    transition: 'all 0.2s ease'
+                  }}>
+                    {dragOver ? 'Release to import' : 'Import'}
+                  </span>
+                  <span style={{
+                    fontSize: "10px",
+                    color: "#475569"
+                  }}>
+                    or drag & drop
+                  </span>
+                </>
+              )}
+              {mediaItems.length > 0 && !isImporting && (
+                <div style={{
+                  position: "absolute",
+                  top: "8px",
+                  right: "8px",
+                  minWidth: "20px",
+                  height: "20px",
+                  background: "#75aadb",
+                  borderRadius: "10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  color: "#0a0a0a",
+                  padding: "0 6px",
+                  boxShadow: '0 2px 8px rgba(117, 170, 219, 0.3)'
+                }}>
+                  {mediaItems.length}
+                </div>
+              )}
+            </button>
+          </>
         )}
       </div>
+
+      {mediaTab === 'local' ? (
+        /* Media grid */
+        <div
+          style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }}
+          className="cs"
+          role="tabpanel"
+          id="local-panel"
+          aria-label="Local media"
+        >
+          {mediaItems.length === 0 ? (
+            <EmptyState />
+          ) : (
+            <div
+              style={{
+                display: viewMode === 'grid' ? "grid" : "flex",
+                gridTemplateColumns: viewMode === 'grid' ? "1fr 1fr" : undefined,
+                flexDirection: viewMode === 'list' ? 'column' : undefined,
+                gap: "10px"
+              }}
+              role="list"
+              aria-label="Imported media items"
+            >
+              {mediaItems.map((item, index) => (
+                <MediaItem
+                  key={item.id}
+                  item={item}
+                  isSelected={selectedMediaId === item.id}
+                  onSelect={onSelectMedia}
+                  onAddToTimeline={onAddToTimeline}
+                  onRemove={onRemoveMedia}
+                  index={index}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* Library tab placeholder */
+        <div
+          role="tabpanel"
+          id="library-panel"
+          aria-label="Community library"
+          style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', padding: '32px 24px', textAlign: 'center'
+          }}
+        >
+          <div style={{
+            width: '72px', height: '72px', borderRadius: '50%',
+            background: 'rgba(117, 170, 219, 0.08)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', marginBottom: '16px'
+          }}>
+            <Icon i="public" s={32} c="#475569" />
+          </div>
+          <p style={{ fontSize: '14px', fontWeight: 600, color: '#cbd5e1', margin: '0 0 6px' }}>
+            Community Templates
+          </p>
+          <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 16px', lineHeight: 1.5 }}>
+            Browse and use templates shared by<br />other ClipCut creators
+          </p>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: '6px',
+            padding: '6px 14px', borderRadius: '20px',
+            background: 'rgba(117, 170, 219, 0.08)', border: '1px solid rgba(117, 170, 219, 0.15)',
+            fontSize: '11px', fontWeight: 600, color: '#75aadb'
+          }}>
+            <Icon i="schedule" s={14} c="#75aadb" />
+            Coming Soon
+          </span>
+        </div>
+      )}
     </aside>
   );
 };

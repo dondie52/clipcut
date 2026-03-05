@@ -65,17 +65,6 @@ export function registerSW(options = {}) {
 }
 
 /**
- * Unregister the service worker
- */
-export async function unregisterSW() {
-  if ('serviceWorker' in navigator) {
-    const registration = await navigator.serviceWorker.ready;
-    await registration.unregister();
-    console.log('[SW] Service worker unregistered');
-  }
-}
-
-/**
  * Check if the app is running as a PWA (installed)
  */
 export function isPWA() {
@@ -90,33 +79,3 @@ export function isServiceWorkerSupported() {
   return 'serviceWorker' in navigator;
 }
 
-/**
- * Get the current service worker registration
- */
-export async function getRegistration() {
-  if ('serviceWorker' in navigator) {
-    return await navigator.serviceWorker.getRegistration();
-  }
-  return null;
-}
-
-/**
- * Force update the service worker
- */
-export async function forceUpdate() {
-  const registration = await getRegistration();
-  if (registration) {
-    await registration.update();
-  }
-}
-
-/**
- * Skip waiting and activate new service worker immediately
- */
-export async function skipWaiting() {
-  const registration = await getRegistration();
-  if (registration?.waiting) {
-    registration.waiting.postMessage({ type: 'SKIP_WAITING' });
-    window.location.reload();
-  }
-}

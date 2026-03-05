@@ -4,10 +4,10 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { 
-  loadFFmpeg, 
-  isFFmpegLoaded, 
-  setProgressCallback, 
+import {
+  loadFFmpeg,
+  isFFmpegLoaded,
+  setProgressCallback,
   clearProgressCallback,
   preloadFFmpeg,
   subscribeToLoadingState,
@@ -21,6 +21,7 @@ import {
 import * as videoOperations from '../services/videoOperations';
 import * as audioOperations from '../services/audioOperations';
 import * as effects from '../services/effects';
+import { getUserFriendlyMessage } from '../utils/errorHandling';
 
 const PREPARING_PROGRESS = 15;
 const PROCESSING_PROGRESS_SPAN = 85;
@@ -84,7 +85,7 @@ export function useFFmpeg() {
       return true;
     } catch (err) {
       if (isMounted.current) {
-        setError(err.message || 'Failed to load FFmpeg');
+        setError(getUserFriendlyMessage(err, 'ffmpeg'));
         setIsLoading(false);
       }
       return false;
@@ -141,7 +142,7 @@ export function useFFmpeg() {
     } catch (err) {
       if (isMounted.current) {
         const isCancelled = err?.name === 'AbortError' || /abort|cancel/i.test(err?.message || '');
-        setError(isCancelled ? 'Operation cancelled' : (err.message || `Failed to ${operationName}`));
+        setError(isCancelled ? 'Operation cancelled' : getUserFriendlyMessage(err, 'ffmpeg'));
         setProgress(0);
         setCurrentOperation(null);
       }
@@ -258,8 +259,32 @@ export function useFFmpeg() {
   }, [executeOperation]);
   
   const adjustBrightnessContrast = useCallback(async (file, brightness, contrast) => {
-    return executeOperation('adjust colors', (onProgress) => 
+    return executeOperation('adjust colors', (onProgress) =>
       effects.adjustBrightnessContrast(file, brightness, contrast, onProgress)
+    );
+  }, [executeOperation]);
+
+  const adjustSaturation = useCallback(async (file, saturation) => {
+    return executeOperation('adjust saturation', (onProgress) =>
+      effects.adjustSaturation(file, saturation, onProgress)
+    );
+  }, [executeOperation]);
+
+  const applyFilter = useCallback(async (file, filter) => {
+    return executeOperation('apply filter', (onProgress) =>
+      effects.applyFilter(file, filter, onProgress)
+    );
+  }, [executeOperation]);
+
+  const applyBlur = useCallback(async (file, radius) => {
+    return executeOperation('apply blur', (onProgress) =>
+      effects.applyBlur(file, radius, onProgress)
+    );
+  }, [executeOperation]);
+
+  const applySharpen = useCallback(async (file, strength) => {
+    return executeOperation('apply sharpen', (onProgress) =>
+      effects.applySharpen(file, strength, onProgress)
     );
   }, [executeOperation]);
   
@@ -361,7 +386,11 @@ export function useFFmpeg() {
     flipVideo,
     cropVideo,
     adjustBrightnessContrast,
-    
+    adjustSaturation,
+    applyFilter,
+    applyBlur,
+    applySharpen,
+
     // Constants
     resolutions: videoOperations.RESOLUTIONS,
     textPositions: effects.TEXT_POSITIONS,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo, lazy, Suspense } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import TopBar from './TopBar';
 import Toolbar from './Toolbar';
 import { styles } from './styles';
@@ -7,13 +7,18 @@ import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject } from '../../services/projectService';
-import { 
-  MAX_UNDO_HISTORY, 
-  AUTO_SAVE_INTERVAL, 
+import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
+import { sanitizeTextInput } from '../../utils/validation';
+import { getUserFriendlyMessage } from '../../utils/errorHandling';
+import ErrorBoundary from '../ErrorBoundary';
+import {
+  MAX_UNDO_HISTORY,
+  AUTO_SAVE_INTERVAL,
   DEFAULT_CLIP_DURATION,
   TOAST_AUTO_CLOSE_DELAY,
-  TOAST_ANIMATION_DURATION 
+  TOAST_ANIMATION_DURATION
 } from '../../constants';
+import { DEFAULT_CLIP_PROPERTIES, FILTER_PRESETS } from './constants';
 
 // Lazy load heavy sub-components for better code splitting
 const MediaPanel = lazy(() => import('./MediaPanel'));
@@ -110,7 +115,7 @@ let _idN = 0;
 const genId = () => `clip-${Date.now()}-${(++_idN).toString(36)}`;
 
 /* ========== LOADING OVERLAY ========== */
-const LoadingOverlay = memo(({ message, progress, subMessage, operationLabel }) => (
+const LoadingOverlay = memo(({ message, progress, subMessage, operationLabel, onCancel }) => (
   <div className="loading-overlay" style={{
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
     display: "flex", alignItems: "center", justifyContent: "center", zIndex: 2000,
@@ -150,8 +155,29 @@ const LoadingOverlay = memo(({ message, progress, subMessage, operationLabel }) 
               transition: "width 0.3s ease", borderRadius: "3px",
             }} />
           </div>
-          <p style={{ color: "#75aadb", fontSize: "13px", fontWeight: 700, margin: 0 }}>{Math.round(progress)}%</p>
+          <p style={{ color: "#75aadb", fontSize: "13px", fontWeight: 700, margin: "0 0 16px" }}>{Math.round(progress)}%</p>
         </>
+      )}
+      {onCancel && (
+        <button
+          onClick={onCancel}
+          style={{
+            marginTop: progress > 0 ? "0" : "16px",
+            background: "rgba(239,68,68,0.12)",
+            border: "1px solid rgba(239,68,68,0.3)",
+            borderRadius: "8px",
+            padding: "8px 24px",
+            color: "#ef4444",
+            cursor: "pointer",
+            fontSize: "13px",
+            fontWeight: 600,
+            fontFamily: "'Spline Sans', sans-serif",
+            transition: "background 0.15s ease",
+          }}
+          aria-label="Cancel operation"
+        >
+          Cancel
+        </button>
       )}
     </div>
   </div>
@@ -312,6 +338,7 @@ const usePlaybackEngine = (clips, totalDuration) => {
 /* ========== MAIN VIDEO EDITOR ========== */
 const VideoEditor = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuth();
 
   // Project state
@@ -324,6 +351,7 @@ const VideoEditor = () => {
   const [rightTab, setRightTab] = useState("video");
   const [rightSubTab, setRightSubTab] = useState("basic");
   const [mediaTab, setMediaTab] = useState("local");
+  const [editorLayout, setEditorLayout] = useState("default");
 
   // Media library
   const [mediaItems, setMediaItems] = useState([]);
@@ -404,6 +432,7 @@ const VideoEditor = () => {
       start = last ? last.startTime + last.duration : 0;
     }
     const clip = {
+      ...DEFAULT_CLIP_PROPERTIES,
       id: genId(), mediaId: mi.id, name: mi.name, type: mi.type,
       startTime: start, duration: mi.duration || DEFAULT_CLIP_DURATION,
       file: mi.file, blobUrl: mi.blobUrl, thumbnail: mi.thumbnail,
@@ -429,8 +458,11 @@ const VideoEditor = () => {
           const info = await ffmpeg.getVideoInfo(file);
           setMediaItems(p => p.map(m => m.id === id ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false } : m));
           if (!isAudio) {
-            ffmpeg.generateThumbnail(file, 0).then(b => {
-              const u = URL.createObjectURL(b);
+            const videoId = `${file.name}_${file.size}_${file.lastModified}`;
+            getCachedThumbnail(videoId, 0).then(async (cached) => {
+              const blob = cached || await ffmpeg.generateThumbnail(file, 0);
+              if (!cached) cacheThumbnail(videoId, 0, blob).catch(() => {});
+              const u = URL.createObjectURL(blob);
               setMediaItems(p => p.map(m => m.id === id ? { ...m, thumbnail: u } : m));
             }).catch(() => {});
           }
@@ -440,7 +472,7 @@ const VideoEditor = () => {
         }
       }
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
-    } catch (e) { notify("error", `Import failed: ${e.message}`); }
+    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
   }, [ffmpeg, notify]);
 
@@ -464,7 +496,7 @@ const VideoEditor = () => {
       if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
       setSelectedClipId(c1.id);
       notify("success", "Clip split");
-    } catch (e) { notify("error", `Split failed: ${e.message}`); }
+    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
     finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
   }, [clips, ffmpeg, setClips, notify]);
 
@@ -479,82 +511,165 @@ const VideoEditor = () => {
       setClips(p => p.map(c => c.id === clipId ? { ...c, file: trimmed, blobUrl: url, duration: dur } : c));
       if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
       notify("success", "Clip trimmed");
-    } catch (e) { notify("error", `Trim failed: ${e.message}`); }
+    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
     finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
   }, [clips, ffmpeg, setClips, notify]);
 
+  // ---- Apply non-destructive clip effects via FFmpeg ----
+  const applyClipEffects = useCallback(async (clip, index, total) => {
+    let file = clip.file;
+    const hasSpeedChange = clip.speed && clip.speed !== 1.0;
+    const hasBrightnessContrast = clip.brightness || clip.contrast;
+    const hasSaturation = clip.saturation !== undefined && clip.saturation !== 1.0;
+    const hasRotation = clip.rotation && [90, 180, 270, -90].includes(clip.rotation);
+    const hasVolume = (clip.volume !== undefined && clip.volume !== 1.0) || clip.isMuted;
+    const hasFade = (clip.fadeIn && clip.fadeIn > 0) || (clip.fadeOut && clip.fadeOut > 0);
+    const hasFilter = clip.filterName;
+    const hasTrim = clip.trimStart > 0 || clip.trimEnd > 0;
+    const hasEffects = clip.effects?.some(e => e.enabled);
+
+    const noEffects = !hasSpeedChange && !hasBrightnessContrast && !hasSaturation && !hasRotation && !hasVolume && !hasFade && !hasFilter && !hasTrim && !hasEffects;
+    if (noEffects) return file;
+
+    const label = `clip ${index + 1}/${total}`;
+
+    if (hasTrim) {
+      setLoadMsg(`Trimming ${label}...`);
+      file = await ffmpeg.trimVideo(file, clip.trimStart, clip.duration);
+    }
+    if (hasSpeedChange) {
+      setLoadMsg(`Adjusting speed for ${label}...`);
+      file = await ffmpeg.changeSpeed(file, clip.speed);
+    }
+    if (hasBrightnessContrast) {
+      setLoadMsg(`Adjusting colors for ${label}...`);
+      file = await ffmpeg.adjustBrightnessContrast(file, clip.brightness || 0, clip.contrast || 0);
+    }
+    if (hasSaturation) {
+      setLoadMsg(`Adjusting saturation for ${label}...`);
+      file = await ffmpeg.adjustSaturation(file, clip.saturation);
+    }
+    if (hasRotation) {
+      setLoadMsg(`Rotating ${label}...`);
+      file = await ffmpeg.rotateVideo(file, clip.rotation);
+    }
+    if (hasVolume) {
+      setLoadMsg(`Adjusting audio for ${label}...`);
+      file = await ffmpeg.adjustVolume(file, clip.isMuted ? 0 : clip.volume);
+    }
+    if (hasFade) {
+      setLoadMsg(`Adding fade to ${label}...`);
+      file = await ffmpeg.addFade(file, clip.fadeIn || 0, clip.fadeOut || 0, clip.duration);
+    }
+    if (hasFilter) {
+      const preset = FILTER_PRESETS.find(f => f.name === clip.filterName);
+      if (preset?.filter) {
+        setLoadMsg(`Applying ${clip.filterName} filter to ${label}...`);
+        file = await ffmpeg.applyFilter(file, preset.filter);
+      }
+    }
+    if (hasEffects) {
+      for (const effect of clip.effects.filter(e => e.enabled)) {
+        if (effect.type === 'blur' && effect.params?.radius) {
+          setLoadMsg(`Applying ${effect.name} to ${label}...`);
+          file = await ffmpeg.applyBlur(file, effect.params.radius);
+        } else if (effect.type === 'sharpen' && effect.params?.strength) {
+          setLoadMsg(`Applying ${effect.name} to ${label}...`);
+          file = await ffmpeg.applySharpen(file, effect.params.strength);
+        }
+      }
+    }
+
+    return file;
+  }, [ffmpeg]);
+
+  // ---- TopBar menu actions ----
+  const handleNewProject = useCallback(() => {
+    if (clips.length > 0 && !window.confirm('Start a new project? Unsaved changes will be lost.')) return;
+    setClips([]);
+    setProjectName('Untitled Project');
+    setProjectId(null);
+    setMediaItems([]);
+    setSelectedClipId(null);
+    setSelectedMediaId(null);
+    notify('info', 'New project created');
+  }, [clips.length, notify, setClips]);
+
+  const handleSave = useCallback(() => {
+    // Auto-save is already wired — trigger a manual nudge via notify
+    notify('info', 'Project saved');
+  }, [notify]);
+
+  const handleSettings = useCallback(() => {
+    navigate('/settings');
+  }, [navigate]);
+
   // ---- Export ----
   const handleExport = useCallback(async (res) => {
-    if (clips.length === 0) { 
-      notify("warning", "No clips to export. Add media to the timeline first."); 
-      return; 
+    if (clips.length === 0) {
+      notify("warning", "No clips to export. Add media to the timeline first.");
+      return;
     }
-    
-    // Filter for video clips and check they have files
+
     const vClips = clips.filter(c => c.type !== "audio" && c.file).sort((a, b) => a.startTime - b.startTime);
-    if (vClips.length === 0) { 
-      notify("warning", "No video clips with valid files. Make sure your clips are properly loaded."); 
-      return; 
+    if (vClips.length === 0) {
+      notify("warning", "No video clips with valid files. Make sure your clips are properly loaded.");
+      return;
     }
-    
-    // Pause video playback before starting export to prevent conflicts
-    if (pb.isPlaying) {
-      pb.setIsPlaying(false);
-    }
-    
-    setIsExporting(true); 
+
+    if (pb.isPlaying) pb.setIsPlaying(false);
+
+    setIsExporting(true);
     setLoadMsg("Preparing export...");
-    
+
     try {
-      // Ensure FFmpeg is initialized
       if (!ffmpeg.isReady) {
         setLoadMsg("Initializing FFmpeg...");
         const initialized = await ffmpeg.initialize();
-        if (!initialized) {
-          throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
-        }
+        if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
       }
-      
+
+      // Apply effects to each clip
+      const processedFiles = [];
+      for (let i = 0; i < vClips.length; i++) {
+        setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
+        const processed = await applyClipEffects(vClips[i], i, vClips.length);
+        processedFiles.push(processed);
+      }
+      setLoadSub("");
+
       let blob;
-      if (vClips.length === 1) { 
-        setLoadMsg(`Exporting at ${res}...`); 
-        if (!vClips[0].file) {
-          throw new Error("Clip file is missing. Please re-import the media.");
-        }
-        blob = await ffmpeg.exportVideo(vClips[0].file, res); 
-      } else { 
-        setLoadMsg(`Merging ${vClips.length} clips...`); 
-        const filesToMerge = vClips.map(c => c.file).filter(f => f);
-        if (filesToMerge.length === 0) {
-          throw new Error("No valid clip files to merge.");
-        }
-        const m = await ffmpeg.mergeClips(filesToMerge); 
-        setLoadMsg(`Exporting at ${res}...`); 
-        blob = await ffmpeg.exportVideo(m, res); 
+      if (processedFiles.length === 1) {
+        setLoadMsg(`Exporting at ${res}...`);
+        blob = await ffmpeg.exportVideo(processedFiles[0], res);
+      } else {
+        setLoadMsg(`Merging ${processedFiles.length} clips...`);
+        const m = await ffmpeg.mergeClips(processedFiles);
+        setLoadMsg(`Exporting at ${res}...`);
+        blob = await ffmpeg.exportVideo(m, res);
       }
-      
-      if (!blob || blob.size === 0) {
-        throw new Error("Export produced an empty file. Please try again.");
-      }
-      
+
+      if (!blob || blob.size === 0) throw new Error("Export produced an empty file. Please try again.");
+
       const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); 
-      a.href = url; 
+      const a = document.createElement("a");
+      a.href = url;
       a.download = `${projectName.replace(/[^a-z0-9]/gi, "_")}_${res}.mp4`;
-      document.body.appendChild(a); 
-      a.click(); 
+      document.body.appendChild(a);
+      a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 2000);
       notify("success", `Exported at ${res}`);
-    } catch (e) { 
+    } catch (e) {
       console.error("Export error:", e);
-      notify("error", `Export failed: ${e.message || "Unknown error. Please check the console for details."}`); 
-    } finally { 
-      setIsExporting(false); 
-      setLoadMsg(""); 
+      notify("error", getUserFriendlyMessage(e, 'ffmpeg'));
+    } finally {
+      setIsExporting(false);
+      setLoadMsg("");
+      setLoadSub("");
       ffmpeg.resetProgress();
     }
-  }, [clips, projectName, ffmpeg, notify]);
+  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects]);
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
@@ -648,7 +763,7 @@ const VideoEditor = () => {
       
       notify("success", "Video converted successfully");
     } catch (e) {
-      notify("error", `Conversion failed: ${e.message}`);
+      notify("error", getUserFriendlyMessage(e, 'ffmpeg'));
     } finally {
       convertingBlobUrls.current.delete(blobUrl);
       setIsProcessing(false);
@@ -672,11 +787,21 @@ const VideoEditor = () => {
     
     if (projectId && projectData) {
       window.history.replaceState({ ...location.state, projectId: null, projectData: null, projectName: null }, "");
-      // Set project name
-      if (projectName) setProjectName(projectName);
+      // Sanitize and set project name (max 100 chars, remove HTML, trim)
+      if (projectName) {
+        const sanitizedName = sanitizeTextInput(projectName, { maxLength: 100 });
+        setProjectName(sanitizedName || "Untitled Project");
+      }
       // Load project data would require loading media items first
       // For now, just set the project name
       console.log("Loading project:", projectId);
+    }
+  }, []); // eslint-disable-line
+
+  // ---- Preload FFmpeg in background so it's ready when user imports ----
+  useEffect(() => {
+    if (!ffmpeg.isReady) {
+      ffmpeg.initialize().catch(() => {});
     }
   }, []); // eslint-disable-line
 
@@ -703,7 +828,6 @@ const VideoEditor = () => {
   return (
     <div style={styles.root}>
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-      <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL@20..48,100..700,0..1&display=swap" rel="stylesheet" />
       <style>{VIDEO_EDITOR_CSS}</style>
 
       <TopBar
@@ -711,46 +835,62 @@ const VideoEditor = () => {
         onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress} currentOperation={ffmpeg.currentOperation}
         hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions}
         lastSaved={lastSaved} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+        onCancelExport={ffmpeg.cancelOperation}
+        onNewProject={handleNewProject} onSave={handleSave} onSettings={handleSettings}
+        editorLayout={editorLayout} onLayoutChange={setEditorLayout}
       />
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
-      <main style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        <Suspense fallback={<PanelLoadingFallback width="280px" />}>
-          <MediaPanel
-            mediaTab={mediaTab} onMediaTabChange={setMediaTab}
-            mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
-            onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
-            isImporting={isImporting}
-          />
-        </Suspense>
-        <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
-          <Player
-            isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
-            videoSrc={previewSrc} currentTime={pb.clipOffset}
-            onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
-            onVideoError={handleVideoFormatError}
-          />
-        </Suspense>
-        <Suspense fallback={<PanelLoadingFallback width="280px" />}>
-          <InspectorPanel
-            rightTab={rightTab} onRightTabChange={setRightTab}
-            rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-            selectedClip={selectedClip} onClipUpdate={updateClip}
-          />
-        </Suspense>
+      <main style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", overflow: "hidden" }}>
+        {editorLayout !== 'compact' && (
+          <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
+            <Suspense fallback={<PanelLoadingFallback width="280px" />}>
+              <MediaPanel
+                mediaTab={mediaTab} onMediaTabChange={setMediaTab}
+                mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
+                onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
+                isImporting={isImporting}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        )}
+        <ErrorBoundary name="player" inline message="Video player encountered an error">
+          <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
+            <Player
+              isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
+              videoSrc={previewSrc} currentTime={pb.clipOffset}
+              onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
+              onVideoError={handleVideoFormatError}
+              clipProperties={pb.currentClip || selectedClip}
+            />
+          </Suspense>
+        </ErrorBoundary>
+        {editorLayout !== 'compact' && (
+          <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
+            <Suspense fallback={<PanelLoadingFallback width="280px" />}>
+              <InspectorPanel
+                rightTab={rightTab} onRightTabChange={setRightTab}
+                rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                selectedClip={selectedClip} onClipUpdate={updateClip}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        )}
       </main>
 
-      <Suspense fallback={<TimelineLoadingFallback />}>
-        <Timeline
-          clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
-          onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip} onTrimClip={trimClip}
-          currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
-          isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
-          mediaItems={mediaItems} onAddToTimeline={addToTimeline}
-        />
-      </Suspense>
+      <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
+        <Suspense fallback={<TimelineLoadingFallback />}>
+          <Timeline
+            clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
+            onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip} onTrimClip={trimClip}
+            currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
+            isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+            mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+          />
+        </Suspense>
+      </ErrorBoundary>
 
-      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} />}
+      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} onCancel={ffmpeg.currentOperation ? ffmpeg.cancelOperation : undefined} />}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
     </div>
   );

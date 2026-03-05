@@ -277,6 +277,7 @@ TrackLabel.displayName = "TrackLabel";
 const TimelineClip = memo(({
   clip, isSelected, onSelect, pixelsPerSecond,
   onDragStart, onDragEnd, isDragging = false,
+  onResizeStart,
 }) => {
   const width = Math.max(clip.duration * pixelsPerSecond, 40);
   const left = clip.startTime * pixelsPerSecond;
@@ -374,12 +375,12 @@ const TimelineClip = memo(({
         position: "absolute", left: 0, top: 0, bottom: 0, width: "6px", cursor: "ew-resize",
         background: `linear-gradient(90deg, ${isAudio ? "rgba(52,211,153,0.7)" : "rgba(117,170,219,0.7)"} 0%, transparent 100%)`,
         borderRadius: "4px 0 0 4px",
-      }} onMouseDown={(e) => e.stopPropagation()} />
+      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.(clip.id, 'left', e); }} />
       <div className="clip-resize-handle" style={{
         position: "absolute", right: 0, top: 0, bottom: 0, width: "6px", cursor: "ew-resize",
         background: `linear-gradient(90deg, transparent 0%, ${isAudio ? "rgba(52,211,153,0.7)" : "rgba(117,170,219,0.7)"} 100%)`,
         borderRadius: "0 4px 4px 0",
-      }} onMouseDown={(e) => e.stopPropagation()} />
+      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart?.(clip.id, 'right', e); }} />
     </div>
   );
 });
@@ -473,6 +474,9 @@ const Timeline = ({
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [snapLine, setSnapLine] = useState(null);
   const [activeTool, setActiveTool] = useState("select");
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [showVolumePopover, setShowVolumePopover] = useState(false);
+  const [showSpeedPopover, setShowSpeedPopover] = useState(false);
   const timelineRef = useRef(null);
   const scrubRef = useRef(false);
 
@@ -579,6 +583,43 @@ const Timeline = ({
     if (selectedClipId && !isProcessing) onDeleteClip?.(selectedClipId);
   }, [selectedClipId, isProcessing, onDeleteClip]);
 
+  // Resize handles for clip trimming
+  const handleResizeStart = useCallback((clipId, side, e) => {
+    const clip = clips.find(c => c.id === clipId);
+    if (!clip) return;
+    const trackType = clip.type === 'audio' ? 'audio' : 'video';
+    if (trackLocks[trackType]) return;
+
+    const startX = e.clientX;
+    const origStart = clip.startTime;
+    const origDur = clip.duration;
+
+    const onMouseMove = (ev) => {
+      const dx = ev.clientX - startX;
+      const dt = dx / pxPerSec;
+
+      if (side === 'left') {
+        const newStart = Math.max(0, origStart + dt);
+        const delta = newStart - origStart;
+        const newDur = origDur - delta;
+        if (newDur > 0.1) {
+          onUpdateClip?.(clipId, { startTime: newStart, duration: newDur, trimStart: (clip.trimStart || 0) + delta });
+        }
+      } else {
+        const newDur = Math.max(0.1, origDur + dt);
+        onUpdateClip?.(clipId, { duration: newDur });
+      }
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  }, [clips, pxPerSec, trackLocks, onUpdateClip]);
+
   // Drag & drop with snapping
   const handleDragStart = useCallback((e, clip) => {
     setDraggingClipId(clip.id);
@@ -633,14 +674,16 @@ const Timeline = ({
       let newStart = Math.max(0, x / pxPerSec);
 
       // Snap logic for new clips
-      const snapTh = 8 / pxPerSec;
-      clips.forEach((c) => {
-        const cEnd = c.startTime + c.duration;
-        if (Math.abs(newStart - c.startTime) < snapTh) { newStart = c.startTime; setSnapLine(c.startTime); }
-        if (Math.abs(newStart - cEnd) < snapTh) { newStart = cEnd; setSnapLine(cEnd); }
-      });
-      // Snap to playhead
-      if (Math.abs(newStart - playheadPos) < snapTh) { newStart = playheadPos; setSnapLine(playheadPos); }
+      if (snapEnabled) {
+        const snapTh = 8 / pxPerSec;
+        clips.forEach((c) => {
+          const cEnd = c.startTime + c.duration;
+          if (Math.abs(newStart - c.startTime) < snapTh) { newStart = c.startTime; setSnapLine(c.startTime); }
+          if (Math.abs(newStart - cEnd) < snapTh) { newStart = cEnd; setSnapLine(cEnd); }
+        });
+        // Snap to playhead
+        if (Math.abs(newStart - playheadPos) < snapTh) { newStart = playheadPos; setSnapLine(playheadPos); }
+      }
 
       // Add to timeline at the drop position
       onAddToTimeline(mediaItem, newStart);
@@ -664,20 +707,22 @@ const Timeline = ({
     let newStart = Math.max(0, x / pxPerSec);
 
     // Snap logic
-    const snapTh = 8 / pxPerSec;
-    clips.forEach((c) => {
-      if (c.id === clipId) return;
-      const cEnd = c.startTime + c.duration;
-      if (Math.abs(newStart - c.startTime) < snapTh) { newStart = c.startTime; setSnapLine(c.startTime); }
-      if (Math.abs(newStart - cEnd) < snapTh) { newStart = cEnd; setSnapLine(cEnd); }
-      if (Math.abs(newStart + clip.duration - c.startTime) < snapTh) { newStart = c.startTime - clip.duration; setSnapLine(c.startTime); }
-    });
-    // Snap to playhead
-    if (Math.abs(newStart - playheadPos) < snapTh) { newStart = playheadPos; setSnapLine(playheadPos); }
+    if (snapEnabled) {
+      const snapTh = 8 / pxPerSec;
+      clips.forEach((c) => {
+        if (c.id === clipId) return;
+        const cEnd = c.startTime + c.duration;
+        if (Math.abs(newStart - c.startTime) < snapTh) { newStart = c.startTime; setSnapLine(c.startTime); }
+        if (Math.abs(newStart - cEnd) < snapTh) { newStart = cEnd; setSnapLine(cEnd); }
+        if (Math.abs(newStart + clip.duration - c.startTime) < snapTh) { newStart = c.startTime - clip.duration; setSnapLine(c.startTime); }
+      });
+      // Snap to playhead
+      if (Math.abs(newStart - playheadPos) < snapTh) { newStart = playheadPos; setSnapLine(playheadPos); }
+    }
 
     onUpdateClip?.(clipId, { startTime: newStart });
     setTimeout(() => setSnapLine(null), 400);
-  }, [clips, trackLocks, pxPerSec, playheadPos, onUpdateClip, mediaItems, onAddToTimeline]);
+  }, [clips, trackLocks, pxPerSec, playheadPos, onUpdateClip, mediaItems, onAddToTimeline, snapEnabled]);
 
   const canSplit = selectedClipId && !isProcessing;
   const canDelete = selectedClipId && !isProcessing;
@@ -706,7 +751,7 @@ const Timeline = ({
           {/* Minimap */}
           <Minimap clips={clips} totalDuration={totalDuration} viewportStart={viewport.start} viewportEnd={viewport.end} width={140} />
 
-          <TlBtn icon="align_horizontal_center" label="Snap to grid" />
+          <TlBtn icon="align_horizontal_center" onClick={() => setSnapEnabled(s => !s)} active={snapEnabled} label={`Snap to grid (${snapEnabled ? 'on' : 'off'})`} />
 
           {/* Zoom */}
           <div style={{ display: "flex", alignItems: "center", gap: "6px", borderLeft: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", padding: "0 10px" }}>
@@ -717,10 +762,64 @@ const Timeline = ({
           </div>
 
           {/* Utility buttons */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-            <TlBtn icon="dynamic_feed" label="Clip grouping" />
-            <TlBtn icon="volume_up" label="Volume" />
-            <TlBtn icon="speed" label="Speed" />
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", position: "relative" }}>
+            <TlBtn icon="dynamic_feed" label="Clip grouping (coming soon)" disabled />
+            <div style={{ position: 'relative' }}>
+              <TlBtn icon="volume_up" onClick={() => { if (selectedClipId) setShowVolumePopover(v => !v); }} disabled={!selectedClipId} label="Volume" active={showVolumePopover} />
+              {showVolumePopover && selectedClipId && (() => {
+                const clip = clips.find(c => c.id === selectedClipId);
+                if (!clip) return null;
+                return (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowVolumePopover(false)} />
+                    <div style={{
+                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                      marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '8px', padding: '12px', zIndex: 100, minWidth: '140px',
+                      boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                    }}>
+                      <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Clip Volume</div>
+                      <input type="range" min={0} max={200} value={Math.round((clip.volume ?? 1) * 100)}
+                        onChange={(e) => onUpdateClip?.(selectedClipId, { volume: Number(e.target.value) / 100 })}
+                        style={{ width: '100%', accentColor: '#75aadb' }}
+                      />
+                      <div style={{ fontSize: '10px', color: '#75aadb', textAlign: 'center', marginTop: '4px' }}>
+                        {Math.round((clip.volume ?? 1) * 100)}%
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+            <div style={{ position: 'relative' }}>
+              <TlBtn icon="speed" onClick={() => { if (selectedClipId) setShowSpeedPopover(v => !v); }} disabled={!selectedClipId} label="Speed" active={showSpeedPopover} />
+              {showSpeedPopover && selectedClipId && (() => {
+                const clip = clips.find(c => c.id === selectedClipId);
+                if (!clip) return null;
+                return (
+                  <>
+                    <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowSpeedPopover(false)} />
+                    <div style={{
+                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                      marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '8px', padding: '8px', zIndex: 100,
+                      boxShadow: '0 12px 32px rgba(0,0,0,0.5)', display: 'flex', gap: '4px',
+                    }}>
+                      {[0.25, 0.5, 1, 1.5, 2].map(s => (
+                        <button key={s} onClick={() => { onUpdateClip?.(selectedClipId, { speed: s }); setShowSpeedPopover(false); }}
+                          style={{
+                            background: (clip.speed ?? 1) === s ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
+                            border: (clip.speed ?? 1) === s ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '4px', padding: '4px 8px', fontSize: '10px', fontWeight: 500,
+                            color: (clip.speed ?? 1) === s ? '#75aadb' : '#94a3b8', cursor: 'pointer',
+                          }}
+                        >{s}x</button>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           </div>
         </div>
       </div>
@@ -827,6 +926,7 @@ const Timeline = ({
                   onSelect={onSelectClip} pixelsPerSecond={pxPerSec}
                   onDragStart={handleDragStart} onDragEnd={handleDragEnd}
                   isDragging={draggingClipId === c.id}
+                  onResizeStart={handleResizeStart}
                 />
               ))}
               {videoClips.length === 0 && <EmptyTrackPlaceholder type="video" isDragOver={dragOverTrack === "video"} />}
@@ -852,6 +952,7 @@ const Timeline = ({
                   onSelect={onSelectClip} pixelsPerSecond={pxPerSec}
                   onDragStart={handleDragStart} onDragEnd={handleDragEnd}
                   isDragging={draggingClipId === c.id}
+                  onResizeStart={handleResizeStart}
                 />
               ))}
               {audioClips.length === 0 && <EmptyTrackPlaceholder type="audio" isDragOver={dragOverTrack === "audio"} />}

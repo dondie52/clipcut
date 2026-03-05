@@ -13,6 +13,7 @@ import { useSessionTimeout } from './hooks/useSessionTimeout'
 import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
 import { performanceMonitor } from './utils/performance'
 import { initAnalytics, trackPageView, trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './utils/analytics'
+import { onNetworkStatusChange } from './utils/errorHandling'
 
 // Lazy load route components for code splitting
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
@@ -24,6 +25,9 @@ const OnboardingStep2 = lazy(() => import('./components/OnboardingStep2.jsx'))
 const OnboardingStep3 = lazy(() => import('./components/OnboardingStep3.jsx'))
 const Dashboard = lazy(() => import('./components/Dashboard.jsx'))
 const VideoEditor = lazy(() => import('./components/VideoEditor/VideoEditor.jsx'))
+const LongToShorts = lazy(() => import('./components/LongToShorts/LongToShorts.jsx'))
+const FeedbackForm = lazy(() => import('./components/FeedbackForm.jsx'))
+const BugReport = lazy(() => import('./components/BugReport.jsx'))
 
 const RouteLoadingFallback = () => (
   <div style={{
@@ -59,6 +63,39 @@ const RouteLoadingFallback = () => (
   </div>
 )
 
+const OfflineBanner = () => {
+  const [isOffline, setIsOffline] = useState(!navigator.onLine)
+
+  useEffect(() => {
+    return onNetworkStatusChange(({ online }) => setIsOffline(!online))
+  }, [])
+
+  if (!isOffline) return null
+
+  return (
+    <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 10000,
+      background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+      padding: '8px 16px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      fontFamily: "'Spline Sans', sans-serif",
+      fontSize: '13px',
+      fontWeight: 600,
+      color: 'white',
+    }}>
+      <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>cloud_off</span>
+      You're offline. Some features may be unavailable.
+    </div>
+  )
+}
+
 const SessionTimeoutBanner = () => {
   const { showWarning, timeRemainingMs, extendSession, logoutNow } = useSessionTimeout()
 
@@ -88,6 +125,74 @@ const SessionTimeoutBanner = () => {
       </div>
     </div>
   )
+}
+
+const HelpFab = () => {
+  const [open, setOpen] = useState(false)
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [showBugReport, setShowBugReport] = useState(false)
+
+  return (
+    <>
+      {/* FAB menu */}
+      {open && (
+        <div style={{
+          position: 'fixed', bottom: '80px', right: '20px', zIndex: 9998,
+          display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end',
+        }}>
+          <button onClick={() => { setShowFeedback(true); setOpen(false); }} style={fabItemStyle}>
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>rate_review</span>
+            Send Feedback
+          </button>
+          <button onClick={() => { setShowBugReport(true); setOpen(false); }} style={fabItemStyle}>
+            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>bug_report</span>
+            Report Bug
+          </button>
+        </div>
+      )}
+
+      {/* FAB button */}
+      <button
+        onClick={() => setOpen(!open)}
+        aria-label="Help and feedback"
+        style={{
+          position: 'fixed', bottom: '20px', right: '20px', zIndex: 9998,
+          width: '48px', height: '48px', borderRadius: '50%',
+          background: '#75AADB', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 4px 16px rgba(117,170,219,0.3)',
+          transition: 'transform 0.2s ease',
+          transform: open ? 'rotate(45deg)' : 'none',
+        }}
+      >
+        <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#0a0a0a' }}>
+          {open ? 'close' : 'help'}
+        </span>
+      </button>
+
+      {/* Modals */}
+      {showFeedback && (
+        <Suspense fallback={null}>
+          <FeedbackForm onClose={() => setShowFeedback(false)} />
+        </Suspense>
+      )}
+      {showBugReport && (
+        <Suspense fallback={null}>
+          <BugReport onClose={() => setShowBugReport(false)} />
+        </Suspense>
+      )}
+    </>
+  )
+}
+
+const fabItemStyle = {
+  display: 'flex', alignItems: 'center', gap: '8px',
+  padding: '10px 16px', borderRadius: '8px',
+  background: '#1a2332', border: '1px solid rgba(255,255,255,0.1)',
+  color: 'white', fontSize: '13px', fontWeight: 600,
+  cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+  boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+  whiteSpace: 'nowrap',
 }
 
 const AppContent = () => {
@@ -148,6 +253,7 @@ const AppContent = () => {
 
   return (
     <>
+      <OfflineBanner />
       <SessionTimeoutBanner />
       <Suspense fallback={<RouteLoadingFallback />}>
         <Routes>
@@ -164,9 +270,11 @@ const AppContent = () => {
             path="/login"
             element={
               <PublicRoute>
-                <DesktopLogin 
-                  onNavigateToRegister={() => navigate('/register')}
-                />
+                <ErrorBoundary name="login" message="Login failed to load" onReset={() => navigate('/login')}>
+                  <DesktopLogin
+                    onNavigateToRegister={() => navigate('/register')}
+                  />
+                </ErrorBoundary>
               </PublicRoute>
             }
           />
@@ -174,9 +282,11 @@ const AppContent = () => {
             path="/register"
             element={
               <PublicRoute>
-                <DesktopRegister 
-                  onNavigateToLogin={() => navigate('/login')}
-                />
+                <ErrorBoundary name="register" message="Registration failed to load" onReset={() => navigate('/register')}>
+                  <DesktopRegister
+                    onNavigateToLogin={() => navigate('/login')}
+                  />
+                </ErrorBoundary>
               </PublicRoute>
             }
           />
@@ -184,7 +294,9 @@ const AppContent = () => {
             path="/reset-password"
             element={
               <PublicRoute>
-                <ResetPassword />
+                <ErrorBoundary name="reset-password" message="Password reset failed to load" onReset={() => navigate('/reset-password')}>
+                  <ResetPassword />
+                </ErrorBoundary>
               </PublicRoute>
             }
           />
@@ -192,7 +304,9 @@ const AppContent = () => {
             path="/verify-email"
             element={
               <ProtectedRoute>
-                <VerifyEmail />
+                <ErrorBoundary name="verify-email" message="Email verification failed to load" onReset={() => navigate('/verify-email')}>
+                  <VerifyEmail />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -201,10 +315,13 @@ const AppContent = () => {
             path="/onboarding/1"
             element={
               <ProtectedRoute>
-                <OnboardingStep1
-                  onContinue={() => navigate('/onboarding/2')}
-                  onSkip={() => navigate('/onboarding/2')}
-                />
+                <ErrorBoundary name="onboarding" onReset={() => navigate('/onboarding/1')}>
+                  <OnboardingStep1
+                    onContinue={() => navigate('/onboarding/2')}
+                    onSkip={() => navigate('/onboarding/2')}
+                    onSkipAll={() => navigate('/dashboard')}
+                  />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -212,10 +329,13 @@ const AppContent = () => {
             path="/onboarding/2"
             element={
               <ProtectedRoute>
-                <OnboardingStep2
-                  onContinue={() => navigate('/onboarding/3')}
-                  onSkip={() => navigate('/onboarding/3')}
-                />
+                <ErrorBoundary name="onboarding" onReset={() => navigate('/onboarding/2')}>
+                  <OnboardingStep2
+                    onContinue={() => navigate('/onboarding/3')}
+                    onSkip={() => navigate('/onboarding/3')}
+                    onSkipAll={() => navigate('/dashboard')}
+                  />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -223,10 +343,12 @@ const AppContent = () => {
             path="/onboarding/3"
             element={
               <ProtectedRoute>
-                <OnboardingStep3
-                  onComplete={() => navigate('/dashboard')}
-                  onSkip={() => navigate('/dashboard')}
-                />
+                <ErrorBoundary name="onboarding" onReset={() => navigate('/onboarding/3')}>
+                  <OnboardingStep3
+                    onComplete={() => navigate('/dashboard')}
+                    onSkip={() => navigate('/dashboard')}
+                  />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -234,7 +356,9 @@ const AppContent = () => {
             path="/dashboard"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <ErrorBoundary name="dashboard" message="Dashboard failed to load" onReset={() => navigate('/dashboard')}>
+                  <Dashboard />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
@@ -242,12 +366,25 @@ const AppContent = () => {
             path="/editor"
             element={
               <ProtectedRoute>
-                <VideoEditor />
+                <ErrorBoundary name="editor" message="Video editor encountered an error" onReset={() => navigate('/editor')}>
+                  <VideoEditor />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/long-to-shorts"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary name="long-to-shorts" message="AI Shorts feature encountered an error" onReset={() => navigate('/long-to-shorts')}>
+                  <LongToShorts />
+                </ErrorBoundary>
               </ProtectedRoute>
             }
           />
         </Routes>
       </Suspense>
+      <HelpFab />
     </>
   )
 }

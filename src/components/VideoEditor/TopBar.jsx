@@ -1,7 +1,9 @@
-import { useState, useCallback, useEffect, memo } from 'react';
+import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import Icon from './Icon';
 import GhostBtn from './GhostBtn';
 import { styles } from './styles';
+import { sanitizeTextInput } from '../../utils/validation';
+import { KEYBOARD_SHORTCUTS } from './constants';
 
 /* ========== CSS ANIMATIONS ========== */
 const TOP_BAR_CSS = `
@@ -74,21 +76,55 @@ const TOP_BAR_CSS = `
   .logo-container {
     transition: transform 0.15s ease;
   }
-  
+
   .logo-container:hover {
     transform: scale(1.02);
+  }
+
+  .menu-dropdown {
+    animation: fadeIn 0.12s ease;
+  }
+
+  .menu-dropdown-item {
+    transition: background 0.1s ease;
+  }
+
+  .menu-dropdown-item:hover {
+    background: rgba(117, 170, 219, 0.12) !important;
+  }
+
+  .shortcuts-modal-backdrop {
+    animation: fadeIn 0.2s ease;
+  }
+
+  .shortcuts-modal-content {
+    animation: slideUp 0.3s ease;
+  }
+
+  .shortcut-key {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 11px;
+    color: #cbd5e1;
+    min-width: 24px;
+    text-align: center;
   }
 `;
 
 /* ========== EXPORT MODAL COMPONENT ========== */
-const ExportModal = memo(({ 
-  isOpen, 
-  onClose, 
-  onExport, 
-  isExporting, 
-  progress, 
+const ExportModal = memo(({
+  isOpen,
+  onClose,
+  onExport,
+  isExporting,
+  progress,
   operationLabel = 'Processing',
-  resolutions 
+  resolutions,
+  onCancel
 }) => {
   const [selectedResolution, setSelectedResolution] = useState('1080p');
   
@@ -367,11 +403,30 @@ const ExportModal = memo(({
               color: '#75aadb',
               fontSize: '18px',
               fontWeight: 700,
-              margin: 0,
+              margin: '0 0 20px',
               fontFamily: 'monospace'
             }}>
               {Math.round(progress)}%
             </p>
+            {onCancel && (
+              <button
+                onClick={onCancel}
+                style={{
+                  background: 'rgba(239,68,68,0.12)',
+                  border: '1px solid rgba(239,68,68,0.3)',
+                  borderRadius: '8px',
+                  padding: '9px 28px',
+                  color: '#ef4444',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  fontFamily: "'Spline Sans', sans-serif",
+                }}
+                aria-label="Cancel export"
+              >
+                Cancel Export
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -381,9 +436,178 @@ const ExportModal = memo(({
 
 ExportModal.displayName = 'ExportModal';
 
+/* ========== KEYBOARD SHORTCUTS MODAL ========== */
+const SHORTCUT_CATEGORIES = {
+  Playback: ['PLAY_PAUSE', 'SKIP_FORWARD', 'SKIP_BACKWARD', 'SKIP_FORWARD_LARGE', 'SKIP_BACKWARD_LARGE', 'FRAME_FORWARD', 'FRAME_BACKWARD', 'GO_TO_START', 'GO_TO_END'],
+  Editing: ['SPLIT', 'DELETE', 'DESELECT'],
+  Audio: ['MUTE', 'VOLUME_UP', 'VOLUME_DOWN'],
+  View: ['FULLSCREEN'],
+  File: ['SAVE', 'EXPORT', 'IMPORT'],
+};
+
+const KeyboardShortcutsModal = memo(({ isOpen, onClose }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="shortcuts-modal-backdrop"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 3500, backdropFilter: 'blur(4px)'
+      }}
+      role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title"
+    >
+      <style>{TOP_BAR_CSS}</style>
+      <div
+        className="shortcuts-modal-content"
+        style={{
+          background: '#1a2332', borderRadius: '12px', padding: '24px',
+          width: '520px', maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto',
+          border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 24px 64px rgba(0,0,0,0.5)'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 id="shortcuts-modal-title" style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Icon i="keyboard" s={22} c="#75aadb" />
+            Keyboard Shortcuts
+          </h2>
+          <button onClick={onClose} style={{ ...styles.ghost, padding: '6px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center' }} aria-label="Close shortcuts dialog">
+            <Icon i="close" s={20} c="#94a3b8" />
+          </button>
+        </div>
+
+        {Object.entries(SHORTCUT_CATEGORIES).map(([category, keys]) => (
+          <div key={category} style={{ marginBottom: '20px' }}>
+            <h3 style={{ fontSize: '11px', color: '#75aadb', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600, margin: '0 0 10px 0' }}>
+              {category}
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {keys.map((k) => {
+                const shortcut = KEYBOARD_SHORTCUTS[k];
+                if (!shortcut) return null;
+                return (
+                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', borderRadius: '6px', background: 'rgba(255,255,255,0.02)' }}>
+                    <span style={{ fontSize: '13px', color: '#cbd5e1' }}>{shortcut.description}</span>
+                    <span className="shortcut-key">{shortcut.key}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
+KeyboardShortcutsModal.displayName = 'KeyboardShortcutsModal';
+
+/* ========== MENU DROPDOWN ========== */
+const MENU_ITEMS = [
+  { id: 'new', icon: 'add', label: 'New Project', shortcut: null },
+  { id: 'save', icon: 'save', label: 'Save', shortcut: 'Ctrl+S' },
+  { id: 'divider1' },
+  { id: 'export', icon: 'download', label: 'Export', shortcut: 'Ctrl+E' },
+  { id: 'divider2' },
+  { id: 'settings', icon: 'settings', label: 'Settings', shortcut: null },
+];
+
+const MenuDropdown = memo(({ isOpen, onClose, onNewProject, onSave, onExport, onSettings, hasMediaToExport }) => {
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        onClose();
+      }
+    };
+    const handleEscape = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    // Delay listener so the click that opens the menu doesn't immediately close it
+    requestAnimationFrame(() => {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
+    });
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
+  const handleItemClick = (id) => {
+    onClose();
+    switch (id) {
+      case 'new': onNewProject?.(); break;
+      case 'save': onSave?.(); break;
+      case 'export': if (hasMediaToExport) onExport?.(); break;
+      case 'settings': onSettings?.(); break;
+    }
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      className="menu-dropdown"
+      role="menu"
+      style={{
+        position: 'absolute', top: '100%', left: 0, marginTop: '4px',
+        background: '#1a2332', borderRadius: '8px', padding: '4px',
+        border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+        minWidth: '200px', zIndex: 100
+      }}
+    >
+      {MENU_ITEMS.map((item) => {
+        if (item.id.startsWith('divider')) {
+          return <div key={item.id} style={{ height: '1px', background: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />;
+        }
+        const disabled = item.id === 'export' && !hasMediaToExport;
+        return (
+          <button
+            key={item.id}
+            className="menu-dropdown-item"
+            role="menuitem"
+            onClick={() => !disabled && handleItemClick(item.id)}
+            style={{
+              ...styles.ghost, display: 'flex', alignItems: 'center', gap: '10px',
+              padding: '8px 12px', borderRadius: '6px', width: '100%', textAlign: 'left',
+              color: disabled ? '#475569' : '#cbd5e1', cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.5 : 1, fontSize: '13px',
+              fontFamily: "'Spline Sans', sans-serif"
+            }}
+            disabled={disabled}
+          >
+            <Icon i={item.icon} s={16} c={disabled ? '#475569' : '#94a3b8'} />
+            <span style={{ flex: 1 }}>{item.label}</span>
+            {item.shortcut && (
+              <span style={{ fontSize: '11px', color: '#475569', fontFamily: "'SF Mono', Monaco, monospace" }}>{item.shortcut}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+});
+
+MenuDropdown.displayName = 'MenuDropdown';
+
 /* ========== TOP BAR COMPONENT ========== */
-const TopBar = ({ 
-  projectName, 
+const TopBar = ({
+  projectName,
   onProjectNameChange,
   onExport,
   isExporting = false,
@@ -395,10 +619,19 @@ const TopBar = ({
   canUndo = false,
   canRedo = false,
   onUndo,
-  onRedo
+  onRedo,
+  onCancelExport,
+  onNewProject,
+  onSave,
+  onSettings,
+  editorLayout = 'default',
+  onLayoutChange
 }) => {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const menuAnchorRef = useRef(null);
   
   const handleExportClick = useCallback(() => {
     if (isExporting) {
@@ -427,7 +660,9 @@ const TopBar = ({
   }, [isExporting]);
   
   const handleTitleChange = useCallback((e) => {
-    onProjectNameChange(e.target.value);
+    // Sanitize project name before updating: max 100 chars, remove HTML, trim
+    const sanitized = sanitizeTextInput(e.target.value, { maxLength: 100 });
+    onProjectNameChange(sanitized);
   }, [onProjectNameChange]);
   
   const handleTitleKeyDown = useCallback((e) => {
@@ -512,20 +747,33 @@ const TopBar = ({
             marginLeft: "8px",
             fontSize: "11px"
           }}>
-            <button 
-              className="menu-btn"
-              style={{
-                ...styles.ghost,
-                display: "flex",
-                alignItems: "center",
-                gap: "2px",
-                color: "#94a3b8"
-              }}
-              aria-haspopup="menu"
-              aria-label="Open menu"
-            >
-              Menu <Icon i="arrow_drop_down" s={16} />
-            </button>
+            <div ref={menuAnchorRef} style={{ position: 'relative' }}>
+              <button
+                className="menu-btn"
+                onClick={() => setShowMenu(v => !v)}
+                style={{
+                  ...styles.ghost,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "2px",
+                  color: showMenu ? "#75aadb" : "#94a3b8"
+                }}
+                aria-haspopup="menu"
+                aria-expanded={showMenu}
+                aria-label="Open menu"
+              >
+                Menu <Icon i="arrow_drop_down" s={16} />
+              </button>
+              <MenuDropdown
+                isOpen={showMenu}
+                onClose={() => setShowMenu(false)}
+                onNewProject={onNewProject}
+                onSave={onSave}
+                onExport={handleExportClick}
+                onSettings={onSettings}
+                hasMediaToExport={hasMediaToExport}
+              />
+            </div>
             {/* Undo/Redo buttons */}
             <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <button
@@ -611,15 +859,21 @@ const TopBar = ({
         
         {/* Right section - Actions */}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <GhostBtn 
-            i="keyboard" 
+          <GhostBtn
+            i="keyboard"
             title="Keyboard shortcuts"
             aria-label="Show keyboard shortcuts"
+            onClick={() => setShowShortcuts(true)}
           />
-          <GhostBtn 
-            i="grid_view" 
-            title="Layout options"
-            aria-label="Layout options"
+          <GhostBtn
+            i={editorLayout === 'default' ? 'grid_view' : editorLayout === 'wide-timeline' ? 'view_agenda' : 'view_compact'}
+            title={`Layout: ${editorLayout}`}
+            aria-label="Cycle layout"
+            onClick={() => {
+              const layouts = ['default', 'wide-timeline', 'compact'];
+              const idx = layouts.indexOf(editorLayout);
+              onLayoutChange?.(layouts[(idx + 1) % layouts.length]);
+            }}
           />
           <button 
             onClick={handleExportClick}
@@ -647,6 +901,12 @@ const TopBar = ({
         progress={exportProgress}
         operationLabel={currentOperation ? `${currentOperation}...` : 'Exporting video...'}
         resolutions={resolutions}
+        onCancel={isExporting ? onCancelExport : undefined}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
       />
     </>
   );

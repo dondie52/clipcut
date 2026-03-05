@@ -83,15 +83,6 @@ export const DEFAULTS = {
   FPS: 30
 };
 
-/* ========== MEDIA THUMBS (deprecated) ========== */
-export const MEDIA_THUMBS = [];
-
-/* ========== TIME MARKERS ========== */
-export const TIME_MARKERS = ["00:00", "00:10", "00:20", "00:30", "00:40", "00:50"];
-
-/* ========== WAVEFORM HEIGHTS ========== */
-export const WAVE_HEIGHTS = [2,4,6,3,5,8,4,6,2,4,7,3,5,2,6,4,8,3,5,7,3,6,4,8,2,5,7,3,4,6];
-
 /* ========== SCROLLBAR CSS ========== */
 export const SCROLLBAR_CSS = `
   .cs::-webkit-scrollbar {
@@ -257,3 +248,64 @@ export const Z_INDEX = {
   modal: 1000,
   toast: 2000
 };
+
+/* ========== DEFAULT CLIP PROPERTIES (non-destructive editing) ========== */
+export const DEFAULT_CLIP_PROPERTIES = {
+  volume: 1.0,
+  isMuted: false,
+  speed: 1.0,
+  rotation: 0,
+  opacity: 1.0,
+  positionX: 0,
+  positionY: 0,
+  scale: 1.0,
+  brightness: 0,
+  contrast: 0,
+  saturation: 1.0,
+  temperature: 0,
+  filterName: null,
+  filterStrength: 50,
+  effects: [],
+  fadeIn: 0,
+  fadeOut: 0,
+  trimStart: 0,
+  trimEnd: 0,
+  colorGrading: { shadows: '#1a1a2e', midtones: '#4a4a5e', highlights: '#ffffff' },
+};
+
+/* ========== FILTER PRESETS ========== */
+export const FILTER_PRESETS = [
+  { name: 'None', filter: null, css: null },
+  { name: '90s', filter: 'colorbalance=rs=.3:gs=-.1:bs=-.3,eq=saturation=0.8', css: 'sepia(0.3) saturate(0.8)' },
+  { name: 'Vintage', filter: 'eq=saturation=0.6:brightness=0.05', css: 'sepia(0.4) saturate(0.6) brightness(1.05)' },
+  { name: 'Cinema', filter: 'eq=contrast=1.2:brightness=-0.05:saturation=1.1', css: 'contrast(1.2) brightness(0.95) saturate(1.1)' },
+  { name: 'B&W', filter: 'eq=saturation=0', css: 'grayscale(1)' },
+  { name: 'Warm', filter: 'colortemperature=6500', css: 'sepia(0.15) saturate(1.2)' },
+  { name: 'Cool', filter: 'colortemperature=3500', css: 'saturate(0.9) hue-rotate(10deg)' },
+  { name: 'Sepia', filter: 'colorchannelmixer=.393:.769:.189:0:.349:.686:.168:0:.272:.534:.131', css: 'sepia(0.8)' },
+];
+
+/* ========== EFFECT PRESETS ========== */
+export const EFFECT_PRESETS = [
+  { name: 'Motion Blur', type: 'blur', params: { radius: 5 }, css: 'blur(2px)' },
+  { name: 'Sharpen', type: 'sharpen', params: { strength: 1.0 }, css: 'contrast(1.1)' },
+  { name: 'Vignette', type: 'vignette', params: {}, css: null },
+  { name: 'Gaussian Blur', type: 'blur', params: { radius: 10 }, css: 'blur(4px)' },
+];
+
+/* ========== ANIMATION PRESETS ========== */
+export const ANIMATION_PRESETS = [
+  { name: 'Fade In', key: 'fadeIn', value: 1.0 },
+  { name: 'Fade Out', key: 'fadeOut', value: 1.0 },
+  { name: 'Scale Up', key: 'scaleUp', value: true },
+  { name: 'Slide Left', key: 'slideLeft', value: true },
+];
+
+/* ========== SPEED PRESETS ========== */
+export const SPEED_PRESETS = [
+  { label: '0.25x', value: 0.25 },
+  { label: '0.5x', value: 0.5 },
+  { label: '1x', value: 1.0 },
+  { label: '1.5x', value: 1.5 },
+  { label: '2x', value: 2.0 },
+];

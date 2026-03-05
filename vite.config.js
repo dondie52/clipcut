@@ -10,13 +10,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 const securityHeaders = {
   // Required for SharedArrayBuffer (FFmpeg WASM)
   'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'require-corp',
+  'Cross-Origin-Embedder-Policy': 'credentialless',
   // Security headers
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; media-src 'self' blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://www.google-analytics.com https://*.sentry.io https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com http://localhost:*; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 }
 
 /**
@@ -175,7 +176,14 @@ export default defineConfig({
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
   },
   server: {
-    headers: securityHeaders
+    headers: securityHeaders,
+    proxy: {
+      '/api/cf-ai': {
+        target: 'https://api.cloudflare.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/cf-ai/, ''),
+      },
+    },
   },
   preview: {
     headers: securityHeaders

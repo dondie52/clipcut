@@ -5,7 +5,7 @@
 
 - **Student ID:** 202103579
 - **Project Type:** Final Year Project (FYP)
-- **Status:** Development in progress — React web app foundation built, routing and core UI components implemented
+- **Status:** Development in progress — full auth flow, video editor UI, Supabase integration, and monitoring all implemented
 
 ## What ClipCut Is
 A free alternative to CapCut (which went paid) that works on Linux, Windows, Web, and Mobile. It targets content creators in Botswana and Africa who can't afford subscription-based editing tools and/or use Linux where CapCut isn't available.
@@ -18,10 +18,14 @@ A free alternative to CapCut (which went paid) that works on Linux, Windows, Web
 | **Web App** | React + Vite (same codebase as desktop) | Currently in development, will be deployed on Vercel |
 | **Mobile App** | Flutter (Dart) | Android & iOS |
 | **Backend/DB** | Supabase | PostgreSQL, Auth, Realtime, Storage |
-| **Video Engine** | FFmpeg | Via fluent-ffmpeg (Node.js) on desktop/web, FFmpeg Kit on mobile |
+| **Video Engine** | @ffmpeg/ffmpeg 0.12.15 + @ffmpeg/util | WASM-based, runs in browser; fluent-ffmpeg via Node.js on desktop |
+| **Error Tracking** | @sentry/react 10.40.0 | Production error monitoring |
+| **Analytics** | react-ga4 2.1.0 | Google Analytics 4 + Core Web Vitals |
+| **PWA** | vite-plugin-pwa 1.2.0 | Offline support, service worker |
+| **Image Processing** | sharp 0.34.5 | Image optimization |
 | **Dev Tools** | Cursor IDE, Claude AI, Git/GitHub | |
 | **Build Tool** | Vite 5.0.8 | Fast development server and build tool |
-| **Routing** | React Router DOM 7.13.0 | Client-side routing for web app |
+| **Routing** | React Router DOM 7.13.0 | Client-side routing with lazy loading |
 
 ## Core Features (In Scope)
 1. **Timeline-based editor** — drag-and-drop media import, clip cutting, trimming, splitting, reordering
@@ -65,7 +69,7 @@ A free alternative to CapCut (which went paid) that works on Linux, Windows, Web
 - Desktop left side uses the logo alongside "ClipCut" text horizontally
 - Mobile uses the logo centered above "ClipCut" text vertically
 
-## Screens Designed So Far
+## Screens Implemented
 
 ### 1. Desktop Splash Screen (React/JSX) ✅
 - Animated scissors-cutting-the-screen reveal
@@ -105,7 +109,7 @@ A free alternative to CapCut (which went paid) that works on Linux, Windows, Web
 - Google sign-in button (white), "or" divider
 - Botswana flag stripe at bottom
 - Font: Spline Sans
-- Files: `DesktopLogin.jsx`, `DesktopRegister.jsx` (separate components with navigation)
+- Files: `DesktopLogin.jsx`, `DesktopRegister.jsx`
 
 ### 7. Mobile Login/Signup (React/JSX) ✅
 - Phone frame (390x844) with notch and home indicator
@@ -130,78 +134,149 @@ A free alternative to CapCut (which went paid) that works on Linux, Windows, Web
 - Main project dashboard after login/onboarding
 - File: `Dashboard.jsx`
 
+### 10. Reset Password (React/JSX) ✅
+- Secure URL token validation (access_token, type params)
+- Rate limiting: 3 attempts per 10 minutes
+- Password strength display
+- File: `ResetPassword.jsx`
+
+### 11. Verify Email (React/JSX) ✅
+- Auto-redirect when email is verified
+- Resend email with rate limiting (3 resends per 5 minutes)
+- File: `VerifyEmail.jsx`
+
+### 12. Video Editor (React/JSX) ✅
+- Full editor layout: top bar → left media panel → center player → right inspector → bottom timeline
+- Undo/redo system, auto-save
+- Export modal with resolution presets (480p, 720p, 1080p)
+- Folder: `VideoEditor/` (14 files)
+
+### 13. Settings (React/JSX) ✅
+- User profile settings
+- GDPR compliance: export all user data, delete account
+- File: `Settings.jsx`
+
+### 14. Cookie Consent (React/JSX) ✅
+- Cookie consent banner displayed on first visit
+- File: `CookieConsent.jsx`
+
 ## Screens Still Needed
 - [ ] Template browser (full page)
-- [ ] Export settings modal
+- [ ] Mobile dashboard / project selector
 - [ ] Text editor overlay panel
 - [ ] Transition picker panel
 - [ ] Audio mixer panel
-- [ ] Settings/preferences page
-- [ ] Mobile dashboard / project selector
-- [ ] Video editor timeline interface
-- [ ] Media library/import panel
+- [ ] Settings/preferences page (expanded)
 
 ## Project Architecture (Current)
 
 ```
-clipcut-main/                 # Current web app structure
+clipcut-main/
 ├── src/
 │   ├── components/
-│   │   ├── ClipCutSplash.jsx        # Splash screen ✅
-│   │   ├── DesktopLogin.jsx         # Login page ✅
-│   │   ├── DesktopRegister.jsx      # Registration page ✅
-│   │   ├── OnboardingStep1.jsx      # Onboarding step 1 ✅
-│   │   ├── OnboardingStep2.jsx      # Onboarding step 2 ✅
-│   │   ├── OnboardingStep3.jsx      # Onboarding step 3 ✅
-│   │   ├── Dashboard.jsx            # Main dashboard ✅
-│   │   ├── DesktopAuth.jsx          # (Legacy auth component)
-│   │   └── MobileAuth.jsx           # Mobile auth (not yet integrated)
-│   ├── App.jsx                      # Main app with routing ✅
-│   └── main.jsx                     # Entry point ✅
-├── public/                          # Static assets
-├── index.html                       # HTML template
-├── vite.config.js                   # Vite configuration
-└── package.json                     # Dependencies
+│   │   ├── VideoEditor/
+│   │   │   ├── VideoEditor.jsx        # Main editor with undo/redo, auto-save
+│   │   │   ├── TopBar.jsx             # Project name, export button, edit/color/audio tabs
+│   │   │   ├── Toolbar.jsx            # Split, text, audio, filters, effects buttons
+│   │   │   ├── Timeline.jsx           # Multi-track timeline component
+│   │   │   ├── Player.jsx             # Video preview player
+│   │   │   ├── MediaPanel.jsx         # Left sidebar media library (video/audio/text tabs)
+│   │   │   ├── InspectorPanel.jsx     # Right sidebar properties inspector
+│   │   │   ├── InspectorComponents.jsx # Reusable inspector UI pieces
+│   │   │   ├── ExportModal.jsx        # Export settings dialog
+│   │   │   ├── Icon.jsx               # Icon component
+│   │   │   ├── GhostBtn.jsx           # Ghost button styling
+│   │   │   ├── styles.js              # Shared CSS-in-JS styles
+│   │   │   ├── constants.js           # Editor-specific constants
+│   │   │   └── index.js
+│   │   ├── ClipCutSplash.jsx          # Splash screen with scissors animation ✅
+│   │   ├── DesktopLogin.jsx           # Login page with split layout ✅
+│   │   ├── DesktopRegister.jsx        # Registration page with split layout ✅
+│   │   ├── ResetPassword.jsx          # Password reset with secure token handling ✅
+│   │   ├── VerifyEmail.jsx            # Email verification with auto-redirect ✅
+│   │   ├── MobileAuth.jsx             # Mobile auth (not yet integrated into routing) ⚠️
+│   │   ├── OnboardingStep1.jsx        # Onboarding step 1 ✅
+│   │   ├── OnboardingStep2.jsx        # Onboarding step 2 ✅
+│   │   ├── OnboardingStep3.jsx        # Onboarding step 3 ✅
+│   │   ├── Dashboard.jsx              # Main project dashboard ✅
+│   │   ├── Settings.jsx               # User settings + GDPR compliance ✅
+│   │   ├── CookieConsent.jsx          # Cookie consent banner ✅
+│   │   ├── Footer.jsx                 # Footer component ✅
+│   │   ├── OptimizedImage.jsx         # Image optimization wrapper ✅
+│   │   ├── ErrorBoundary.jsx          # React error boundary ✅
+│   │   └── index.js
+│   ├── hooks/
+│   │   ├── useFFmpeg.js               # FFmpeg WASM loading + video processing
+│   │   ├── usePerformance.js          # Component render + memory tracking
+│   │   ├── useSessionTimeout.js       # 15-min idle timeout + warning banner
+│   │   └── index.js
+│   ├── services/
+│   │   ├── projectService.js          # Cloud save/load, media upload, sanitization
+│   │   ├── authService.js             # Supabase auth wrapper
+│   │   ├── ffmpeg.js                  # FFmpeg command builder
+│   │   ├── videoOperations.js         # Trim, split, merge
+│   │   ├── audioOperations.js         # Volume control, mixing
+│   │   ├── effects.js                 # Transition effects, filters
+│   │   ├── gdprService.js             # Export/delete user data (GDPR)
+│   │   └── index.js
+│   ├── supabase/
+│   │   ├── supabaseClient.js          # Supabase client init + isSupabaseConfigured()
+│   │   ├── authService.js             # signUp, signIn, signOut, Google OAuth, resetPassword, updatePassword, uploadAvatar
+│   │   ├── AuthContext.jsx            # React context for auth state + session timeout
+│   │   ├── ProtectedRoute.jsx         # ProtectedRoute + PublicRoute guards
+│   │   └── index.js
+│   ├── utils/
+│   │   ├── validation.js              # validateEmail/Username/Password, sanitizeTextInput/FileName/SearchQuery/UrlParam
+│   │   ├── analytics.js               # GA4 init, trackEvent, trackPageView, Core Web Vitals (LCP/FID/CLS/TTFB/INP)
+│   │   ├── errorTracking.js           # Sentry init, captureError, addBreadcrumb
+│   │   ├── performance.js             # performanceMonitor, trackAPIRequest, trackFileUpload
+│   │   ├── fileUpload.js              # uploadFile, compressImage, file type validation
+│   │   ├── rateLimiter.js             # createRateLimiter (e.g. 3 attempts/10 min)
+│   │   ├── errorAlerts.js             # User-friendly error display
+│   │   ├── logger.js                  # Dev/prod conditional logging
+│   │   ├── serviceWorker.js           # PWA service worker registration
+│   │   ├── thumbnailCache.js          # Video thumbnail caching
+│   │   └── index.js
+│   ├── constants/
+│   │   ├── app.js                     # Splash duration, mobile breakpoint (768px)
+│   │   ├── editor.js                  # Timeline zoom levels, clip defaults, undo history limit, auto-save interval, export resolution presets
+│   │   ├── theme.js                   # Design system (colours #75AADB, fonts, breakpoints, spacing, shadows)
+│   │   └── index.js
+│   ├── App.jsx                        # Routing with lazy loading, auth guards, mobile detection, session timeout banner, error boundary
+│   └── main.jsx                       # React entry point
+├── supabase/
+│   ├── migrations/
+│   │   ├── 001_profiles.sql           # User profile table (username, avatar_url)
+│   │   ├── 002_projects.sql           # Projects table (user_id, name, project_data JSONB, duration, resolution)
+│   │   ├── 003_templates.sql          # Community templates table
+│   │   ├── 004_template_ratings.sql   # Template ratings (1–5 stars, unique per user/template)
+│   │   ├── 005_storage_buckets.sql    # Storage buckets (avatars, projects, media, templates)
+│   │   └── 006_login_attempts.sql     # Login attempt tracking for security
+│   └── seed.sql                       # Sample data for development
+├── public/                            # Static assets
+├── index.html
+├── vite.config.js
+└── package.json
+```
 
-## Project Architecture (Planned - Full Structure)
+## Project Architecture (Planned — Electron + Flutter)
 
 ```
 clipcut/
 ├── desktop/                  # Electron wrapper (future)
 │   ├── main.js              # Electron main process
 │   └── preload.js           # Bridge to Node.js/FFmpeg
-├── web/                     # React app (current - clipcut-main)
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Timeline/    # Timeline editor component (TODO)
-│   │   │   ├── Preview/     # Video preview player (TODO)
-│   │   │   ├── MediaPanel/  # Left sidebar media library (TODO)
-│   │   │   ├── Inspector/   # Right sidebar properties (TODO)
-│   │   │   ├── Toolbar/     # Top toolbar (TODO)
-│   │   │   ├── Splash/      # Splash screen ✅
-│   │   │   ├── Auth/        # Login/Signup ✅
-│   │   │   └── Dashboard/   # Project dashboard ✅
-│   │   ├── hooks/           # Custom React hooks (TODO)
-│   │   ├── services/
-│   │   │   ├── ffmpeg.js    # FFmpeg command builder (TODO)
-│   │   │   ├── supabase.js  # Supabase client (TODO)
-│   │   │   └── project.js   # Project save/load (TODO)
-│   │   ├── store/           # State management (TODO)
-│   │   └── App.jsx          # Main app with routing ✅
-│   └── package.json
-├── mobile/                   # Flutter app (future)
-│   ├── lib/
-│   │   ├── screens/
-│   │   ├── widgets/
-│   │   ├── services/
-│   │   └── main.dart
-│   └── pubspec.yaml
-└── supabase/
-    ├── migrations/           # Database schema (TODO)
-    └── seed.sql
+├── web/                     # React app (current — clipcut-main)
+└── mobile/                  # Flutter app (future)
+    ├── lib/
+    │   ├── screens/
+    │   ├── widgets/
+    │   ├── services/
+    │   └── main.dart
+    └── pubspec.yaml
 ```
 
-## Database Schema (Planned — Supabase/PostgreSQL)
+## Database Schema (Implemented — Supabase/PostgreSQL)
 
 ```sql
 -- Users (handled by Supabase Auth, extended with profiles)
@@ -245,6 +320,15 @@ CREATE TABLE template_ratings (
   rating INTEGER CHECK (rating >= 1 AND rating <= 5),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(template_id, user_id)
+);
+
+-- Login attempts (security)
+CREATE TABLE login_attempts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT,
+  ip_address TEXT,
+  attempted_at TIMESTAMPTZ DEFAULT NOW(),
+  success BOOLEAN
 );
 ```
 
@@ -298,39 +382,70 @@ When continuing development, the priority order is:
 1. ✅ Set up the project repo and folder structure
 2. ✅ Build React web app foundation with routing
 3. ✅ Implement splash screen, auth, onboarding, and dashboard UI
-4. **Next:** Integrate Supabase authentication (replace TODO placeholders)
-5. **Next:** Design and build timeline editor component
-6. **Next:** Integrate FFmpeg for video processing
-7. **Next:** Add Supabase cloud storage for projects
-8. **Next:** Design remaining screens (template browser, export modal, mobile dashboard)
-9. **Next:** Wrap in Electron for desktop
-10. **Next:** Build Flutter mobile app
-11. **Next:** Testing and documentation
+4. ✅ Integrate Supabase authentication (signup, login, Google OAuth, password reset, email verification)
+5. ✅ Build video editor UI (timeline, player, inspector, media panel, export modal)
+6. ✅ Add error tracking (Sentry), analytics (GA4), performance monitoring, PWA support
+7. **Next:** Connect FFmpeg WASM hook to VideoEditor for actual video processing
+8. **Next:** Complete input sanitization integration across all components (see INPUT_SANITIZATION_TASKS.md)
+9. **Next:** Build template browser page (full page)
+10. **Next:** Implement real video export pipeline (FFmpeg → file download)
+11. **Next:** Wrap in Electron for desktop
+12. **Next:** Build Flutter mobile app
+13. **Next:** Testing and documentation
 
-## All React Component Files Created
+## All React Component Files
+
 | File | Description | Status |
 |------|-------------|--------|
-| `ClipCutSplash.jsx` | Desktop splash screen with scissors animation | ✅ Implemented |
-| `DesktopLogin.jsx` | Desktop login page with split layout | ✅ Implemented |
-| `DesktopRegister.jsx` | Desktop registration page with split layout | ✅ Implemented |
-| `OnboardingStep1.jsx` | First onboarding step | ✅ Implemented |
-| `OnboardingStep2.jsx` | Second onboarding step | ✅ Implemented |
-| `OnboardingStep3.jsx` | Third onboarding step | ✅ Implemented |
-| `Dashboard.jsx` | Main project dashboard | ✅ Implemented |
-| `DesktopAuth.jsx` | Legacy desktop auth component (may be deprecated) | ⚠️ Exists but not used |
-| `MobileAuth.jsx` | Mobile login/signup in phone frame with toggle | ⚠️ Created but not integrated |
-| `App.jsx` | Main app component with React Router setup | ✅ Implemented |
-| `main.jsx` | React app entry point | ✅ Implemented |
+| `ClipCutSplash.jsx` | Desktop splash screen with scissors animation | ✅ |
+| `DesktopLogin.jsx` | Desktop login page with split layout | ✅ |
+| `DesktopRegister.jsx` | Desktop registration page with split layout | ✅ |
+| `ResetPassword.jsx` | Password reset with secure token + rate limiting | ✅ |
+| `VerifyEmail.jsx` | Email verification with auto-redirect + resend | ✅ |
+| `OnboardingStep1.jsx` | First onboarding step | ✅ |
+| `OnboardingStep2.jsx` | Second onboarding step | ✅ |
+| `OnboardingStep3.jsx` | Third onboarding step | ✅ |
+| `Dashboard.jsx` | Main project dashboard | ✅ |
+| `Settings.jsx` | User settings + GDPR data export/delete | ✅ |
+| `CookieConsent.jsx` | Cookie consent banner | ✅ |
+| `Footer.jsx` | Footer component | ✅ |
+| `OptimizedImage.jsx` | Image optimization wrapper | ✅ |
+| `ErrorBoundary.jsx` | React error boundary | ✅ |
+| `VideoEditor/VideoEditor.jsx` | Main editor with undo/redo + auto-save | ✅ |
+| `VideoEditor/TopBar.jsx` | Top bar with project name, export, tabs | ✅ |
+| `VideoEditor/Toolbar.jsx` | Tool buttons (split, text, audio, filters, effects) | ✅ |
+| `VideoEditor/Timeline.jsx` | Multi-track timeline | ✅ |
+| `VideoEditor/Player.jsx` | Video preview player | ✅ |
+| `VideoEditor/MediaPanel.jsx` | Left sidebar media library | ✅ |
+| `VideoEditor/InspectorPanel.jsx` | Right sidebar properties inspector | ✅ |
+| `VideoEditor/ExportModal.jsx` | Export settings dialog | ✅ |
+| `MobileAuth.jsx` | Mobile auth in phone frame (not yet in routing) | ⚠️ |
+| `DesktopAuth.jsx` | Legacy auth component (deprecated, not used) | ⚠️ |
+| `App.jsx` | Main app with routing, auth guards, lazy loading | ✅ |
+| `main.jsx` | React app entry point | ✅ |
 
 ## Current Implementation Status
 - ✅ Project structure set up with Vite + React
-- ✅ React Router configured with routes for login, register, onboarding, dashboard
+- ✅ React Router configured with lazy-loaded routes, protected/public guards
+- ✅ Error boundary and mobile detection (shows "coming soon" on mobile)
+- ✅ Session timeout warning (15-min idle + extend/logout banner)
 - ✅ Splash screen component with animation
-- ✅ Desktop authentication UI (login/register pages)
+- ✅ Authentication flow: signup, login, Google OAuth, password reset, email verification
 - ✅ Onboarding flow (3 steps)
-- ✅ Dashboard component structure
-- ⚠️ Authentication logic (currently placeholder - needs Supabase integration)
-- ⚠️ Mobile responsive routing (detected but not fully implemented)
-- ❌ Video editor timeline (not started)
-- ❌ FFmpeg integration (not started)
-- ❌ Supabase backend integration (not started)
+- ✅ Dashboard component
+- ✅ Video editor UI (complete: timeline, player, inspector, media panel, export modal, undo/redo, auto-save)
+- ✅ User settings with GDPR compliance (export data, delete account)
+- ✅ Input validation and sanitization utilities (validation.js — comprehensive)
+- ✅ Error tracking (Sentry) and analytics (GA4 + Core Web Vitals)
+- ✅ Performance monitoring hooks and utilities
+- ✅ Rate limiting utility (used in ResetPassword, VerifyEmail)
+- ✅ Supabase schema (6 migrations: profiles, projects, templates, ratings, storage, login attempts)
+- ✅ File upload security (MIME validation, 500MB max, path traversal protection)
+- ✅ PWA support (service worker, offline capability)
+- ⚠️ Input sanitization not yet connected to all form components (task list in INPUT_SANITIZATION_TASKS.md)
+- ⚠️ FFmpeg WASM hook exists but not wired to editor UI (no real video processing yet)
+- ⚠️ Mobile routing detected but MobileAuth not integrated into App.jsx routes
+- ❌ Real video rendering/export pipeline (FFmpeg → file download)
+- ❌ Template library browser page
+- ❌ Electron desktop wrapper
+- ❌ Flutter mobile app

@@ -9,14 +9,21 @@ import { Component } from 'react';
 import { captureError, addBreadcrumb, logger } from '../utils';
 
 /**
- * Error boundary wrapper component
- * Use this to wrap routes or sections that might throw errors
+ * Error boundary wrapper component.
+ *
+ * Props:
+ *  - name {string}      – identifier for this boundary (e.g. "editor", "dashboard")
+ *  - fallback {ReactNode} – custom static fallback UI (takes priority)
+ *  - renderFallback {function(error, reset)} – dynamic fallback renderer
+ *  - onReset {function}  – called after the user clicks "Try Again"
+ *  - inline {boolean}    – renders a compact inline card instead of full-screen
+ *  - message {string}    – override the default heading
  */
 class ErrorBoundary extends Component {
   constructor(props) {
     super(props);
-    this.state = { 
-      hasError: false, 
+    this.state = {
+      hasError: false,
       error: null,
       errorInfo: null,
       eventId: null
@@ -24,24 +31,20 @@ class ErrorBoundary extends Component {
   }
 
   static getDerivedStateFromError(error) {
-    // Update state so the next render will show the fallback UI
     return { hasError: true, error };
   }
 
   componentDidCatch(error, errorInfo) {
     logger.error('ErrorBoundary caught an error', { error, errorInfo });
-    captureError(error, { source: 'ErrorBoundary', componentStack: errorInfo?.componentStack });
-    
+
     this.setState({ errorInfo });
-    
-    // Add breadcrumb for context
+
     addBreadcrumb({
       category: 'error_boundary',
-      message: `Error caught: ${error.message}`,
+      message: `Error caught in "${this.props.name || 'root'}": ${error.message}`,
       level: 'error',
     });
-    
-    // Report error to Sentry
+
     captureError(error, {
       tags: {
         type: 'error_boundary',
@@ -56,7 +59,6 @@ class ErrorBoundary extends Component {
 
   handleReset = () => {
     this.setState({ hasError: false, error: null, errorInfo: null });
-    // Optionally navigate to a safe route
     if (this.props.onReset) {
       this.props.onReset();
     }
@@ -64,28 +66,57 @@ class ErrorBoundary extends Component {
 
   render() {
     if (this.state.hasError) {
-      // Custom fallback UI if provided
+      // Custom static fallback
       if (this.props.fallback) {
         return this.props.fallback;
       }
 
-      // Default fallback UI
+      // Dynamic fallback renderer
+      if (this.props.renderFallback) {
+        return this.props.renderFallback(this.state.error, this.handleReset);
+      }
+
+      // Inline (section-level) fallback
+      if (this.props.inline) {
+        return (
+          <div style={styles.inlineContainer}>
+            <div style={styles.inlineCard}>
+              <span className="material-symbols-outlined" style={{ fontSize: '28px', color: '#ef4444' }}>
+                error_outline
+              </span>
+              <div style={{ flex: 1 }}>
+                <p style={{ color: '#ffffff', fontSize: '14px', fontWeight: 600, margin: '0 0 4px' }}>
+                  {this.props.message || 'This section encountered an error'}
+                </p>
+                <p style={{ color: '#94a3b8', fontSize: '12px', margin: 0 }}>
+                  Try again or reload the page.
+                </p>
+              </div>
+              <button onClick={this.handleReset} style={styles.inlineButton}>
+                Retry
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Full-screen fallback (root-level)
       return (
         <div style={styles.container}>
           <div style={styles.card}>
             <div style={styles.iconWrapper}>
-              <span 
-                className="material-symbols-outlined" 
+              <span
+                className="material-symbols-outlined"
                 style={styles.icon}
               >
                 error_outline
               </span>
             </div>
-            
-            <h1 style={styles.title}>Something went wrong</h1>
-            
+
+            <h1 style={styles.title}>{this.props.message || 'Something went wrong'}</h1>
+
             <p style={styles.message}>
-              We're sorry, but something unexpected happened. 
+              We're sorry, but something unexpected happened.
               Please try refreshing the page or go back to the dashboard.
             </p>
 
@@ -100,13 +131,13 @@ class ErrorBoundary extends Component {
             )}
 
             <div style={styles.buttonGroup}>
-              <button 
+              <button
                 onClick={this.handleReset}
                 style={styles.primaryButton}
               >
                 Try Again
               </button>
-              <button 
+              <button
                 onClick={() => window.location.href = '/dashboard'}
                 style={styles.secondaryButton}
               >
@@ -220,6 +251,40 @@ const styles = {
     cursor: 'pointer',
     fontFamily: "'Spline Sans', sans-serif",
     transition: 'background 0.15s ease',
+  },
+  // Inline (section-level) styles
+  inlineContainer: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '24px',
+    width: '100%',
+    height: '100%',
+    minHeight: '120px',
+    background: '#0e1820',
+  },
+  inlineCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '14px',
+    background: 'rgba(239,68,68,0.06)',
+    border: '1px solid rgba(239,68,68,0.15)',
+    borderRadius: '12px',
+    padding: '16px 20px',
+    maxWidth: '420px',
+    width: '100%',
+  },
+  inlineButton: {
+    background: 'linear-gradient(135deg, #75aadb 0%, #5a8cbf 100%)',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '8px 18px',
+    fontSize: '13px',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: "'Spline Sans', sans-serif",
+    whiteSpace: 'nowrap',
   },
 };
 

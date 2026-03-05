@@ -124,7 +124,7 @@ DROP POLICY IF EXISTS "Users can delete own template files" ON storage.objects;
 CREATE POLICY "Users can delete own template files"
 ON storage.objects FOR DELETE
 USING (
-  bucket_id = 'templates' A
+  bucket_id = 'templates' 
   AND auth.uid()::text = (storage.foldername(name))[1]
 );
 

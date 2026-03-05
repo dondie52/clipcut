@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
+import { FILTER_PRESETS } from './constants';
 
 /* ========== CSS ========== */
 const PLAYER_CSS = `
@@ -259,6 +260,7 @@ const Player = ({
   currentTime = 0, duration = 0,
   onTimeUpdate, onDurationChange, onEnded, onSeek,
   onVideoError = null,
+  clipProperties = null,
 }) => {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -491,6 +493,78 @@ const Player = ({
     return () => v.removeEventListener("leavepictureinpicture", h);
   }, [videoSrc]);
 
+  // ---- CSS live preview from clip properties ----
+  const videoPreviewStyle = useMemo(() => {
+    if (!clipProperties) return {};
+    const transforms = [];
+    const filters = [];
+    const style = {};
+
+    // Transform properties
+    if (clipProperties.rotation) transforms.push(`rotate(${clipProperties.rotation}deg)`);
+    if (clipProperties.scale && clipProperties.scale !== 1.0) transforms.push(`scale(${clipProperties.scale})`);
+    if (clipProperties.positionX || clipProperties.positionY) {
+      transforms.push(`translate(${clipProperties.positionX || 0}px, ${clipProperties.positionY || 0}px)`);
+    }
+
+    // Filter properties
+    if (clipProperties.brightness) filters.push(`brightness(${1 + clipProperties.brightness})`);
+    if (clipProperties.contrast) filters.push(`contrast(${1 + clipProperties.contrast})`);
+    if (clipProperties.saturation !== undefined && clipProperties.saturation !== 1.0) {
+      filters.push(`saturate(${clipProperties.saturation})`);
+    }
+
+    // Named filter preset CSS
+    if (clipProperties.filterName) {
+      const preset = FILTER_PRESETS.find(f => f.name === clipProperties.filterName);
+      if (preset?.css) {
+        const strength = (clipProperties.filterStrength ?? 50) / 100;
+        // Scale the CSS filter by strength
+        if (strength < 1) {
+          filters.push(preset.css.replace(/\(([^)]+)\)/g, (match, val) => {
+            const num = parseFloat(val);
+            if (isNaN(num)) return match;
+            // Interpolate toward identity (1.0 for most filters, 0 for effects like sepia/grayscale)
+            const isIdentity = val.includes('deg') ? 0 : 1;
+            return `(${isIdentity + (num - isIdentity) * strength}${val.replace(/[\d.]+/, '')})`;
+          }));
+        } else {
+          filters.push(preset.css);
+        }
+      }
+    }
+
+    // Opacity
+    if (clipProperties.opacity !== undefined && clipProperties.opacity !== 1.0) {
+      style.opacity = clipProperties.opacity;
+    }
+
+    if (transforms.length) style.transform = transforms.join(' ');
+    if (filters.length) style.filter = filters.join(' ');
+    style.transition = 'transform 0.1s ease, filter 0.1s ease, opacity 0.1s ease';
+
+    return style;
+  }, [clipProperties]);
+
+  // Apply clip speed to video element
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !clipProperties) return;
+    const clipSpeed = clipProperties.speed || 1.0;
+    if (v.playbackRate !== clipSpeed * speed) {
+      v.playbackRate = clipSpeed * speed;
+    }
+  }, [clipProperties?.speed, speed]);
+
+  // Apply clip volume/mute to video element
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !clipProperties) return;
+    const clipVol = clipProperties.isMuted ? 0 : (clipProperties.volume ?? 1.0);
+    v.volume = Math.min(1, clipVol * volume);
+    v.muted = muted || clipProperties.isMuted;
+  }, [clipProperties?.volume, clipProperties?.isMuted, volume, muted]);
+
   // ---- Fit mode ----
   const fitStyles = { fit: "contain", fill: "cover", original: "none" };
   const fitLabels = { fit: "Fit", fill: "Fill", original: "Original" };
@@ -572,15 +646,15 @@ const Player = ({
                 </div>
               ) : (
                 <>
-                  <video 
-                    ref={videoRef} 
+                  <video
+                    ref={videoRef}
                     src={videoSrc}
                     preload="metadata"
                     playsInline
-                    onTimeUpdate={handleTimeUpdate} 
-                    onLoadedMetadata={handleMeta} 
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleMeta}
                     onEnded={handleEnded}
-                    style={{ width: "100%", height: "100%", objectFit: fitStyles[fitMode] }}
+                    style={{ width: "100%", height: "100%", objectFit: fitStyles[fitMode], ...videoPreviewStyle }}
                   />
                   {/* Center play/pause overlay */}
                   <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
