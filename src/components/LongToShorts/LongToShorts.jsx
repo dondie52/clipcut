@@ -24,7 +24,9 @@ const initialState = {
   videoDuration: 0,
   videoWidth: 0,
   videoHeight: 0,
-  segments: [],         // Array of { id, startSeconds, endSeconds, label, reason }
+  clipDuration: 30,     // Target clip duration: 15, 30, or 60 seconds
+  captionsEnabled: true, // Burn captions into exported shorts
+  segments: [],         // Array of { id, startSeconds, endSeconds, label, reason, words? }
   results: [],          // Array of { id, label, blob, url }
   error: null,
 };
@@ -42,6 +44,10 @@ function reducer(state, action) {
         videoHeight: action.height,
         error: null,
       };
+    case 'SET_CLIP_DURATION':
+      return { ...state, clipDuration: action.clipDuration };
+    case 'SET_CAPTIONS':
+      return { ...state, captionsEnabled: action.enabled };
     case 'START_ANALYSIS':
       return { ...state, step: 'ANALYZING', error: null };
     case 'ANALYSIS_DONE':
@@ -284,6 +290,50 @@ const CSS = `
   }
   .lts-segment-actions button:hover { background: rgba(255,255,255,0.08); color: white; }
   .lts-segment-actions .delete:hover { background: rgba(239,68,68,0.1); color: #fca5a5; }
+
+  /* Score badge — color-coded by viral potential */
+  .lts-score-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: 6px; padding: 2px 8px;
+    font-size: 10px; font-weight: 700; border-radius: 8px;
+    vertical-align: middle; white-space: nowrap;
+  }
+  .lts-score-badge.score-low {
+    background: rgba(239,68,68,0.15); color: #f87171;
+  }
+  .lts-score-badge.score-good {
+    background: rgba(250,204,21,0.15); color: #fbbf24;
+  }
+  .lts-score-badge.score-viral {
+    background: rgba(74,222,128,0.15); color: #4ade80;
+  }
+
+  /* Hook title */
+  .lts-segment-hook {
+    font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85);
+    margin: 0 0 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
+  /* Transcript snippet */
+  .lts-segment-transcript {
+    margin: 6px 0 0; font-size: 11px; color: rgba(255,255,255,0.35);
+    font-style: italic; line-height: 1.4;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Captions toggle */
+  .lts-captions-toggle {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.7);
+    padding: 8px 12px; border-radius: 8px; cursor: pointer;
+    background: rgba(117,170,219,0.06); border: 1px solid rgba(117,170,219,0.15);
+    transition: all 0.15s;
+  }
+  .lts-captions-toggle:hover { border-color: rgba(117,170,219,0.3); }
+  .lts-captions-toggle input[type="checkbox"] {
+    accent-color: #75AADB; width: 16px; height: 16px; cursor: pointer;
+  }
 
   /* Add segment button */
   .lts-add-segment {

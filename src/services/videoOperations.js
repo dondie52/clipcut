@@ -530,6 +530,9 @@ export async function preloadVideoFrames(videoFile, frameCount = 10) {
   return { frames, duration };
 }
 
+// Counter for unique temp filenames across cropToVertical calls
+let cropCallId = 0;
+
 /**
  * Crop and trim a video segment to vertical 9:16 (1080x1920) for shorts
  * If the source is already portrait, only trims without cropping.
@@ -537,9 +540,13 @@ export async function preloadVideoFrames(videoFile, frameCount = 10) {
  * @param {number} startTime - Start time in seconds
  * @param {number} duration - Duration in seconds
  * @param {Function} onProgress - Progress callback
+ * @param {string|null} vfOverride - Optional face-aware -vf filter string.
+ *   When provided, uses input seeking (-ss before -i) so the filter
+ *   expression's `t` variable starts near 0, matching face keyframe times.
+ *   When null, falls back to default center crop with output seeking.
  * @returns {Promise<Blob>} Vertical video as Blob
  */
-export async function cropToVertical(inputFile, startTime, duration, onProgress = null) {
+export async function cropToVertical(inputFile, startTime, duration, onProgress = null, vfOverride = null) {
   return trackVideoOperation(
     'VIDEO_CROP_VERTICAL',
     async () => {
@@ -547,25 +554,35 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
 
       if (onProgress) setProgressCallback(onProgress);
 
-      const inputName = 'input_vertical.mp4';
-      const outputName = 'output_vertical.mp4';
+      // Unique filenames per call to prevent collisions between attempts
+      const id = ++cropCallId;
+      const inputName = `input_vertical_${id}.mp4`;
+      const outputName = `output_vertical_${id}.mp4`;
 
       try {
         await writeFile(inputName, inputFile);
 
-        // Detect if video is already portrait
-        const info = await getVideoInfo(inputFile);
-        const isPortrait = info.height > info.width;
+        let vf;
+        if (vfOverride) {
+          vf = vfOverride;
+        } else {
+          // Default path: center crop or portrait pad
+          const info = await getVideoInfo(inputFile);
+          const isPortrait = info.height > info.width;
+          vf = isPortrait
+            ? 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2'
+            : 'crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920';
+        }
 
-        // Center crop to 9:16 then scale, or just scale if already portrait
-        const vf = isPortrait
-          ? 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2'
-          : 'crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920';
+        // Face-aware crop uses input seeking (-ss before -i) so the expression
+        // variable `t` starts at 0, matching keyframe times from faceDetection.
+        // Default path keeps output seeking (original behaviour, frame-accurate).
+        const seekArgs = vfOverride
+          ? ['-ss', formatTime(startTime), '-i', inputName, '-t', formatTime(duration)]
+          : ['-i', inputName, '-ss', formatTime(startTime), '-t', formatTime(duration)];
 
         await exec([
-          '-ss', formatTime(startTime),
-          '-i', inputName,
-          '-t', formatTime(duration),
+          ...seekArgs,
           '-vf', vf,
           '-c:v', 'libx264',
           '-preset', 'ultrafast',

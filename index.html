@@ -41,22 +41,7 @@
     <meta http-equiv="Referrer-Policy" content="strict-origin-when-cross-origin" />
     <meta http-equiv="Permissions-Policy" content="camera=(), microphone=(), geolocation=()" />
     
-    <!-- Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content="
-      default-src 'self';
-      script-src 'self' 'wasm-unsafe-eval' blob:;
-      style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-      font-src 'self' https://fonts.gstatic.com;
-      img-src 'self' data: blob: https:;
-      media-src 'self' blob:;
-      connect-src 'self' https://*.supabase.co wss://*.supabase.co https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com https://*.workers.dev;
-      worker-src 'self' blob:;
-      child-src 'self' blob:;
-      frame-ancestors 'none';
-      form-action 'self';
-      base-uri 'self';
-      upgrade-insecure-requests;
-    " />
+    <!-- Content Security Policy (authoritative CSP is set via server headers in vite.config.js / vercel.json) -->
     
     <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />

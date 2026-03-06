@@ -147,14 +147,39 @@ export default function UploadStep({ state, dispatch }) {
       </div>
 
       {state.videoFile && (
-        <button
-          className="lts-btn-primary"
-          onClick={handleAnalyze}
-          style={{ marginTop: 20 }}
-        >
-          <span className="mi" style={{ fontSize: 18 }}>auto_awesome</span>
-          Analyze with AI
-        </button>
+        <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 20 }}>
+            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.5)', fontWeight: 500 }}>Clip length:</span>
+            {[15, 30, 60].map(d => (
+              <button
+                key={d}
+                onClick={() => dispatch({ type: 'SET_CLIP_DURATION', clipDuration: d })}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 8,
+                  border: state.clipDuration === d ? '1px solid #75AADB' : '1px solid rgba(255,255,255,0.1)',
+                  background: state.clipDuration === d ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.04)',
+                  color: state.clipDuration === d ? '#75AADB' : 'rgba(255,255,255,0.6)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {d}s
+              </button>
+            ))}
+          </div>
+          <button
+            className="lts-btn-primary"
+            onClick={handleAnalyze}
+            style={{ marginTop: 12 }}
+          >
+            <span className="mi" style={{ fontSize: 18 }}>auto_awesome</span>
+            Analyze with AI
+          </button>
+        </>
       )}
     </div>
   );

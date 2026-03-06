@@ -15,9 +15,35 @@ function parseTime(str) {
   return parseFloat(str) || 0;
 }
 
+function getScoreClass(score) {
+  if (score >= 70) return 'score-viral';
+  if (score >= 40) return 'score-good';
+  return 'score-low';
+}
+
+function getScoreLabel(score) {
+  if (score >= 70) return 'Viral';
+  if (score >= 40) return 'Good';
+  return 'Low';
+}
+
 export default function ReviewStep({ state, dispatch, videoRef }) {
   const [thumbnails, setThumbnails] = useState({});
   const thumbsLoaded = useRef(new Set());
+
+  // Clean up preview listeners on unmount
+  useEffect(() => {
+    return () => {
+      const video = videoRef.current;
+      if (!video) return;
+      if (seekListenerRef.current) {
+        video.removeEventListener('seeked', seekListenerRef.current);
+      }
+      if (stopListenerRef.current) {
+        video.removeEventListener('timeupdate', stopListenerRef.current);
+      }
+    };
+  }, [videoRef]);
 
   // Generate thumbnails for each segment
   useEffect(() => {
@@ -56,10 +82,44 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
     dispatch({ type: 'SET_SEGMENTS', segments: [...state.segments, newSeg] });
   }, [state.segments, state.videoDuration, dispatch]);
 
-  const seekTo = useCallback((time) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = time;
+  const stopListenerRef = useRef(null);
+  const seekListenerRef = useRef(null);
+
+  const previewSegment = useCallback((seg) => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    // Clean up any previous listeners
+    if (seekListenerRef.current) {
+      video.removeEventListener('seeked', seekListenerRef.current);
+      seekListenerRef.current = null;
     }
+    if (stopListenerRef.current) {
+      video.removeEventListener('timeupdate', stopListenerRef.current);
+      stopListenerRef.current = null;
+    }
+    video.pause();
+
+    // Wait for seek to complete, then play
+    const onSeeked = () => {
+      video.removeEventListener('seeked', onSeeked);
+      seekListenerRef.current = null;
+
+      const handleTimeUpdate = () => {
+        if (video.currentTime >= seg.endSeconds) {
+          video.pause();
+          video.removeEventListener('timeupdate', handleTimeUpdate);
+          stopListenerRef.current = null;
+        }
+      };
+      stopListenerRef.current = handleTimeUpdate;
+      video.addEventListener('timeupdate', handleTimeUpdate);
+      video.play();
+    };
+
+    seekListenerRef.current = onSeeked;
+    video.addEventListener('seeked', onSeeked);
+    video.currentTime = seg.startSeconds;
   }, [videoRef]);
 
   const handleProcess = useCallback(() => {
@@ -97,6 +157,19 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
           <span>{state.segments.length} segment{state.segments.length !== 1 ? 's' : ''}</span>
         </div>
 
+        {/* Captions toggle — only shown when transcript words are available */}
+        {state.segments.some(s => s.words?.length > 0) && (
+          <label className="lts-captions-toggle">
+            <input
+              type="checkbox"
+              checked={state.captionsEnabled}
+              onChange={(e) => dispatch({ type: 'SET_CAPTIONS', enabled: e.target.checked })}
+            />
+            <span className="mi" style={{ fontSize: 16 }}>subtitles</span>
+            Burn captions into shorts
+          </label>
+        )}
+
         {state.segments.map((seg) => {
           const dur = Math.round(seg.endSeconds - seg.startSeconds);
           return (
@@ -108,10 +181,33 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
                   <div className="lts-segment-thumb" />
                 )}
                 <div className="lts-segment-info">
-                  <p className="lts-segment-label">{seg.label}</p>
+                  {seg.hookTitle && (
+                    <p className="lts-segment-hook">{seg.hookTitle}</p>
+                  )}
+                  <p className="lts-segment-label">
+                    {seg.label}
+                    {typeof seg.score === 'number' && (
+                      <span
+                        className={`lts-score-badge ${getScoreClass(seg.score)}`}
+                        title={`Viral score: ${seg.score}/100`}
+                      >
+                        {seg.score}
+                        <span style={{ fontWeight: 500, opacity: 0.85 }}>{getScoreLabel(seg.score)}</span>
+                      </span>
+                    )}
+                  </p>
                   <p className="lts-segment-reason">{seg.reason}</p>
                 </div>
               </div>
+
+              {seg.transcriptSnippet && (
+                <p className="lts-segment-transcript">
+                  <span className="mi" style={{ fontSize: 12, verticalAlign: 'middle', marginRight: 4 }}>format_quote</span>
+                  {seg.transcriptSnippet.length > 120
+                    ? seg.transcriptSnippet.slice(0, 120) + '…'
+                    : seg.transcriptSnippet}
+                </p>
+              )}
 
               <div className="lts-segment-time">
                 <input
@@ -129,7 +225,7 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
               </div>
 
               <div className="lts-segment-actions">
-                <button onClick={() => seekTo(seg.startSeconds)}>
+                <button onClick={() => previewSegment(seg)}>
                   <span className="mi" style={{ fontSize: 14 }}>play_arrow</span>
                   Preview
                 </button>

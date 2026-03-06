@@ -252,6 +252,28 @@ export function isFFmpegLoaded() {
 }
 
 /**
+ * Terminate the current FFmpeg instance and reset singleton state.
+ * The next call to loadFFmpeg() will create a fresh instance.
+ * Use this after a fatal WASM error (e.g. "memory access out of bounds")
+ * to ensure the retry starts with clean state.
+ */
+export async function terminateFFmpeg() {
+  if (ffmpegInstance) {
+    try {
+      ffmpegInstance.terminate();
+    } catch (e) {
+      // Instance may already be broken — ignore
+    }
+    ffmpegInstance = null;
+  }
+  loadingPromise = null;
+  virtualFSFiles.clear();
+  estimatedMemoryUsage = 0;
+  progressCallback = null;
+  currentAbortController = null;
+}
+
+/**
  * Write a file to FFmpeg's virtual file system
  * @param {string} filename - Name for the file in FFmpeg's FS
  * @param {File|Blob|string} file - File object, Blob, or URL string
