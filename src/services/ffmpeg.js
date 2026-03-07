@@ -399,12 +399,15 @@ export function isOperationAborted() {
 
 /**
  * Convert Uint8Array to Blob
+ * IMPORTANT: Uses `new Blob([data])` — NOT `new Blob([data.buffer])`.
+ * data.buffer returns the full backing ArrayBuffer which may be larger
+ * than the view (e.g. WASM linear memory), producing corrupt files.
  * @param {Uint8Array} data - Binary data
  * @param {string} mimeType - MIME type for the blob
  * @returns {Blob} Blob object
  */
 export function toBlob(data, mimeType = 'video/mp4') {
-  return new Blob([data.buffer], { type: mimeType });
+  return new Blob([data], { type: mimeType });
 }
 
 /**

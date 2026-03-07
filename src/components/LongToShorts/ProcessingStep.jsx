@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cropToVertical } from '../../services/videoOperations';
 import { loadFFmpeg, terminateFFmpeg } from '../../services/ffmpeg';
 import { detectFaceKeyframes, buildCropFilter } from '../../services/faceDetection';
-import { buildCaptionFilterFromWords, loadCaptionFont, resetCaptionFontState } from '../../services/captionService';
+import { buildCaptionFilterFromWords, loadCaptionFont, resetCaptionFontState, isCaptionFontReady } from '../../services/captionService';
 
 export default function ProcessingStep({ state, dispatch }) {
   const [progress, setProgress] = useState({}); // { [segId]: 0-100 }
@@ -21,12 +21,21 @@ export default function ProcessingStep({ state, dispatch }) {
       resetCaptionFontState(); // font was in the old FS — must reload
       await loadFFmpeg();
 
-      // Pre-load caption font into FFmpeg's virtual FS if captions are enabled
+      // Pre-load caption font into FFmpeg's virtual FS if captions are enabled.
+      // Track availability locally — if font fails, disable captions for the
+      // entire run instead of failing/retrying every segment.
+      let captionsAvailable = false;
       if (state.captionsEnabled) {
         try {
           await loadCaptionFont();
+          captionsAvailable = await isCaptionFontReady();
+          if (!captionsAvailable) {
+            console.warn('[LongToShorts] Caption font written but not readable in FS — disabling captions');
+          } else {
+            console.log('[LongToShorts] Caption font ready');
+          }
         } catch (fontErr) {
-          console.warn('[LongToShorts] Caption font load failed, captions will be disabled:', fontErr.message);
+          console.warn('[LongToShorts] Caption font load failed, captions disabled for this run:', fontErr.message);
         }
       }
 
@@ -42,10 +51,11 @@ export default function ProcessingStep({ state, dispatch }) {
           const duration = seg.endSeconds - seg.startSeconds;
 
           // Face-aware crop: detect faces in this segment's time range
+          // Pass transcript words so the crop can follow the active speaker.
           let cropFilter = null;
           if (isLandscape) {
             const keyframes = await detectFaceKeyframes(
-              state.videoFile, seg.startSeconds, duration
+              state.videoFile, seg.startSeconds, duration, seg.words
             );
             cropFilter = buildCropFilter(
               keyframes, state.videoWidth, state.videoHeight
@@ -53,8 +63,9 @@ export default function ProcessingStep({ state, dispatch }) {
           }
 
           // Captions: build drawtext filter from word timings
+          // Only attempt if font is confirmed available in the current FFmpeg FS
           let captionFilter = null;
-          if (state.captionsEnabled && seg.words?.length > 0) {
+          if (captionsAvailable && seg.words?.length > 0) {
             try {
               captionFilter = buildCaptionFilterFromWords(seg.words, seg.startSeconds);
             } catch (captionErr) {
@@ -80,14 +91,15 @@ export default function ProcessingStep({ state, dispatch }) {
           }
 
           const progressCb = (p) => {
+            // FFmpeg progress callback sends { progress: 0-100 } or a number 0-100
             const raw = typeof p === 'object' ? p.progress : (typeof p === 'number' ? p : 0);
-            const pct = Math.min(raw, 1);
-            setProgress(prev => ({ ...prev, [seg.id]: Math.round(pct * 100) }));
+            const pct = Math.min(Math.max(raw, 0), 100);
+            setProgress(prev => ({ ...prev, [seg.id]: Math.round(pct) }));
           };
 
           let blob;
           try {
-            console.log(`[LongToShorts] Exporting "${seg.label}" (captions: ${!!captionFilter})`);
+            console.log(`[LongToShorts] Export started: "${seg.label}" (captions: ${!!captionFilter}, fontReady: ${captionsAvailable})`);
             blob = await cropToVertical(
               state.videoFile,
               seg.startSeconds,
@@ -100,12 +112,22 @@ export default function ProcessingStep({ state, dispatch }) {
             // in a fully isolated FFmpeg state (terminate + reload).
             if (captionFilter) {
               console.warn(`[LongToShorts] Export with captions failed for "${seg.label}", terminating FFmpeg for clean retry:`, err.message);
+              // Disable captions for remaining segments — font is gone with the old FS
+              captionsAvailable = false;
               // Terminate the corrupted WASM instance so the retry gets a fresh one
               await terminateFFmpeg();
-              resetCaptionFontState(); // font was in the old FS
+              resetCaptionFontState();
               // Re-load a clean FFmpeg instance
               await loadFFmpeg();
-              console.log(`[LongToShorts] Retrying "${seg.label}" without captions`);
+              // Try to reload font for subsequent segments
+              try {
+                await loadCaptionFont();
+                captionsAvailable = await isCaptionFontReady();
+                console.log(`[LongToShorts] Font reloaded after retry: available=${captionsAvailable}`);
+              } catch (reloadErr) {
+                console.warn('[LongToShorts] Font reload after retry failed, captions stay disabled:', reloadErr.message);
+              }
+              console.log(`[LongToShorts] Retrying "${seg.label}" without captions (clean FFmpeg instance)`);
               blob = await cropToVertical(
                 state.videoFile,
                 seg.startSeconds,
@@ -118,7 +140,17 @@ export default function ProcessingStep({ state, dispatch }) {
             }
           }
 
+          // Validate the exported blob before accepting it
+          const MIN_BLOB_SIZE = 1024; // 1 KB minimum for a valid MP4
+          if (!blob || blob.size < MIN_BLOB_SIZE) {
+            console.error(`[LongToShorts] Export rejected: "${seg.label}" — blob ${blob ? blob.size : 0} bytes (min ${MIN_BLOB_SIZE})`);
+            // Skip this clip instead of showing a broken card
+            setProgress(prev => ({ ...prev, [seg.id]: 100 }));
+            continue;
+          }
+
           const url = URL.createObjectURL(blob);
+          console.log(`[LongToShorts] Export accepted: "${seg.label}" — blob=${blob.size} bytes, objectURL=${url}`);
           results.push({ id: seg.id, label: seg.label, hookTitle: seg.hookTitle, score: seg.score, blob, url });
           setProgress(prev => ({ ...prev, [seg.id]: 100 }));
         } catch (err) {
