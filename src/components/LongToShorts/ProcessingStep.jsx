@@ -53,8 +53,9 @@ export default function ProcessingStep({ state, dispatch }) {
           // Face-aware crop: detect faces in this segment's time range
           // Pass transcript words so the crop can follow the active speaker.
           let cropFilter = null;
+          let keyframes = [];
           if (isLandscape) {
-            const keyframes = await detectFaceKeyframes(
+            keyframes = await detectFaceKeyframes(
               state.videoFile, seg.startSeconds, duration, seg.words
             );
             cropFilter = buildCropFilter(
@@ -74,9 +75,17 @@ export default function ProcessingStep({ state, dispatch }) {
             }
           }
 
-          // Diagnostic: log whether face-aware crop was produced
+          // Diagnostic: log full filter pipeline result
           if (isLandscape) {
-            console.log(`[LongToShorts] "${seg.label}" cropFilter: ${cropFilter ? cropFilter.substring(0, 120) + '...' : 'null (will use default center crop)'}`);
+            console.log(`[LongToShorts] "${seg.label}" face detection result:`);
+            console.log(`  keyframes count: ${keyframes.length}`);
+            if (keyframes.length > 0) {
+              const xs = keyframes.map(k => Math.round(k.centerX));
+              console.log(`  keyframe centerX values: [${xs.join(', ')}]`);
+              console.log(`  keyframe time range: ${keyframes[0].time.toFixed(1)}s – ${keyframes[keyframes.length - 1].time.toFixed(1)}s`);
+            }
+            console.log(`  cropFilter: ${cropFilter ? cropFilter.substring(0, 200) : 'null (will use default center crop)'}`);
+            console.log(`  cropFilter type: ${cropFilter === null ? 'NULL_FALLBACK' : (cropFilter.includes('if(lt(t') ? 'DYNAMIC' : 'STATIC')}`);
           }
 
           // Merge crop + caption filters into one -vf string
@@ -105,6 +114,7 @@ export default function ProcessingStep({ state, dispatch }) {
           let blob;
           try {
             console.log(`[LongToShorts] Export started: "${seg.label}" (captions: ${!!captionFilter}, fontReady: ${captionsAvailable})`);
+            console.log(`[LongToShorts] Final vfOverride for FFmpeg: ${combinedFilter ? combinedFilter.substring(0, 300) : 'null (cropToVertical will use built-in default)'}`);
             blob = await cropToVertical(
               state.videoFile,
               seg.startSeconds,

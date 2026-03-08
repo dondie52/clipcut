@@ -48,11 +48,15 @@ const ACTIVITY_WINDOW = 4;
 /** Minimum pause between words (seconds) to infer a speaker change */
 const SPEAKER_CHANGE_PAUSE = 0.7;
 
-/** Minimum ratio between best and median zone scores to consider detection confident */
-const ZONE_CONFIDENCE_RATIO = 1.4;
+/** Minimum ratio between best and median zone scores to consider detection confident.
+ *  1.4 was too strict — rejected almost all real talking-head footage.
+ *  1.15 allows zones that are clearly above average without requiring huge contrast. */
+const ZONE_CONFIDENCE_RATIO = 1.15;
 
-/** Penalty multiplier for edge zones (0 and last) to counter frame-border artifacts */
-const EDGE_ZONE_PENALTY = 0.35;
+/** Penalty multiplier for edge zones (0 and last) to counter frame-border artifacts.
+ *  0.35 was too harsh — when the subject IS near the edge, it completely suppressed
+ *  the correct zone.  0.6 still penalizes but doesn't obliterate. */
+const EDGE_ZONE_PENALTY = 0.6;
 
 // ─── Browser API detection ────────────────────────────────────
 
@@ -356,6 +360,13 @@ async function sampleFrameZones(videoFile, startTime, duration) {
         const medianScore = [...zoneScores].sort((a, b) => a.totalScore - b.totalScore)[Math.floor(ZONE_COUNT / 2)].totalScore;
         const isConfident = medianScore > 0 ? (sorted[0].totalScore / medianScore) >= ZONE_CONFIDENCE_RATIO : sorted[0].totalScore >= ZONE_MIN_SCORE;
 
+        // Diagnostic: log zone scores for every frame so we can see why gates pass/fail
+        if (i <= 3 || !isConfident) {
+          const scoreStr = zoneScores.map((z, zi) => `z${zi}=${z.totalScore.toFixed(4)}`).join(' ');
+          const ratio = medianScore > 0 ? (sorted[0].totalScore / medianScore).toFixed(2) : 'N/A';
+          console.log(`[Face] Frame ${i} zones: ${scoreStr} | best/median=${ratio} threshold=${ZONE_CONFIDENCE_RATIO} pass=${isConfident}`);
+        }
+
         if (sorted[0].totalScore >= ZONE_MIN_SCORE && isConfident) {
           // Estimate a synthetic face width (~15% of source width)
           const synthFaceW = srcWidth * 0.15;
@@ -623,6 +634,31 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
   const framesWithFaces = frames.filter(f => f.faces.length > 0);
   if (framesWithFaces.length === 0) {
     console.log('[Face] No faces/zones detected in any sampled frame');
+
+    // Transcript-only fallback: if we have speaker intervals and know the source
+    // dimensions, create synthetic keyframes that pan between speaker positions.
+    // This is better than static center crop when speakers alternate.
+    if (speakerIntervals.length > 1 && srcWidth > 0) {
+      const cropW = Math.round((srcHeight || 1080) * 9 / 16);
+      const maxX = srcWidth - cropW;
+      if (maxX > 0) {
+        // Place speaker 0 at ~33% of frame, speaker 1 at ~66%
+        const positions = [
+          Math.round(srcWidth * 0.33),
+          Math.round(srcWidth * 0.66),
+        ];
+        const transcriptKeyframes = [];
+        for (const iv of speakerIntervals) {
+          const idx = Math.min(iv.speakerIdx, positions.length - 1);
+          transcriptKeyframes.push({ time: iv.start, centerX: positions[idx] });
+          // Also add end keyframe to hold position for the interval duration
+          transcriptKeyframes.push({ time: iv.end, centerX: positions[idx] });
+        }
+        console.log(`[Face] Transcript-only fallback: ${transcriptKeyframes.length} keyframes from ${speakerIntervals.length} speaker intervals, positions=[${positions.join(',')}]`);
+        return transcriptKeyframes;
+      }
+    }
+
     return [];
   }
 
