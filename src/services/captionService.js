@@ -15,29 +15,54 @@
  *  - Font file must be loaded into FFmpeg FS via loadCaptionFont() before export
  */
 
-import { loadFFmpeg } from './ffmpeg';
+import { loadFFmpeg, getFFmpegInstance } from './ffmpeg';
 
 /** Filename used inside FFmpeg's virtual filesystem */
 export const CAPTION_FONT_FILE = 'caption-bold.ttf';
 
 let fontLoaded = false;
 
+/** Cached font bytes so we don't re-fetch on every FFmpeg restart */
+let fontBytesCache = null;
+
 /**
  * Load the caption font into FFmpeg's virtual filesystem.
- * Must be called once before any export that uses drawtext captions.
- * Safe to call multiple times — only loads on the first call.
+ * Must be called before any export that uses drawtext captions.
+ * Safe to call multiple times — skips if already loaded.
+ * Caches the font bytes so subsequent calls after terminateFFmpeg
+ * only need to re-write to the FS, not re-fetch over the network.
  */
 export async function loadCaptionFont() {
   if (fontLoaded) return;
   await loadFFmpeg();
-  const resp = await fetch('/fonts/caption-bold.ttf');
-  if (!resp.ok) throw new Error(`Failed to fetch caption font: ${resp.status}`);
-  const buf = await resp.arrayBuffer();
-  const ffmpeg = (await import('./ffmpeg')).getFFmpegInstance;
-  const instance = await ffmpeg();
-  await instance.writeFile(CAPTION_FONT_FILE, new Uint8Array(buf));
+
+  // Fetch font bytes (once, then cache)
+  if (!fontBytesCache) {
+    const resp = await fetch('/fonts/caption-bold.ttf');
+    if (!resp.ok) throw new Error(`Failed to fetch caption font: ${resp.status}`);
+    fontBytesCache = new Uint8Array(await resp.arrayBuffer());
+    console.log(`[Captions] Font fetched: ${fontBytesCache.byteLength} bytes`);
+  }
+
+  const instance = await getFFmpegInstance();
+  await instance.writeFile(CAPTION_FONT_FILE, fontBytesCache);
   fontLoaded = true;
-  console.log('[Captions] Font loaded into FFmpeg FS');
+  console.log('[Captions] Font written to FFmpeg FS');
+}
+
+/**
+ * Verify the caption font is actually present in FFmpeg's virtual FS.
+ * Returns true if the file exists and is non-empty, false otherwise.
+ */
+export async function isCaptionFontReady() {
+  if (!fontLoaded) return false;
+  try {
+    const instance = await getFFmpegInstance();
+    const data = await instance.readFile(CAPTION_FONT_FILE);
+    return data && data.byteLength > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**

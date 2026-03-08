@@ -13,7 +13,11 @@
       "Bash(npx supabase projects list)",
       "Read(//home/georgy/Desktop/clipcut-main/$HOME/.nvm/**)",
       "Bash(export HOME=/home/georgy)",
-      "Bash(source /home/georgy/.nvm/nvm.sh)"
+      "Bash(source /home/georgy/.nvm/nvm.sh)",
+      "Bash(git push origin main)",
+      "Bash(npm run dev)",
+      "Bash(npx vitest run --reporter=verbose)",
+      "Bash(git status -u)"
     ],
     "additionalDirectories": [
       "/home/georgy/.claude/projects/-home-georgy-Desktop-clipcut-main"

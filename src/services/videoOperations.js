@@ -581,6 +581,9 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
           ? ['-ss', formatTime(startTime), '-i', inputName, '-t', formatTime(duration)]
           : ['-i', inputName, '-ss', formatTime(startTime), '-t', formatTime(duration)];
 
+        console.log(`[cropToVertical] Export started: ${outputName}, start=${startTime}s, dur=${duration}s, vfOverride=${!!vfOverride}`);
+        console.log(`[cropToVertical] Final -vf: ${vf.substring(0, 200)}${vf.length > 200 ? '...' : ''}`);
+
         await exec([
           ...seekArgs,
           '-vf', vf,
@@ -595,7 +598,18 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
         ]);
 
         const data = await readFile(outputName);
-        return toBlob(data, 'video/mp4');
+
+        // Validate output: a valid MP4 must have at least the ftyp box header
+        const MIN_VALID_SIZE = 1024; // 1 KB — anything smaller is certainly not a playable video
+        if (!data || data.byteLength < MIN_VALID_SIZE) {
+          const size = data ? data.byteLength : 0;
+          console.error(`[cropToVertical] Output file too small or empty: ${size} bytes (min ${MIN_VALID_SIZE})`);
+          throw new Error(`Export produced invalid output (${size} bytes)`);
+        }
+
+        const blob = toBlob(data, 'video/mp4');
+        console.log(`[cropToVertical] Export succeeded: ${outputName}, data=${data.byteLength} bytes, blob=${blob.size} bytes`);
+        return blob;
       } finally {
         clearProgressCallback();
         await cleanup([inputName, outputName]);

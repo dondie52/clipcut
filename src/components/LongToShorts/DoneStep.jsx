@@ -34,14 +34,15 @@ export default function DoneStep({ state, dispatch, navigate }) {
   }, []);
 
   const handleDownloadAll = useCallback(() => {
+    const valid = state.results.filter(r => r.blob && r.blob.size > 0 && r.url);
     setDownloading(true);
     setDownloadProgress(0);
 
-    state.results.forEach((result, i) => {
+    valid.forEach((result, i) => {
       setTimeout(() => {
         downloadBlob(result.blob, buildFilename(result, i));
         setDownloadProgress(i + 1);
-        if (i === state.results.length - 1) {
+        if (i === valid.length - 1) {
           setTimeout(() => setDownloading(false), 800);
         }
       }, i * 500);
@@ -57,13 +58,31 @@ export default function DoneStep({ state, dispatch, navigate }) {
     dispatch({ type: 'RESET' });
   }, [dispatch]);
 
+  // Filter out any results that somehow have missing blobs or URLs
+  const validResults = state.results.filter(r => r.blob && r.blob.size > 0 && r.url);
+
+  if (validResults.length === 0) {
+    return (
+      <div className="lts-done">
+        <p className="lts-done-title">No valid clips were produced</p>
+        <p className="lts-done-sub">All exports failed validation. Try again with different segments or disable captions.</p>
+        <div className="lts-done-actions">
+          <button className="lts-btn-primary" onClick={handleStartOver}>
+            <span className="mi" style={{ fontSize: 16 }}>refresh</span>
+            Start over
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="lts-done">
       <p className="lts-done-title">Your shorts are ready!</p>
-      <p className="lts-done-sub">{state.results.length} vertical short{state.results.length !== 1 ? 's' : ''} created</p>
+      <p className="lts-done-sub">{validResults.length} vertical short{validResults.length !== 1 ? 's' : ''} created</p>
 
       <div className="lts-done-grid">
-        {state.results.map((result, i) => (
+        {validResults.map((result, i) => (
           <div key={result.id} className="lts-done-card">
             <video src={result.url} controls muted playsInline />
             <div className="lts-done-card-body">
@@ -101,7 +120,7 @@ export default function DoneStep({ state, dispatch, navigate }) {
         <button className="lts-btn-primary" onClick={handleDownloadAll} disabled={downloading}>
           <span className="mi" style={{ fontSize: 18 }}>download</span>
           {downloading
-            ? `Downloading ${downloadProgress}/${state.results.length}...`
+            ? `Downloading ${downloadProgress}/${validResults.length}...`
             : 'Download All'}
         </button>
       </div>

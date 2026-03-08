@@ -23,6 +23,7 @@ vi.mock('../supabaseClient.js', () => {
       },
     },
     from: mockFrom,
+    rpc: vi.fn(),
     storage: {
       from: vi.fn().mockReturnValue({
         upload: vi.fn(),
@@ -157,17 +158,13 @@ describe('signIn', () => {
 
   it('throws with lockout message when account is locked', async () => {
     const futureTime = new Date(Date.now() + 30 * 60 * 1000).toISOString()
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: {
-          email: 'locked@example.com',
-          failed_attempts: 5,
-          locked_until: futureTime,
-        },
-        error: null,
-      }),
+    supabase.rpc.mockResolvedValue({
+      data: {
+        locked: true,
+        locked_until: futureTime,
+        attempts_remaining: 0,
+      },
+      error: null,
     })
     await expect(signIn({ email: 'locked@example.com', password: 'anything' }))
       .rejects.toThrow(/locked/i)
@@ -304,24 +301,20 @@ describe('isEmailVerified', () => {
 
 describe('checkAccountLockout', () => {
   it('returns unlocked when no record exists', async () => {
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-    })
+    supabase.rpc.mockResolvedValue({ data: null, error: null })
     const result = await checkAccountLockout('user@example.com')
     expect(result.locked).toBe(false)
   })
 
   it('returns locked when locked_until is in the future', async () => {
     const futureTime = new Date(Date.now() + 10 * 60 * 1000).toISOString()
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: { email: 'user@example.com', failed_attempts: 5, locked_until: futureTime },
-        error: null,
-      }),
+    supabase.rpc.mockResolvedValue({
+      data: {
+        locked: true,
+        locked_until: futureTime,
+        attempts_remaining: 0,
+      },
+      error: null,
     })
     const result = await checkAccountLockout('user@example.com')
     expect(result.locked).toBe(true)
@@ -330,13 +323,13 @@ describe('checkAccountLockout', () => {
 
   it('returns unlocked when locked_until is in the past', async () => {
     const pastTime = new Date(Date.now() - 10 * 60 * 1000).toISOString()
-    supabase.from.mockReturnValue({
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({
-        data: { email: 'user@example.com', failed_attempts: 5, locked_until: pastTime },
-        error: null,
-      }),
+    supabase.rpc.mockResolvedValue({
+      data: {
+        locked: false,
+        locked_until: pastTime,
+        attempts_remaining: 3,
+      },
+      error: null,
     })
     const result = await checkAccountLockout('user@example.com')
     expect(result.locked).toBe(false)
