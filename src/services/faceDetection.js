@@ -48,6 +48,12 @@ const ACTIVITY_WINDOW = 4;
 /** Minimum pause between words (seconds) to infer a speaker change */
 const SPEAKER_CHANGE_PAUSE = 0.7;
 
+/** Minimum ratio between best and median zone scores to consider detection confident */
+const ZONE_CONFIDENCE_RATIO = 1.4;
+
+/** Penalty multiplier for edge zones (0 and last) to counter frame-border artifacts */
+const EDGE_ZONE_PENALTY = 0.35;
+
 // ─── Browser API detection ────────────────────────────────────
 
 export function isFaceDetectionSupported() {
@@ -336,11 +342,21 @@ async function sampleFrameZones(videoFile, startTime, duration) {
 
         prevZoneBrightness = zoneBrightness;
 
+        // Penalize edge zones — frame borders create false edge-density spikes
+        zoneScores[0].totalScore *= EDGE_ZONE_PENALTY;
+        zoneScores[zoneScores.length - 1].totalScore *= EDGE_ZONE_PENALTY;
+
         // Pick the top-scoring zones as synthetic "face" detections
         const sorted = [...zoneScores].sort((a, b) => b.totalScore - a.totalScore);
         const syntheticFaces = [];
 
-        if (sorted[0].totalScore >= ZONE_MIN_SCORE) {
+        // Confidence gate: best zone must stand out clearly from the median.
+        // If all zones score similarly, the scene has no clear subject and we
+        // should fall back to center crop rather than picking an arbitrary zone.
+        const medianScore = [...zoneScores].sort((a, b) => a.totalScore - b.totalScore)[Math.floor(ZONE_COUNT / 2)].totalScore;
+        const isConfident = medianScore > 0 ? (sorted[0].totalScore / medianScore) >= ZONE_CONFIDENCE_RATIO : sorted[0].totalScore >= ZONE_MIN_SCORE;
+
+        if (sorted[0].totalScore >= ZONE_MIN_SCORE && isConfident) {
           // Estimate a synthetic face width (~15% of source width)
           const synthFaceW = srcWidth * 0.15;
           syntheticFaces.push({
@@ -374,7 +390,8 @@ async function sampleFrameZones(videoFile, startTime, duration) {
     }
 
     const withFaces = frames.filter(f => f.faces.length > 0).length;
-    console.log(`[Face] Canvas zone analysis: ${frames.length} frames, ${withFaces} have detected zones`);
+    const noFaces = frames.filter(f => f.faces.length === 0).length;
+    console.log(`[Face] Canvas zone analysis: ${frames.length} frames, ${withFaces} have detected zones, ${noFaces} rejected by confidence gate`);
     return { frames, srcWidth, srcHeight };
   } catch (err) {
     console.warn('[Face] Canvas zone analysis failed:', err.message);
@@ -620,7 +637,13 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
   const targets = buildCropTargets(frames, speakers, srcWidth, srcHeight, speakerIntervals);
   if (targets.length === 0) return [];
 
+  // Diagnostic: show speaker positions and crop target range
+  const centerXs = targets.map(t => t.centerX);
+  const minCX = Math.round(Math.min(...centerXs));
+  const maxCX = Math.round(Math.max(...centerXs));
   console.log(`[Face] ${speakers.length} speaker(s), ${targets.length} keyframes from ${frames.length} samples`);
+  console.log(`[Face] Speaker avgX positions: [${speakers.map(s => Math.round(s.avgCenterX)).join(', ')}]`);
+  console.log(`[Face] Crop target centerX range: ${minCX}–${maxCX} (srcWidth=${srcWidth})`);
   return targets;
 }
 
@@ -763,9 +786,16 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
     smoothed.splice(minIdx, 1);
   }
 
+  // Diagnostic: show smoothing pipeline results
+  const rawRange = `${Math.min(...rawPositions.map(p => p.cropX))}–${Math.max(...rawPositions.map(p => p.cropX))}`;
+  const smoothedRange = `${Math.min(...smoothed.map(p => p.cropX))}–${Math.max(...smoothed.map(p => p.cropX))}`;
+  console.log(`[Face] buildCropFilter: ${rawPositions.length} raw positions (cropX range ${rawRange}), ${smoothed.length} smoothed keyframes (cropX range ${smoothedRange}), maxX=${maxX}, cropW=${cropW}`);
+
   // Single keyframe → static face-centered crop
   if (smoothed.length === 1) {
-    return `crop=${cropW}:${srcHeight}:${smoothed[0].cropX}:0,scale=1080:1920`;
+    const filter = `crop=${cropW}:${srcHeight}:${smoothed[0].cropX}:0,scale=1080:1920`;
+    console.log(`[Face] Static crop filter: ${filter}`);
+    return filter;
   }
 
   // Multiple keyframes → piecewise-linear FFmpeg expression for smooth pan
@@ -798,5 +828,7 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
   // Clamp to valid pixel range
   expr = `max(0${E}min(${maxX}${E}${expr}))`;
 
-  return `crop=${cropW}:${srcHeight}:${expr}:0,scale=1080:1920`;
+  const filter = `crop=${cropW}:${srcHeight}:${expr}:0,scale=1080:1920`;
+  console.log(`[Face] Dynamic crop filter (${smoothed.length} keyframes): cropX moves through [${smoothed.map(s => s.cropX).join(', ')}] at times [${smoothed.map(s => s.time.toFixed(1)).join(', ')}]`);
+  return filter;
 }

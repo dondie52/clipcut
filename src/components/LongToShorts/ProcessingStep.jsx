@@ -74,6 +74,11 @@ export default function ProcessingStep({ state, dispatch }) {
             }
           }
 
+          // Diagnostic: log whether face-aware crop was produced
+          if (isLandscape) {
+            console.log(`[LongToShorts] "${seg.label}" cropFilter: ${cropFilter ? cropFilter.substring(0, 120) + '...' : 'null (will use default center crop)'}`);
+          }
+
           // Merge crop + caption filters into one -vf string
           // When captions exist but no face-crop, prepend the default crop/scale
           // so cropToVertical still reframes correctly (vfOverride replaces its default).

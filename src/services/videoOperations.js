@@ -582,6 +582,7 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
           : ['-i', inputName, '-ss', formatTime(startTime), '-t', formatTime(duration)];
 
         console.log(`[cropToVertical] Export started: ${outputName}, start=${startTime}s, dur=${duration}s, vfOverride=${!!vfOverride}`);
+        console.log(`[cropToVertical] Final -vf: ${vf.substring(0, 200)}${vf.length > 200 ? '...' : ''}`);
 
         await exec([
           ...seekArgs,
