@@ -22,16 +22,19 @@ const MAX_SAMPLES = 40;
 const SAMPLES_PER_SECOND = 0.7; // ~1 sample per 1.5 seconds
 
 /** Max horizontal pan speed in pixels per second (prevents jarring jumps) */
-const MAX_PAN_PX_PER_SEC = 250;
+const MAX_PAN_PX_PER_SEC = 400; // Reduced for smoother, more intentional movement
 
 /** EMA smoothing factor (lower = smoother but laggier, higher = more responsive) */
-const SMOOTH_ALPHA = 0.25;
+const SMOOTH_ALPHA = 0.35; // Reduced for smoother motion
 
-/** Minimum time (seconds) to hold a crop target before accepting a new one */
-const MIN_HOLD_TIME = 1.5;
+/** Minimum time (seconds) to hold a crop target before allowing another switch */
+const MIN_HOLD_TIME = 1.2; // Increased for shot stabilization - prevents rapid oscillation
 
 /** Dead zone: ignore crop movements smaller than this fraction of crop width */
-const DEAD_ZONE_RATIO = 0.03;
+const DEAD_ZONE_RATIO = 0.08; // Increased to ignore tiny target changes
+
+/** Minimum transition duration (seconds) for smooth easing */
+const MIN_TRANSITION_DURATION = 0.4;
 
 /** Maximum number of keyframes in the FFmpeg expression */
 const MAX_EXPRESSION_KEYFRAMES = 20;
@@ -98,6 +101,58 @@ function arrayVariance(arr) {
   return arr.reduce((sum, v) => sum + (v - mean) ** 2, 0) / arr.length;
 }
 
+/**
+ * Quantize crop position into stable shot zones.
+ * Zones: left (0-33%), center (33-67%), right (67-100%), two-shot (center between speakers)
+ * @param {number} cropX - Current crop X position
+ * @param {number} maxX - Maximum crop X (srcWidth - cropW)
+ * @param {Array<{time: number, cropX: number}>} allPositions - All positions for two-shot detection
+ * @returns {number} Quantized crop X position
+ */
+function quantizeShotZone(cropX, maxX, allPositions = []) {
+  if (maxX <= 0) return 0;
+  
+  // Define zone boundaries (as fractions of maxX)
+  const leftBound = maxX * 0.33;
+  const rightBound = maxX * 0.67;
+  
+  // Check if we should use two-shot (center between speakers)
+  // If positions span a wide range, use center zone
+  if (allPositions.length > 1) {
+    const positions = allPositions.map(p => p.cropX);
+    const minPos = Math.min(...positions);
+    const maxPos = Math.max(...positions);
+    const span = maxPos - minPos;
+    // If positions span more than 40% of available space, use center
+    if (span > maxX * 0.4) {
+      return Math.round(maxX / 2);
+    }
+  }
+  
+  // Quantize to nearest zone
+  if (cropX < leftBound) {
+    // Left zone: quantize to 20% of maxX
+    return Math.round(maxX * 0.2);
+  } else if (cropX < rightBound) {
+    // Center zone: quantize to 50% of maxX
+    return Math.round(maxX / 2);
+  } else {
+    // Right zone: quantize to 80% of maxX
+    return Math.round(maxX * 0.8);
+  }
+}
+
+/**
+ * Easing function: ease-in-out cubic for smooth acceleration/deceleration
+ * @param {number} t - Normalized time (0 to 1)
+ * @returns {number} Eased value (0 to 1)
+ */
+function easeInOutCubic(t) {
+  return t < 0.5
+    ? 4 * t * t * t
+    : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
 // ─── Transcript-based speaker inference ──────────────────────
 
 /**
@@ -143,6 +198,9 @@ export function inferActiveSpeakerFromTranscript(words, segmentStart, duration) 
   });
 
   console.log(`[Face] Transcript speaker inference: ${intervals.length} intervals from ${words.length} words`);
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:145',message:'[Face] speaker intervals',data:{intervalsCount:intervals.length,intervals:intervals.map(iv=>({start:iv.start,end:iv.end,speaker:iv.speakerIdx,duration:iv.end-iv.start}))},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
   return intervals;
 }
 
@@ -403,6 +461,9 @@ async function sampleFrameZones(videoFile, startTime, duration) {
     const withFaces = frames.filter(f => f.faces.length > 0).length;
     const noFaces = frames.filter(f => f.faces.length === 0).length;
     console.log(`[Face] Canvas zone analysis: ${frames.length} frames, ${withFaces} have detected zones, ${noFaces} rejected by confidence gate`);
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:405',message:'[Face] zones detected',data:{framesCount:frames.length,withFaces,noFaces,srcWidth,srcHeight},timestamp:Date.now(),runId:'debug1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
     return { frames, srcWidth, srcHeight };
   } catch (err) {
     console.warn('[Face] Canvas zone analysis failed:', err.message);
@@ -619,6 +680,10 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
   // Infer speaker intervals from transcript (used in both face + canvas paths)
   const speakerIntervals = inferActiveSpeakerFromTranscript(words, startTime, duration);
 
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:618',message:'[Face] detectFaceKeyframes entry',data:{startTime,duration,wordsCount:words?.length||0,speakerIntervalsCount:speakerIntervals.length,faceDetectorSupported:isFaceDetectionSupported()},timestamp:Date.now(),runId:'debug1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
   let frames, srcWidth, srcHeight;
 
   if (isFaceDetectionSupported()) {
@@ -629,11 +694,19 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
     ({ frames, srcWidth, srcHeight } = await sampleFrameZones(videoFile, startTime, duration));
   }
 
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:632',message:'[Face] zones detected',data:{framesCount:frames.length,srcWidth,srcHeight,framesWithFacesCount:frames.filter(f=>f.faces.length>0).length},timestamp:Date.now(),runId:'debug1',hypothesisId:'A'})}).catch(()=>{});
+  // #endregion
+
   if (!frames.length || srcWidth === 0) return [];
 
   const framesWithFaces = frames.filter(f => f.faces.length > 0);
   if (framesWithFaces.length === 0) {
     console.log('[Face] No faces/zones detected in any sampled frame');
+
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:635',message:'[Face] transcript fallback check',data:{speakerIntervalsCount:speakerIntervals.length,srcWidth,srcHeight:srcHeight||1080},timestamp:Date.now(),runId:'debug1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
 
     // Transcript-only fallback: if we have speaker intervals and know the source
     // dimensions, create synthetic keyframes that pan between speaker positions.
@@ -641,6 +714,9 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
     if (speakerIntervals.length > 1 && srcWidth > 0) {
       const cropW = Math.round((srcHeight || 1080) * 9 / 16);
       const maxX = srcWidth - cropW;
+      // #region agent log
+      fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:641',message:'[Face] transcript fallback conditions',data:{cropW,maxX,willCreateKeyframes:maxX>0},timestamp:Date.now(),runId:'debug1',hypothesisId:'C'})}).catch(()=>{});
+      // #endregion
       if (maxX > 0) {
         // Place speaker 0 at ~33% of frame, speaker 1 at ~66%
         const positions = [
@@ -650,11 +726,22 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
         const transcriptKeyframes = [];
         for (const iv of speakerIntervals) {
           const idx = Math.min(iv.speakerIdx, positions.length - 1);
-          transcriptKeyframes.push({ time: iv.start, centerX: positions[idx] });
-          // Also add end keyframe to hold position for the interval duration
-          transcriptKeyframes.push({ time: iv.end, centerX: positions[idx] });
+          const targetX = positions[idx];
+          // Add start keyframe
+          transcriptKeyframes.push({ time: iv.start, centerX: targetX });
+          // Add intermediate keyframe at 0.3s after start for faster transition
+          // This ensures the crop starts moving immediately and reaches target sooner
+          const intermediateTime = Math.min(iv.start + 0.3, iv.end - 0.1);
+          if (intermediateTime > iv.start + 0.1) {
+            transcriptKeyframes.push({ time: intermediateTime, centerX: targetX });
+          }
+          // Add end keyframe to hold position
+          transcriptKeyframes.push({ time: iv.end, centerX: targetX });
         }
         console.log(`[Face] Transcript-only fallback: ${transcriptKeyframes.length} keyframes from ${speakerIntervals.length} speaker intervals, positions=[${positions.join(',')}]`);
+        // #region agent log
+        fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:670',message:'[Face] keyframes generated',data:{keyframesCount:transcriptKeyframes.length,keyframes:transcriptKeyframes.map(k=>({t:k.time.toFixed(2),x:Math.round(k.centerX)})),positions},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+        // #endregion
         return transcriptKeyframes;
       }
     }
@@ -680,6 +767,9 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
   console.log(`[Face] ${speakers.length} speaker(s), ${targets.length} keyframes from ${frames.length} samples`);
   console.log(`[Face] Speaker avgX positions: [${speakers.map(s => Math.round(s.avgCenterX)).join(', ')}]`);
   console.log(`[Face] Crop target centerX range: ${minCX}–${maxCX} (srcWidth=${srcWidth})`);
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:683',message:'[Face] keyframes generated',data:{keyframesCount:targets.length,keyframes:targets.slice(0,10).map(k=>({t:k.time,x:Math.round(k.centerX)}))},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
   return targets;
 }
 
@@ -708,14 +798,28 @@ export async function detectFaceKeyframes(videoFile, startTime, duration, words)
  *   (caller should fall back to default center crop).
  */
 export function buildCropFilter(keyframes, srcWidth, srcHeight) {
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:710',message:'[Crop] buildCropFilter entry',data:{keyframesCount:keyframes.length,srcWidth,srcHeight,keyframes:keyframes.slice(0,5).map(k=>({t:k.time,x:Math.round(k.centerX)}))},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
+  // #endregion
+
   const cropW = Math.round(srcHeight * 9 / 16);
   const maxX = srcWidth - cropW;
 
   // Source is already narrower than or equal to 9:16 — no horizontal crop needed
-  if (maxX <= 0) return null;
+  if (maxX <= 0) {
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:715',message:'[Crop] filter built',data:{result:'null',reason:'maxX<=0',maxX,cropW},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    return null;
+  }
 
   // No face keyframes — fall back to center crop
-  if (!keyframes.length) return null;
+  if (!keyframes.length) {
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:718',message:'[Crop] filter built',data:{result:'null',reason:'no keyframes'},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    return null;
+  }
 
   // Step 1: Convert face centerX → crop X (face centered in the crop window)
   const rawPositions = keyframes.map(kf => ({
@@ -724,34 +828,130 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
   }));
 
   rawPositions.sort((a, b) => a.time - b.time);
+  
+  // #region agent log
+  console.log(`[Crop] Raw targets: ${rawPositions.length} positions`);
+  rawPositions.slice(0, 10).forEach((p, i) => {
+    console.log(`  [${i}] t=${p.time.toFixed(2)}s, cropX=${p.cropX}`);
+  });
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:764',message:'[Crop] raw positions',data:{count:rawPositions.length,positions:rawPositions.map(p=>({t:p.time.toFixed(2),x:p.cropX})),cropW,maxX},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
 
-  // Step 2: Dead zone filter — discard movements smaller than 3% of crop width
-  const deadZone = cropW * DEAD_ZONE_RATIO;
-  const deadFiltered = [rawPositions[0]];
-  for (let i = 1; i < rawPositions.length; i++) {
-    const lastAccepted = deadFiltered[deadFiltered.length - 1];
-    if (Math.abs(rawPositions[i].cropX - lastAccepted.cropX) >= deadZone) {
-      deadFiltered.push(rawPositions[i]);
-    } else {
-      // Keep the time but use the last accepted position
-      deadFiltered.push({ time: rawPositions[i].time, cropX: lastAccepted.cropX });
+  // Step 1.5: Shot quantization — quantize positions into stable zones (left, center, right, two-shot)
+  const quantizedPositions = rawPositions.map(p => ({
+    time: p.time,
+    cropX: quantizeShotZone(p.cropX, maxX, rawPositions),
+    originalCropX: p.cropX, // Keep original for logging
+  }));
+  
+  // Log quantization changes
+  const quantizationChanges = [];
+  for (let i = 0; i < rawPositions.length; i++) {
+    if (Math.abs(quantizedPositions[i].cropX - rawPositions[i].cropX) > 1) {
+      quantizationChanges.push({
+        time: rawPositions[i].time,
+        from: rawPositions[i].cropX,
+        to: quantizedPositions[i].cropX,
+        zone: quantizedPositions[i].cropX < maxX * 0.33 ? 'left' : 
+              quantizedPositions[i].cropX < maxX * 0.67 ? 'center' : 'right'
+      });
     }
   }
+  console.log(`[Crop] Shot quantization: ${quantizationChanges.length} positions quantized into zones`);
+  if (quantizationChanges.length > 0) {
+    quantizationChanges.slice(0, 5).forEach(change => {
+      console.log(`  t=${change.time.toFixed(2)}s: ${change.from} → ${change.to} (${change.zone})`);
+    });
+  }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:777',message:'[Crop] after quantization',data:{count:quantizedPositions.length,positions:quantizedPositions.map(p=>({t:p.time.toFixed(2),x:p.cropX,original:p.originalCropX})),quantizationChanges:quantizationChanges.slice(0,10)},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
 
-  // Step 3: Minimum hold time — suppress direction changes within 1.5s
+  // Step 2: Dead zone filter — discard movements smaller than threshold
+  const deadZone = cropW * DEAD_ZONE_RATIO;
+  const deadFiltered = [quantizedPositions[0]];
+  const ignoredChanges = [];
+  for (let i = 1; i < quantizedPositions.length; i++) {
+    const lastAccepted = deadFiltered[deadFiltered.length - 1];
+    const change = Math.abs(quantizedPositions[i].cropX - lastAccepted.cropX);
+    if (change >= deadZone) {
+      deadFiltered.push(quantizedPositions[i]);
+    } else {
+      // Keep the time but use the last accepted position
+      deadFiltered.push({ time: quantizedPositions[i].time, cropX: lastAccepted.cropX });
+      ignoredChanges.push({
+        time: quantizedPositions[i].time,
+        requested: quantizedPositions[i].cropX,
+        kept: lastAccepted.cropX,
+        change: change
+      });
+    }
+  }
+  
+  console.log(`[Crop] Dead zone filter: ${ignoredChanges.length} tiny changes ignored (threshold=${Math.round(deadZone)}px)`);
+  if (ignoredChanges.length > 0 && ignoredChanges.length <= 10) {
+    ignoredChanges.forEach(change => {
+      console.log(`  t=${change.time.toFixed(2)}s: ignored change of ${Math.round(change.change)}px`);
+    });
+  }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:777',message:'[Crop] after dead zone',data:{count:deadFiltered.length,positions:deadFiltered.map(p=>({t:p.time.toFixed(2),x:p.cropX})),deadZone:Math.round(deadZone),ignoredCount:ignoredChanges.length,ignoredSamples:ignoredChanges.slice(0,5)},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
+
+  // Step 3: Minimum hold time — suppress direction changes within MIN_HOLD_TIME
   const holdFiltered = [deadFiltered[0]];
   let lastChangeTime = deadFiltered[0].time;
   let lastChangeCropX = deadFiltered[0].cropX;
+  const suppressedChanges = [];
   for (let i = 1; i < deadFiltered.length; i++) {
+    const timeSinceChange = deadFiltered[i].time - lastChangeTime;
     if (deadFiltered[i].cropX !== lastChangeCropX &&
-        (deadFiltered[i].time - lastChangeTime) >= MIN_HOLD_TIME) {
+        timeSinceChange >= MIN_HOLD_TIME) {
       holdFiltered.push(deadFiltered[i]);
       lastChangeTime = deadFiltered[i].time;
       lastChangeCropX = deadFiltered[i].cropX;
     } else {
+      if (deadFiltered[i].cropX !== lastChangeCropX) {
+        suppressedChanges.push({
+          time: deadFiltered[i].time,
+          requested: deadFiltered[i].cropX,
+          kept: lastChangeCropX,
+          timeSinceChange: timeSinceChange
+        });
+      }
       holdFiltered.push({ time: deadFiltered[i].time, cropX: lastChangeCropX });
     }
   }
+  
+  console.log(`[Crop] Hold time filter: ${suppressedChanges.length} changes suppressed (min hold=${MIN_HOLD_TIME}s)`);
+  if (suppressedChanges.length > 0 && suppressedChanges.length <= 10) {
+    suppressedChanges.forEach(change => {
+      console.log(`  t=${change.time.toFixed(2)}s: suppressed change (only ${change.timeSinceChange.toFixed(2)}s since last)`);
+    });
+  }
+  
+  // #region agent log
+  const transitions = [];
+  for (let i = 1; i < holdFiltered.length; i++) {
+    if (holdFiltered[i].cropX !== holdFiltered[i-1].cropX) {
+      transitions.push({
+        from: holdFiltered[i-1].cropX,
+        to: holdFiltered[i].cropX,
+        startTime: holdFiltered[i-1].time,
+        endTime: holdFiltered[i].time,
+        duration: holdFiltered[i].time - holdFiltered[i-1].time,
+        distance: Math.abs(holdFiltered[i].cropX - holdFiltered[i-1].cropX)
+      });
+    }
+  }
+  console.log(`[Crop] Stabilized targets: ${holdFiltered.length} positions, ${transitions.length} transitions`);
+  transitions.forEach((t, i) => {
+    console.log(`  Transition ${i+1}: ${t.from} → ${t.to} over ${t.duration.toFixed(2)}s (${Math.round(t.distance)}px)`);
+  });
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:792',message:'[Crop] after hold time',data:{count:holdFiltered.length,positions:holdFiltered.map(p=>({t:p.time.toFixed(2),x:p.cropX})),transitions,minHoldTime:MIN_HOLD_TIME,suppressedCount:suppressedChanges.length},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
 
   // Step 4: Merge consecutive targets within 5% of crop width
   const mergeThreshold = cropW * 0.05;
@@ -769,34 +969,52 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
   const emaSmoothed = [merged[0]];
   for (let i = 1; i < merged.length; i++) {
     const prev = emaSmoothed[i - 1];
+    const rawX = merged[i].cropX;
+    const smoothedX = SMOOTH_ALPHA * rawX + (1 - SMOOTH_ALPHA) * prev.cropX;
     emaSmoothed.push({
       time: merged[i].time,
-      cropX: clamp(
-        Math.round(SMOOTH_ALPHA * merged[i].cropX + (1 - SMOOTH_ALPHA) * prev.cropX),
-        0, maxX
-      ),
+      cropX: clamp(Math.round(smoothedX), 0, maxX),
     });
   }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:817',message:'[Crop] after EMA',data:{count:emaSmoothed.length,positions:emaSmoothed.map(p=>({t:p.time.toFixed(2),x:p.cropX})),smoothAlpha:SMOOTH_ALPHA},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
 
   // Step 6: Velocity clamping — limit how fast the crop can pan
   const velocityClamped = [emaSmoothed[0]];
+  const velocityLog = [];
   for (let i = 1; i < emaSmoothed.length; i++) {
     const dt = emaSmoothed[i].time - emaSmoothed[i - 1].time;
     const prev = velocityClamped[i - 1];
     if (dt > 0) {
       const maxDelta = MAX_PAN_PX_PER_SEC * dt;
       const delta = emaSmoothed[i].cropX - prev.cropX;
-      const clamped = Math.abs(delta) > maxDelta
+      const wasClamped = Math.abs(delta) > maxDelta;
+      const clamped = wasClamped
         ? prev.cropX + Math.sign(delta) * maxDelta
         : emaSmoothed[i].cropX;
       velocityClamped.push({
         time: emaSmoothed[i].time,
         cropX: clamp(Math.round(clamped), 0, maxX),
       });
+      if (wasClamped) {
+        velocityLog.push({
+          time: emaSmoothed[i].time,
+          requested: emaSmoothed[i].cropX,
+          clamped: clamped,
+          maxDelta: maxDelta,
+          actualSpeed: Math.abs(clamped - prev.cropX) / dt
+        });
+      }
     } else {
       velocityClamped.push({ ...emaSmoothed[i] });
     }
   }
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:837',message:'[Crop] after velocity clamp',data:{count:velocityClamped.length,positions:velocityClamped.map(p=>({t:p.time.toFixed(2),x:p.cropX})),maxPanSpeed:MAX_PAN_PX_PER_SEC,clampedCount:velocityLog.length,clampedSamples:velocityLog.slice(0,5)},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
 
   // Step 7: Cap keyframe count — deduplicate then merge closest pairs if over limit
   // First, deduplicate consecutive keyframes with the same cropX
@@ -831,31 +1049,86 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
   if (smoothed.length === 1) {
     const filter = `crop=${cropW}:${srcHeight}:${smoothed[0].cropX}:0,scale=1080:1920`;
     console.log(`[Face] Static crop filter: ${filter}`);
+    // #region agent log
+    fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:833',message:'[Crop] filter built',data:{result:'static',cropX:smoothed[0].cropX,filter},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
     return filter;
   }
 
-  // Multiple keyframes → piecewise-linear FFmpeg expression for smooth pan
+  // Multiple keyframes → piecewise-eased FFmpeg expression for smooth pan
   //
   // FFmpeg filtergraph escaping: commas inside a filter parameter must be
   // written as \, so they aren't mistaken for filter-chain separators.
   const E = '\\,'; // escaped comma
 
+  /**
+   * Generate eased interpolation expression for FFmpeg.
+   * Uses cubic ease-in-out approximation: smoothstep-like curve
+   * @param {number} fromX - Start position
+   * @param {number} toX - End position
+   * @param {number} startTime - Start time
+   * @param {number} endTime - End time
+   * @returns {string} FFmpeg expression for eased interpolation
+   */
+  function buildEasedExpression(fromX, toX, startTime, endTime) {
+    const dt = endTime - startTime;
+    if (dt <= 0) return String(toX);
+    
+    const delta = toX - fromX;
+    // Normalized time: 0 to 1 over the transition duration
+    // t_norm = (t - startTime) / dt
+    const tNorm = `(t-${startTime.toFixed(2)})/${dt.toFixed(4)}`;
+    
+    // Cubic ease-in-out approximation using smoothstep-like function
+    // ease(t) = t^2 * (3 - 2*t) for t in [0,1] (smoothstep)
+    // This gives smooth acceleration and deceleration
+    // We clamp t_norm to [0,1] first
+    const tClamped = `max(0${E}min(1${E}${tNorm}))`;
+    const tSquared = `(${tClamped})*(${tClamped})`;
+    const ease = `${tSquared}*(3-2*${tClamped})`;
+    
+    // Interpolate: fromX + delta * ease(t)
+    return `${fromX}+${delta}*${ease}`;
+  }
+
   // Build nested if() expression from the end backwards
   let expr = String(smoothed[smoothed.length - 1].cropX);
-
+  
+  const filterTransitions = [];
   for (let i = smoothed.length - 2; i >= 0; i--) {
     const curr = smoothed[i];
     const next = smoothed[i + 1];
     const dt = next.time - curr.time;
     if (dt <= 0) continue;
 
-    const slope = (next.cropX - curr.cropX) / dt;
-    const absSlope = Math.abs(slope).toFixed(4);
-    const sign = slope >= 0 ? '+' : '-';
+    const distance = Math.abs(next.cropX - curr.cropX);
+    const speed = distance / dt;
+    const useEasing = dt >= MIN_TRANSITION_DURATION;
 
-    // Linear interpolation: currX +/- |slope| * (t - currTime)
-    const lerp = `${curr.cropX}${sign}${absSlope}*(t-${curr.time.toFixed(2)})`;
+    // Use eased interpolation for transitions >= MIN_TRANSITION_DURATION, linear for very short ones
+    let lerp;
+    if (useEasing) {
+      lerp = buildEasedExpression(curr.cropX, next.cropX, curr.time, next.time);
+    } else {
+      // Very short transitions: use linear to avoid expression complexity
+      const slope = (next.cropX - curr.cropX) / dt;
+      const absSlope = Math.abs(slope).toFixed(4);
+      const sign = slope >= 0 ? '+' : '-';
+      lerp = `${curr.cropX}${sign}${absSlope}*(t-${curr.time.toFixed(2)})`;
+    }
+    
     expr = `if(lt(t${E}${next.time.toFixed(2)})${E}${lerp}${E}${expr})`;
+    
+    filterTransitions.push({
+      from: curr.cropX,
+      to: next.cropX,
+      startTime: curr.time,
+      endTime: next.time,
+      duration: dt,
+      distance: distance,
+      speed: speed,
+      easing: useEasing
+    });
   }
 
   // Hold first keyframe's position for frames before the first sample
@@ -865,6 +1138,19 @@ export function buildCropFilter(keyframes, srcWidth, srcHeight) {
   expr = `max(0${E}min(${maxX}${E}${expr}))`;
 
   const filter = `crop=${cropW}:${srcHeight}:${expr}:0,scale=1080:1920`;
-  console.log(`[Face] Dynamic crop filter (${smoothed.length} keyframes): cropX moves through [${smoothed.map(s => s.cropX).join(', ')}] at times [${smoothed.map(s => s.time.toFixed(1)).join(', ')}]`);
+  
+  // Final logging
+  console.log(`[Crop] Final crop filter (${smoothed.length} keyframes):`);
+  console.log(`  Keyframes: [${smoothed.map(s => `${s.cropX}@${s.time.toFixed(1)}s`).join(', ')}]`);
+  console.log(`  Transitions: ${filterTransitions.length}`);
+  filterTransitions.forEach((t, i) => {
+    const easingStr = t.easing ? 'eased' : 'linear';
+    console.log(`    ${i+1}. ${t.from} → ${t.to} over ${t.duration.toFixed(2)}s (${Math.round(t.distance)}px, ${easingStr})`);
+  });
+  console.log(`[Crop] Final filter string (first 400 chars): ${filter.substring(0, 400)}${filter.length > 400 ? '...' : ''}`);
+  
+  // #region agent log
+  fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'faceDetection.js:915',message:'[Crop] filter built',data:{result:'dynamic',keyframesCount:smoothed.length,keyframes:smoothed.map(s=>({t:s.time.toFixed(2),x:s.cropX})),transitions:filterTransitions,filterPreview:filter.substring(0,400),fullFilter:filter},timestamp:Date.now(),runId:'debug2',hypothesisId:'motion'})}).catch(()=>{});
+  // #endregion
   return filter;
 }
