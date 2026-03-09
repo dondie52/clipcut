@@ -583,9 +583,7 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
 
         console.log(`[cropToVertical] Export started: ${outputName}, start=${startTime}s, dur=${duration}s, vfOverride=${!!vfOverride}`);
         console.log(`[cropToVertical] Final -vf: ${vf.substring(0, 200)}${vf.length > 200 ? '...' : ''}`);
-        // #region agent log
-        fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'videoOperations.js:585',message:'[LongToShorts] vfOverride',data:{vfOverride:vfOverride?vfOverride.substring(0,300):'null',finalVf:vf.substring(0,300)},timestamp:Date.now(),runId:'debug1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
+
 
         await exec([
           ...seekArgs,

@@ -128,8 +128,8 @@ const CSS = `
 
   /* Content area */
   .lts-content {
-    flex: 1; overflow-y: auto; overflow-x: hidden;
-    display: flex; align-items: center; justify-content: center;
+    flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+    display: flex; align-items: flex-start; justify-content: center;
     padding: 24px;
   }
 
@@ -370,7 +370,7 @@ const CSS = `
 
   /* Done step */
   .lts-done {
-    width: 100%; max-width: 900px;
+    width: 100%; max-width: 900px; padding-bottom: 32px;
   }
   .lts-done-title { font-size: 18px; font-weight: 600; margin: 0 0 4px; text-align: center; }
   .lts-done-sub { font-size: 13px; color: rgba(255,255,255,0.4); margin: 0 0 24px; text-align: center; }

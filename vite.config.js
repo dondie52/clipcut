@@ -17,7 +17,7 @@ const securityHeaders = {
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; media-src 'self' blob: https://*.supabase.co; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co https://www.google-analytics.com https://*.sentry.io https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com https://*.workers.dev http://localhost:*; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co; media-src 'self' blob: https://*.supabase.co; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co https://www.google-analytics.com https://*.sentry.io https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com https://*.workers.dev http://localhost:* https://tfhub.dev https://storage.googleapis.com; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 }
 
 /**
@@ -173,7 +173,7 @@ export default defineConfig({
     }),
   ].filter(Boolean),
   optimizeDeps: {
-    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util']
+    exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@mediapipe/tasks-vision']
   },
   server: {
     headers: securityHeaders,
@@ -222,6 +222,10 @@ export default defineConfig({
           // FFmpeg chunk: FFmpeg WASM and utilities
           if (id.includes('node_modules/@ffmpeg')) {
             return 'vendor-ffmpeg'
+          }
+          // MediaPipe chunk: Face Landmarker and vision tasks
+          if (id.includes('node_modules/@mediapipe')) {
+            return 'vendor-mediapipe'
           }
         },
       }

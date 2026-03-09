@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { cropToVertical } from '../../services/videoOperations';
 import { loadFFmpeg, terminateFFmpeg } from '../../services/ffmpeg';
-import { detectFaceKeyframes, buildCropFilter } from '../../services/faceDetection';
+import { detectFaceKeyframes, buildCropFilter, getLastDebugData } from '../../services/faceDetection';
 import { buildCaptionFilterFromWords, loadCaptionFont, resetCaptionFontState, isCaptionFontReady } from '../../services/captionService';
 
 export default function ProcessingStep({ state, dispatch }) {
@@ -55,19 +55,17 @@ export default function ProcessingStep({ state, dispatch }) {
           let cropFilter = null;
           let keyframes = [];
           if (isLandscape) {
-            keyframes = await detectFaceKeyframes(
+            const faceResult = await detectFaceKeyframes(
               state.videoFile, seg.startSeconds, duration, seg.words
             );
-            // #region agent log
-            fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessingStep.jsx:61',message:'[Crop] targets',data:{keyframesCount:keyframes.length,keyframes:keyframes.slice(0,10).map(k=>({t:k.time,x:Math.round(k.centerX)}))},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
+            keyframes = faceResult.keyframes;
             cropFilter = buildCropFilter(
-              keyframes, state.videoWidth, state.videoHeight
+              keyframes, state.videoWidth, state.videoHeight, faceResult.effectiveIntervals
             );
-            // #region agent log
-            fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessingStep.jsx:64',message:'[Crop] filter built',data:{result:cropFilter?'filter':'null',filterPreview:cropFilter?cropFilter.substring(0,200):null},timestamp:Date.now(),runId:'debug1',hypothesisId:'D'})}).catch(()=>{});
-            // #endregion
           }
+
+          // Capture debug data for this segment (dev only)
+          const faceDebug = import.meta.env.DEV ? getLastDebugData() : null;
 
           // Captions: build drawtext filter from word timings
           // Only attempt if font is confirmed available in the current FFmpeg FS
@@ -121,9 +119,7 @@ export default function ProcessingStep({ state, dispatch }) {
           try {
             console.log(`[LongToShorts] Export started: "${seg.label}" (captions: ${!!captionFilter}, fontReady: ${captionsAvailable})`);
             console.log(`[LongToShorts] Final vfOverride for FFmpeg: ${combinedFilter ? combinedFilter.substring(0, 300) : 'null (cropToVertical will use built-in default)'}`);
-            // #region agent log
-            fetch('http://127.0.0.1:7249/ingest/d2db4c1e-da8f-4150-a6f6-6b5680af0010',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'ProcessingStep.jsx:118',message:'[LongToShorts] vfOverride',data:{vfOverride:combinedFilter?combinedFilter.substring(0,300):'null',hasCropFilter:!!cropFilter,hasCaptionFilter:!!captionFilter},timestamp:Date.now(),runId:'debug1',hypothesisId:'E'})}).catch(()=>{});
-            // #endregion
+
             blob = await cropToVertical(
               state.videoFile,
               seg.startSeconds,
@@ -175,7 +171,7 @@ export default function ProcessingStep({ state, dispatch }) {
 
           const url = URL.createObjectURL(blob);
           console.log(`[LongToShorts] Export accepted: "${seg.label}" — blob=${blob.size} bytes, objectURL=${url}`);
-          results.push({ id: seg.id, label: seg.label, hookTitle: seg.hookTitle, score: seg.score, blob, url });
+          results.push({ id: seg.id, label: seg.label, hookTitle: seg.hookTitle, score: seg.score, blob, url, faceDebug });
           setProgress(prev => ({ ...prev, [seg.id]: 100 }));
         } catch (err) {
           console.error(`[LongToShorts] Failed to process segment ${seg.label}:`, err);
