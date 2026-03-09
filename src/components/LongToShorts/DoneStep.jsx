@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import FaceDebugOverlay from '../FaceDebugOverlay';
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -107,6 +108,12 @@ export default function DoneStep({ state, dispatch, navigate }) {
                   Edit
                 </button>
               </div>
+              {import.meta.env.DEV && result.faceDebug && (
+                <FaceDebugOverlay
+                  debugData={result.faceDebug}
+                  segLabel={result.hookTitle || result.label}
+                />
+              )}
             </div>
           </div>
         ))}
