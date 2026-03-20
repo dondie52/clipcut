@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '../supabase/AuthContext';
 
 const DEFAULT_WARNING_MS = 60_000;
@@ -7,9 +7,11 @@ export function useSessionTimeout(warningWindowMs = DEFAULT_WARNING_MS) {
   const { session, refreshSession, signOut } = useAuth();
   const [showWarning, setShowWarning] = useState(false);
   const [timeRemainingMs, setTimeRemainingMs] = useState(0);
+  const hasExpiredRef = useRef(false);
 
   const expiresAtMs = useMemo(() => {
     if (!session?.expires_at) return null;
+    hasExpiredRef.current = false;
     return session.expires_at * 1000;
   }, [session?.expires_at]);
 
@@ -28,8 +30,10 @@ export function useSessionTimeout(warningWindowMs = DEFAULT_WARNING_MS) {
         setShowWarning(true);
       }
 
-      if (remaining <= 0) {
+      if (remaining <= 0 && !hasExpiredRef.current) {
+        hasExpiredRef.current = true;
         setShowWarning(false);
+        signOut();
       }
     };
 
@@ -37,7 +41,7 @@ export function useSessionTimeout(warningWindowMs = DEFAULT_WARNING_MS) {
     const intervalId = window.setInterval(tick, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [expiresAtMs, warningWindowMs]);
+  }, [expiresAtMs, warningWindowMs, signOut]);
 
   const extendSession = async () => {
     const refreshed = await refreshSession();

@@ -92,7 +92,6 @@ export async function signUp({ email, password, username }) {
     const { error: profileError } = await supabase.from("profiles").upsert({
       id: data.user.id,
       username,
-      email,
       created_at: new Date().toISOString(),
     });
     if (profileError) console.warn("Profile creation deferred:", profileError.message);

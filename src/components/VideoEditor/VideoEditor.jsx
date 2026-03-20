@@ -227,7 +227,7 @@ Toast.displayName = "Toast";
 /* ========== AUTO-SAVE HOOK ========== */
 const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resolution, interval = AUTO_SAVE_INTERVAL) => {
   const [lastSaved, setLastSaved] = useState(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const projectIdRef = useRef(projectId);
 
   // Update ref when projectId changes
@@ -237,28 +237,28 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 
   useEffect(() => {
     if (clips.length === 0) return;
-    
+
     const doSave = async () => {
-      if (isSaving) return;
-      setIsSaving(true);
-      
+      if (isSavingRef.current) return;
+      isSavingRef.current = true;
+
       try {
         const projectData = {
           id: projectIdRef.current,
           name: projectName,
-          clips: clips.map(c => ({ 
-            id: c.id, 
-            mediaId: c.mediaId, 
-            name: c.name, 
-            type: c.type, 
-            startTime: c.startTime, 
+          clips: clips.map(c => ({
+            id: c.id,
+            mediaId: c.mediaId,
+            name: c.name,
+            type: c.type,
+            startTime: c.startTime,
             duration: c.duration,
             storagePath: c.storagePath || null,
           })),
           duration: totalDuration,
           resolution: resolution || '1080p',
         };
-        
+
         // Save to cloud if user is authenticated, otherwise localStorage
         if (userId) {
           const saved = await saveProject(userId, projectData);
@@ -275,21 +275,21 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
           };
           localStorage.setItem(`clipcut_autosave_${projectName}`, JSON.stringify(data));
         }
-        
+
         setLastSaved(new Date());
-      } catch (e) { 
-        console.warn("Auto-save failed:", e); 
+      } catch (e) {
+        console.warn("Auto-save failed:", e);
       } finally {
-        setIsSaving(false);
+        isSavingRef.current = false;
       }
     };
-    
+
     const timer = setInterval(doSave, interval);
     return () => clearInterval(timer);
-  }, [projectName, clips, userId, totalDuration, resolution, interval, isSaving]);
+  }, [projectName, clips, userId, totalDuration, resolution, interval]);
 
   // Return both lastSaved and the current projectId
-  return { lastSaved, projectId: projectIdRef.current, isSaving };
+  return { lastSaved, projectId: projectIdRef.current };
 };
 
 /* ========== PLAYBACK ENGINE ========== */
@@ -388,7 +388,7 @@ const VideoEditor = () => {
   const ffmpeg = useFFmpeg();
 
   // Auto-save with cloud storage
-  const { lastSaved, projectId: savedProjectId, isSaving } = useAutoSave(
+  const { lastSaved, projectId: savedProjectId } = useAutoSave(
     projectId, 
     projectName, 
     clips, 
@@ -819,11 +819,17 @@ const VideoEditor = () => {
     return () => window.removeEventListener("keydown", h);
   }, [handleExport, undo, redo, clips.length]);
 
+  // ---- Keep refs current for cleanup ----
+  const mediaItemsRef = useRef(mediaItems);
+  const clipsRef = useRef(clips);
+  useEffect(() => { mediaItemsRef.current = mediaItems; }, [mediaItems]);
+  useEffect(() => { clipsRef.current = clips; }, [clips]);
+
   // ---- Cleanup ----
   useEffect(() => () => {
-    mediaItems.forEach(m => { if (m.blobUrl) URL.revokeObjectURL(m.blobUrl); if (m.thumbnail) URL.revokeObjectURL(m.thumbnail); });
-    clips.forEach(c => { if (c.blobUrl) URL.revokeObjectURL(c.blobUrl); });
-  }, []); // eslint-disable-line
+    mediaItemsRef.current.forEach(m => { if (m.blobUrl) URL.revokeObjectURL(m.blobUrl); if (m.thumbnail) URL.revokeObjectURL(m.thumbnail); });
+    clipsRef.current.forEach(c => { if (c.blobUrl) URL.revokeObjectURL(c.blobUrl); });
+  }, []);
 
   return (
     <div style={styles.root}>
