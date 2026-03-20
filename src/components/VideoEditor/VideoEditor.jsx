@@ -307,7 +307,12 @@ const usePlaybackEngine = (clips, totalDuration) => {
   }, [clips]);
 
   const currentClip = useMemo(() => getClipAtTime(currentTime), [getClipAtTime, currentTime]);
-  const clipOffset = useMemo(() => currentClip ? Math.max(0, currentTime - currentClip.startTime) : 0, [currentClip, currentTime]);
+  // clipOffset includes trimStart so the Player seeks to the correct position in the source file
+  const clipOffset = useMemo(() => {
+    if (!currentClip) return 0;
+    const relativeOffset = Math.max(0, currentTime - currentClip.startTime);
+    return relativeOffset + (currentClip.trimStart || 0);
+  }, [currentClip, currentTime]);
 
   // RAF playback loop
   useEffect(() => {
@@ -483,22 +488,37 @@ const VideoEditor = () => {
     if (selectedMediaId === id) setSelectedMediaId(null);
   }, [selectedMediaId, setClips]);
 
-  // ---- Split ----
-  const splitClip = useCallback(async (clipId, splitTime) => {
+  // ---- Split (non-destructive — instant, no FFmpeg) ----
+  const splitClip = useCallback((clipId, splitTime) => {
     const clip = clips.find(c => c.id === clipId);
-    if (!clip?.file) return;
-    setIsProcessing(true); setLoadMsg("Splitting clip...");
-    try {
-      const { part1, part2 } = await ffmpeg.splitVideo(clip.file, splitTime);
-      const c1 = { ...clip, id: genId(), name: `${clip.name} (1)`, duration: splitTime, file: part1, blobUrl: URL.createObjectURL(part1) };
-      const c2 = { ...clip, id: genId(), name: `${clip.name} (2)`, startTime: clip.startTime + splitTime, duration: clip.duration - splitTime, file: part2, blobUrl: URL.createObjectURL(part2) };
-      setClips(p => { const i = p.findIndex(c => c.id === clipId); const n = [...p]; n.splice(i, 1, c1, c2); return n; });
-      if (clip.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(clip.blobUrl));
-      setSelectedClipId(c1.id);
-      notify("success", "Clip split");
-    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
-    finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
-  }, [clips, ffmpeg, setClips, notify]);
+    if (!clip) return;
+
+    // Create two clips referencing the same source file.
+    // trimStart tracks where each clip starts within the source.
+    const c1 = {
+      ...clip,
+      id: genId(),
+      name: `${clip.name} (1)`,
+      duration: splitTime,
+    };
+    const c2 = {
+      ...clip,
+      id: genId(),
+      name: `${clip.name} (2)`,
+      startTime: clip.startTime + splitTime,
+      duration: clip.duration - splitTime,
+      trimStart: (clip.trimStart || 0) + splitTime,
+    };
+
+    setClips(p => {
+      const i = p.findIndex(c => c.id === clipId);
+      const n = [...p];
+      n.splice(i, 1, c1, c2);
+      return n;
+    });
+    setSelectedClipId(c1.id);
+    notify("success", "Clip split");
+  }, [clips, setClips, notify]);
 
   // ---- Trim ----
   const trimClip = useCallback(async (clipId, start, dur) => {
@@ -677,7 +697,13 @@ const VideoEditor = () => {
   }, [pb]);
 
   const onTimeUpdate = useCallback((t) => {
-    pb.currentClip ? pb.setCurrentTime(pb.currentClip.startTime + t) : pb.setCurrentTime(t);
+    if (pb.currentClip) {
+      // t is the video element's currentTime (includes trimStart offset)
+      const trimStart = pb.currentClip.trimStart || 0;
+      pb.setCurrentTime(pb.currentClip.startTime + (t - trimStart));
+    } else {
+      pb.setCurrentTime(t);
+    }
   }, [pb]);
 
   const onEnded = useCallback(() => {
@@ -810,6 +836,7 @@ const VideoEditor = () => {
     const h = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       const mod = e.ctrlKey || e.metaKey;
+      if (e.key === " ") { e.preventDefault(); pb.togglePlay(); }
       if (mod && e.key === "s") { e.preventDefault(); }
       if (mod && e.key === "e") { e.preventDefault(); clips.length > 0 && handleExport("1080p"); }
       if (mod && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -817,7 +844,7 @@ const VideoEditor = () => {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [handleExport, undo, redo, clips.length]);
+  }, [handleExport, undo, redo, clips.length, pb]);
 
   // ---- Keep refs current for cleanup ----
   const mediaItemsRef = useRef(mediaItems);
@@ -888,7 +915,7 @@ const VideoEditor = () => {
         <Suspense fallback={<TimelineLoadingFallback />}>
           <Timeline
             clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
-            onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip} onTrimClip={trimClip}
+            onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
             currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
             isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
             mediaItems={mediaItems} onAddToTimeline={addToTimeline}
