@@ -409,11 +409,14 @@ const bannerSecondaryButtonStyle = {
   cursor: 'pointer',
 }
 
+const routerBasename =
+  import.meta.env.BASE_URL.replace(/\/$/, '') || undefined
+
 const App = () => {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter basename="/clipcut">
+        <BrowserRouter basename={routerBasename}>
           <AppContent />
         </BrowserRouter>
       </AuthProvider>

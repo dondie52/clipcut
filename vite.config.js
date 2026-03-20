@@ -26,7 +26,8 @@ const securityHeaders = {
 const isAnalyze = process.env.ANALYZE === 'true'
 
 export default defineConfig({
-  base: '/clipcut/',
+  // Root for local dev and hosts like Vercel. GitHub Pages uses `vite build --base /clipcut/` (see package.json predeploy).
+  base: '/',
   plugins: [
     react(),
     // PWA with Service Worker
