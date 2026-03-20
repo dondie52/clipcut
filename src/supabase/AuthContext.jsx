@@ -114,25 +114,6 @@ export function AuthProvider({ children }) {
   }, [isTokenExpiringSoon]);
 
   /**
-   * Handle user activity to reset inactivity timeout
-   */
-  const handleUserActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-    
-    // Reset inactivity timeout
-    if (inactivityTimeoutRef.current) {
-      clearTimeout(inactivityTimeoutRef.current);
-    }
-    
-    if (session) {
-      inactivityTimeoutRef.current = setTimeout(async () => {
-        console.info('Session expired due to inactivity');
-        await handleSignOut();
-      }, SESSION_CONFIG.INACTIVITY_TIMEOUT_MS);
-    }
-  }, [session]);
-
-  /**
    * Sign out and clear session
    */
   const handleSignOut = useCallback(async () => {
@@ -143,17 +124,39 @@ export function AuthProvider({ children }) {
     if (validationIntervalRef.current) {
       clearInterval(validationIntervalRef.current);
     }
-    
+
     try {
       await supabase.auth.signOut();
     } catch (error) {
       console.warn('Sign out error:', error);
     }
-    
+
     setUser(null);
     setSession(null);
     setIsSessionValid(false);
   }, []);
+
+  /**
+   * Handle user activity to reset inactivity timeout
+   */
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
+
+  const handleUserActivity = useCallback(() => {
+    lastActivityRef.current = Date.now();
+
+    // Reset inactivity timeout
+    if (inactivityTimeoutRef.current) {
+      clearTimeout(inactivityTimeoutRef.current);
+    }
+
+    if (sessionRef.current) {
+      inactivityTimeoutRef.current = setTimeout(async () => {
+        console.info('Session expired due to inactivity');
+        await handleSignOut();
+      }, SESSION_CONFIG.INACTIVITY_TIMEOUT_MS);
+    }
+  }, [handleSignOut]);
 
   /**
    * Manually refresh session

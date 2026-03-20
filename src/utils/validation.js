@@ -270,7 +270,7 @@ export function sanitizeErrorMessage(error, fallback = 'An error occurred. Pleas
     /supabase.*key/i,
     /api.*key/i,
     /secret/i,
-    /token/i,
+    /token(?!\s*(has\s+)?expir)/i,
   ];
 
   // Check if error message contains sensitive information

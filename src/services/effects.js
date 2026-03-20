@@ -212,6 +212,11 @@ async function getVideoDuration(videoFile) {
  * @returns {Promise<Blob>} Filtered video as Blob
  */
 export async function applyFilter(videoFile, filter, onProgress = null) {
+  // Validate filter string — only allow alphanumerics, common filter chars, and no shell metacharacters
+  if (typeof filter !== 'string' || !/^[a-zA-Z0-9_=:.,\-\s\[\]\/\(\)']+$/.test(filter)) {
+    throw new Error('Invalid FFmpeg filter string');
+  }
+
   await loadFFmpeg();
   
   if (onProgress) setProgressCallback(onProgress);

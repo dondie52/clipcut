@@ -26,6 +26,7 @@ const securityHeaders = {
 const isAnalyze = process.env.ANALYZE === 'true'
 
 export default defineConfig({
+  base: '/clipcut/',
   plugins: [
     react(),
     // PWA with Service Worker

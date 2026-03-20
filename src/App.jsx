@@ -413,7 +413,7 @@ const App = () => {
   return (
     <ErrorBoundary>
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter basename="/clipcut">
           <AppContent />
         </BrowserRouter>
       </AuthProvider>
