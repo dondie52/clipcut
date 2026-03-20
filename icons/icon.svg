@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#0a0a0a"/>
+  <rect x="32" y="32" width="448" height="448" rx="48" fill="#1a2332"/>
+  <g transform="translate(128, 128)">
+    <!-- Movie icon -->
+    <rect x="0" y="32" width="256" height="192" rx="16" fill="#75AADB"/>
+    <rect x="16" y="0" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="64" y="0" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="112" y="0" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="160" y="0" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="208" y="0" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="16" y="224" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="64" y="224" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="112" y="224" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="160" y="224" width="32" height="32" rx="4" fill="#75AADB"/>
+    <rect x="208" y="224" width="32" height="32" rx="4" fill="#75AADB"/>
+    <!-- Play button -->
+    <polygon points="104,88 168,128 104,168" fill="#0a0a0a"/>
+  </g>
+  <!-- Scissors badge -->
+  <circle cx="384" cy="384" r="64" fill="#75AADB"/>
+  <g transform="translate(352, 352)" fill="#0a0a0a">
+    <path d="M16 8c-4.4 0-8 3.6-8 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zm0 12c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4z"/>
+    <path d="M48 8c-4.4 0-8 3.6-8 8s3.6 8 8 8 8-3.6 8-8-3.6-8-8-8zm0 12c-2.2 0-4-1.8-4-4s1.8-4 4-4 4 1.8 4 4-1.8 4-4 4z"/>
+    <path d="M54 16L26 44M10 16L38 44" stroke="#0a0a0a" stroke-width="4" stroke-linecap="round"/>
+  </g>
+</svg>
