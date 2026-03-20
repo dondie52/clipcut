@@ -214,41 +214,49 @@ const TrackLabel = memo(({
   icon, lockIcon = "lock", label,
   isMuted = false, isLocked = false,
   onToggleMute, onToggleLock,
-  trackType = "video", height = 60,
-}) => (
-  <div
-    style={{
-      height: `${height}px`, display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center", gap: "6px",
-      borderBottom: "1px solid rgba(255,255,255,0.04)",
-      background: "linear-gradient(180deg, rgba(15,23,42,0.35) 0%, rgba(15,23,42,0.15) 100%)",
-      position: "relative",
-    }}
-    role="group" aria-label={`${trackType} track controls`}
-  >
-    <span style={{
-      position: "absolute", top: "3px", left: "50%", transform: "translateX(-50%)",
-      fontSize: "7px", fontWeight: 700, textTransform: "uppercase",
-      letterSpacing: "0.5px", color: "rgba(117,170,219,0.4)",
-    }}>{label}</span>
-    <button
-      onClick={onToggleMute} className="track-control-btn"
-      style={{ background: "none", border: "none", padding: "3px", cursor: "pointer", opacity: isMuted ? 0.5 : 1 }}
-      aria-label={isMuted ? `Show ${trackType}` : `Hide ${trackType}`}
-      title={isMuted ? `Show ${trackType}` : `Hide ${trackType}`}
+  trackType = "video", height = 72,
+}) => {
+  const accentColor = trackType === "audio" ? "#34d399" : "#75aadb";
+  return (
+    <div
+      style={{
+        height: `${height}px`, display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: "4px",
+        borderBottom: "1px solid rgba(255,255,255,0.04)",
+        background: "linear-gradient(180deg, rgba(15,23,42,0.4) 0%, rgba(15,23,42,0.15) 100%)",
+        position: "relative",
+        padding: "4px 0",
+      }}
+      role="group" aria-label={`${trackType} track controls`}
     >
-      <Icon i={isMuted ? (trackType === "video" ? "visibility_off" : "volume_off") : icon} s={13} c={isMuted ? "#ef4444" : "#64748b"} />
-    </button>
-    <button
-      onClick={onToggleLock} className="track-control-btn"
-      style={{ background: "none", border: "none", padding: "3px", cursor: "pointer" }}
-      aria-label={isLocked ? `Unlock ${trackType}` : `Lock ${trackType}`}
-      title={isLocked ? `Unlock ${trackType}` : `Lock ${trackType}`}
-    >
-      <Icon i={isLocked ? "lock" : lockIcon} s={13} c={isLocked ? "#f59e0b" : "#64748b"} />
-    </button>
-  </div>
-));
+      <div style={{
+        fontSize: "9px", fontWeight: 700, textTransform: "uppercase",
+        letterSpacing: "1px", color: accentColor,
+        background: `${accentColor}15`,
+        padding: "1px 6px", borderRadius: "3px",
+        lineHeight: "16px",
+      }}>{label}</div>
+      <div style={{ display: "flex", gap: "2px" }}>
+        <button
+          onClick={onToggleMute} className="track-control-btn"
+          style={{ background: "none", border: "none", padding: "3px", cursor: "pointer", opacity: isMuted ? 0.5 : 1 }}
+          aria-label={isMuted ? `Show ${trackType}` : `Hide ${trackType}`}
+          title={isMuted ? `Show ${trackType}` : `Hide ${trackType}`}
+        >
+          <Icon i={isMuted ? (trackType === "video" ? "visibility_off" : "volume_off") : icon} s={14} c={isMuted ? "#ef4444" : "#64748b"} />
+        </button>
+        <button
+          onClick={onToggleLock} className="track-control-btn"
+          style={{ background: "none", border: "none", padding: "3px", cursor: "pointer" }}
+          aria-label={isLocked ? `Unlock ${trackType}` : `Lock ${trackType}`}
+          title={isLocked ? `Unlock ${trackType}` : `Lock ${trackType}`}
+        >
+          <Icon i={isLocked ? "lock" : lockIcon} s={14} c={isLocked ? "#f59e0b" : "#64748b"} />
+        </button>
+      </div>
+    </div>
+  );
+});
 TrackLabel.displayName = "TrackLabel";
 
 /* ========== CLIP COMPONENT ========== */
@@ -260,10 +268,8 @@ const TimelineClip = memo(({
   const width = Math.max(clip.duration * pixelsPerSecond, 40);
   const left = clip.startTime * pixelsPerSecond;
   const isAudio = clip.type === "audio";
-  const baseColor = isAudio ? "rgba(52,211,153," : "rgba(117,170,219,";
-  const borderColor = isSelected
-    ? (isAudio ? "#34d399" : "#75aadb")
-    : `${baseColor}0.35)`;
+  const accent = isAudio ? "#34d399" : "#75aadb";
+  const accentRgba = isAudio ? "52,211,153" : "117,170,219";
 
   return (
     <div
@@ -275,12 +281,12 @@ const TimelineClip = memo(({
       aria-selected={isSelected}
       style={{
         position: "absolute", left: `${left}px`, width: `${width}px`,
-        height: isAudio ? "44px" : "52px", top: "4px",
+        height: isAudio ? "52px" : "60px", top: "4px",
         background: isSelected
-          ? `linear-gradient(135deg, ${baseColor}0.35) 0%, ${baseColor}0.2) 100%)`
-          : `linear-gradient(135deg, ${baseColor}0.12) 0%, ${baseColor}0.06) 100%)`,
-        borderRadius: "4px",
-        border: isSelected ? `2px solid ${borderColor}` : `1px solid ${borderColor}`,
+          ? `linear-gradient(180deg, rgba(${accentRgba},0.3) 0%, rgba(${accentRgba},0.15) 100%)`
+          : `linear-gradient(180deg, rgba(${accentRgba},0.1) 0%, rgba(${accentRgba},0.04) 100%)`,
+        borderRadius: "5px",
+        border: isSelected ? `2px solid ${accent}` : `1px solid rgba(${accentRgba},0.25)`,
         overflow: "hidden", outline: "none",
         cursor: cutMode ? "crosshair" : "grab",
       }}
@@ -288,88 +294,130 @@ const TimelineClip = memo(({
       {/* Filmstrip or waveform background */}
       {isAudio ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 4px" }}>
-          <WaveformCanvas width={Math.max(width - 8, 20)} height={36} color="#34d399" opacity={isSelected ? 0.5 : 0.3} />
+          <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} />
         </div>
       ) : (
-        <FilmstripThumbnails width={width} height={52} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
+        <FilmstripThumbnails width={width} height={60} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
       )}
+
+      {/* Top color strip — visual track type indicator */}
+      <div style={{
+        position: "absolute", top: 0, left: 0, right: 0, height: "3px",
+        background: isSelected
+          ? `linear-gradient(90deg, ${accent} 0%, rgba(${accentRgba},0.5) 100%)`
+          : `linear-gradient(90deg, rgba(${accentRgba},0.5) 0%, rgba(${accentRgba},0.2) 100%)`,
+        pointerEvents: "none",
+      }} />
 
       {/* Gradient overlay */}
       <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none", borderRadius: "3px",
+        position: "absolute", inset: 0, pointerEvents: "none", borderRadius: "4px",
         background: isSelected
-          ? `linear-gradient(180deg, ${baseColor}0.1) 0%, ${baseColor}0.25) 100%)`
-          : "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.15) 100%)",
+          ? `linear-gradient(180deg, rgba(${accentRgba},0.05) 0%, rgba(${accentRgba},0.2) 100%)`
+          : "linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.2) 100%)",
       }} />
 
       {/* Clip info overlay */}
       <div style={{
-        position: "relative", padding: "0 8px", display: "flex", alignItems: "center",
+        position: "relative", padding: "4px 10px 0", display: "flex", alignItems: "center",
         gap: "6px", width: "100%", overflow: "hidden", pointerEvents: "none", zIndex: 2,
         height: "100%",
       }}>
         <div style={{
-          width: "18px", height: "18px", borderRadius: "3px", flexShrink: 0,
-          background: isSelected ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.08)",
+          width: "20px", height: "20px", borderRadius: "4px", flexShrink: 0,
+          background: isSelected ? `rgba(${accentRgba},0.3)` : "rgba(255,255,255,0.06)",
           display: "flex", alignItems: "center", justifyContent: "center",
+          border: `1px solid rgba(${accentRgba},${isSelected ? "0.4" : "0.15"})`,
         }}>
-          <Icon i={isAudio ? "music_note" : "movie"} s={11} c={isSelected ? "white" : "#cbd5e1"} />
+          <Icon i={isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
         </div>
-        <span style={{
-          fontSize: "10px", fontWeight: isSelected ? 600 : 500,
-          color: isSelected ? "white" : "#e2e8f0",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          textShadow: "0 1px 3px rgba(0,0,0,0.5)", letterSpacing: "0.01em",
-        }}>{clip.name}</span>
-        {width > 80 && (
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", gap: "1px" }}>
+          <span style={{
+            fontSize: "10px", fontWeight: isSelected ? 600 : 500,
+            color: isSelected ? "white" : "#e2e8f0",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            textShadow: "0 1px 3px rgba(0,0,0,0.6)", letterSpacing: "0.01em",
+          }}>{clip.name}</span>
+          {width > 100 && (
+            <span style={{
+              fontSize: "8px", fontWeight: 500,
+              color: isSelected ? `rgba(${accentRgba},0.9)` : "#64748b",
+              textShadow: "0 1px 2px rgba(0,0,0,0.4)",
+            }}>{formatDuration(clip.duration)}</span>
+          )}
+        </div>
+        {width > 80 && width <= 100 && (
           <span style={{
             fontSize: "8px", fontWeight: 600, marginLeft: "auto", flexShrink: 0,
             color: isSelected ? "rgba(255,255,255,0.8)" : "#94a3b8",
-            background: "rgba(0,0,0,0.25)", padding: "1px 4px", borderRadius: "2px",
-            textShadow: "0 1px 2px rgba(0,0,0,0.4)",
+            background: "rgba(0,0,0,0.3)", padding: "2px 5px", borderRadius: "3px",
           }}>{formatDuration(clip.duration)}</span>
         )}
       </div>
 
-      {/* Resize handles */}
+      {/* Resize handles — visible grip indicators */}
       <div className="clip-resize-handle" style={{
-        position: "absolute", left: 0, top: 0, bottom: 0, width: "6px", cursor: "ew-resize",
-        background: `linear-gradient(90deg, ${isAudio ? "rgba(52,211,153,0.7)" : "rgba(117,170,219,0.7)"} 0%, transparent 100%)`,
-        borderRadius: "4px 0 0 4px", pointerEvents: "auto",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'left', e); }} />
+        position: "absolute", left: 0, top: 0, bottom: 0, width: "7px", cursor: "ew-resize",
+        background: `linear-gradient(90deg, rgba(${accentRgba},0.8) 0%, transparent 100%)`,
+        borderRadius: "5px 0 0 5px", pointerEvents: "auto",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'left', e); }}>
+        <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
+      </div>
       <div className="clip-resize-handle" style={{
-        position: "absolute", right: 0, top: 0, bottom: 0, width: "6px", cursor: "ew-resize",
-        background: `linear-gradient(90deg, transparent 0%, ${isAudio ? "rgba(52,211,153,0.7)" : "rgba(117,170,219,0.7)"} 100%)`,
-        borderRadius: "0 4px 4px 0", pointerEvents: "auto",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'right', e); }} />
+        position: "absolute", right: 0, top: 0, bottom: 0, width: "7px", cursor: "ew-resize",
+        background: `linear-gradient(90deg, transparent 0%, rgba(${accentRgba},0.8) 100%)`,
+        borderRadius: "0 5px 5px 0", pointerEvents: "auto",
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'right', e); }}>
+        <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
+      </div>
     </div>
   );
 });
 TimelineClip.displayName = "TimelineClip";
 
 /* ========== EMPTY TRACK PLACEHOLDER ========== */
-const EmptyTrackPlaceholder = memo(({ type, isDragOver }) => (
-  <div
-    className={`timeline-track-empty ${isDragOver ? "timeline-track-dragover" : ""}`}
-    style={{
-      position: "absolute", inset: "4px 16px 4px 4px",
-      display: "flex", alignItems: "center", justifyContent: "center", gap: "10px",
-      color: isDragOver ? "#75aadb" : "#475569", fontSize: "12px",
-      border: `1.5px dashed ${isDragOver ? "#75aadb" : "rgba(100,116,139,0.2)"}`,
-      borderRadius: "6px",
-      background: isDragOver
-        ? "linear-gradient(135deg, rgba(117,170,219,0.1) 0%, rgba(117,170,219,0.04) 100%)"
-        : "transparent",
-      pointerEvents: "none",
-    }}
-    role="region" aria-label={`Empty ${type} track`}
-  >
-    <Icon i={type === "video" ? "movie" : "music_note"} s={18} c={isDragOver ? "#75aadb" : "#475569"} />
-    <span style={{ fontWeight: 500, fontSize: "11px", color: isDragOver ? "#75aadb" : "#64748b" }}>
-      {isDragOver ? `Drop ${type} here` : `Drag ${type} clips here`}
-    </span>
-  </div>
-));
+const EmptyTrackPlaceholder = memo(({ type, isDragOver }) => {
+  const accent = type === "audio" ? "#34d399" : "#75aadb";
+  const accentRgba = type === "audio" ? "52,211,153" : "117,170,219";
+  return (
+    <div
+      className={`timeline-track-empty ${isDragOver ? "timeline-track-dragover" : ""}`}
+      style={{
+        position: "absolute", inset: "4px 16px 4px 4px",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: "8px",
+        color: isDragOver ? accent : "#3d4a5c",
+        border: `1.5px dashed ${isDragOver ? accent : "rgba(100,116,139,0.15)"}`,
+        borderRadius: "6px",
+        background: isDragOver
+          ? `linear-gradient(135deg, rgba(${accentRgba},0.08) 0%, rgba(${accentRgba},0.02) 100%)`
+          : "linear-gradient(135deg, rgba(255,255,255,0.01) 0%, transparent 100%)",
+        pointerEvents: "none",
+      }}
+      role="region" aria-label={`Empty ${type} track`}
+    >
+      <div style={{
+        width: "28px", height: "28px", borderRadius: "6px",
+        background: isDragOver ? `rgba(${accentRgba},0.15)` : "rgba(255,255,255,0.03)",
+        border: `1px solid ${isDragOver ? `rgba(${accentRgba},0.3)` : "rgba(255,255,255,0.04)"}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <Icon i={type === "video" ? "movie" : "music_note"} s={14} c={isDragOver ? accent : "#3d4a5c"} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+        <span style={{ fontWeight: 600, fontSize: "11px", color: isDragOver ? accent : "#4a5568" }}>
+          {isDragOver ? `Drop ${type} here` : `${type === "video" ? "Video" : "Audio"} Track`}
+        </span>
+        {!isDragOver && (
+          <span style={{ fontSize: "9px", color: "#334155" }}>
+            Drag media from library or use + button
+          </span>
+        )}
+      </div>
+    </div>
+  );
+});
 EmptyTrackPlaceholder.displayName = "EmptyTrackPlaceholder";
 
 /* ========== MINIMAP ========== */
@@ -1034,14 +1082,18 @@ const Timeline = ({
 
       {/* ── Tracks area ─────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Track labels */}
-        <div style={{ width: "48px", background: "#0e1218", borderRight: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", paddingTop: "28px", zIndex: 10, flexShrink: 0 }}>
-          <TrackLabel icon="visibility" lockIcon="lock_open" label="V1" trackType="video" height={68}
+        {/* Track labels — wider for readability */}
+        <div style={{
+          width: "56px", background: "linear-gradient(180deg, #0f1620 0%, #0c1018 100%)",
+          borderRight: "1px solid rgba(117,170,219,0.08)",
+          display: "flex", flexDirection: "column", paddingTop: "32px", zIndex: 10, flexShrink: 0,
+        }}>
+          <TrackLabel icon="visibility" lockIcon="lock_open" label="V1" trackType="video" height={76}
             isMuted={trackMutes.video} isLocked={trackLocks.video}
             onToggleMute={() => setTrackMutes((p) => ({ ...p, video: !p.video }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, video: !p.video }))}
           />
-          <TrackLabel icon="volume_up" lockIcon="lock_open" label="A1" trackType="audio" height={60}
+          <TrackLabel icon="volume_up" lockIcon="lock_open" label="A1" trackType="audio" height={68}
             isMuted={trackMutes.audio} isLocked={trackLocks.audio}
             onToggleMute={() => setTrackMutes((p) => ({ ...p, audio: !p.audio }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, audio: !p.audio }))}
@@ -1056,38 +1108,45 @@ const Timeline = ({
           tabIndex={0}
           role="application"
           aria-label="Timeline — arrow keys to scrub, S to split, Del to delete, Ctrl+wheel to zoom"
-          style={{ flex: 1, position: "relative", overflowX: "auto", overflowY: "hidden", background: "rgba(8,10,14,0.6)", outline: "none" }}
+          style={{
+            flex: 1, position: "relative", overflowX: "auto", overflowY: "hidden",
+            background: "linear-gradient(180deg, rgba(8,10,14,0.8) 0%, rgba(6,8,12,0.9) 100%)",
+            outline: "none",
+          }}
           className="cs"
         >
-          {/* Time ruler */}
+          {/* Time ruler — taller, more readable */}
           <div style={{
-            height: "28px", borderBottom: "1px solid rgba(255,255,255,0.06)", position: "relative",
-            width: `${tlWidth}px`, background: "linear-gradient(180deg, rgba(14,18,24,0.9) 0%, rgba(10,10,10,0.7) 100%)", zIndex: 20, cursor: "text",
+            height: "32px", borderBottom: "1px solid rgba(117,170,219,0.08)", position: "relative",
+            width: `${tlWidth}px`,
+            background: "linear-gradient(180deg, rgba(17,23,32,0.95) 0%, rgba(12,16,24,0.85) 100%)",
+            zIndex: 20, cursor: "text",
           }}>
             {timeMarkers.map((mk, i) => (
               <div key={i} style={{
                 position: "absolute", left: `${timeToX(mk.time, pxPerSec)}px`, height: "100%",
-                borderLeft: `1px solid ${mk.major ? "rgba(117,170,219,0.25)" : "rgba(100,116,139,0.1)"}`,
-                paddingLeft: "5px", display: "flex", alignItems: mk.major ? "flex-end" : "flex-end",
-                paddingBottom: mk.major ? "4px" : "0",
+                borderLeft: `1px solid ${mk.major ? "rgba(117,170,219,0.2)" : "rgba(100,116,139,0.08)"}`,
+                paddingLeft: "6px", display: "flex", alignItems: "flex-end",
+                paddingBottom: mk.major ? "5px" : "0",
                 fontSize: mk.major ? "9px" : "8px",
-                color: mk.major ? "#94a3b8" : "transparent",
-                fontFamily: "monospace", fontWeight: 500, userSelect: "none",
+                color: mk.major ? "#75aadb" : "transparent",
+                fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, userSelect: "none",
+                letterSpacing: "0.3px",
               }}>{mk.label}</div>
             ))}
-            {/* Sub-ticks for minor markers at high zoom */}
+            {/* Sub-ticks for minor markers */}
             {timeMarkers.filter(mk => !mk.major).map((mk, i) => (
               <div key={`sub-${i}`} style={{
                 position: "absolute", left: `${timeToX(mk.time, pxPerSec)}px`,
-                bottom: 0, width: "1px", height: "6px",
-                background: "rgba(100,116,139,0.15)",
+                bottom: 0, width: "1px", height: "8px",
+                background: "rgba(100,116,139,0.12)",
               }} />
             ))}
           </div>
 
           {/* Tracks container */}
-          <div style={{ position: "relative", width: `${tlWidth}px`, paddingTop: "6px", paddingBottom: "8px" }}>
-            {/* Snap line (always rendered, hidden by default) */}
+          <div style={{ position: "relative", width: `${tlWidth}px`, paddingTop: "8px", paddingBottom: "10px" }}>
+            {/* Snap line */}
             <div
               ref={snapLineRef}
               className="tl-snap-line"
@@ -1098,52 +1157,57 @@ const Timeline = ({
               }}
             />
 
-            {/* Playhead */}
+            {/* Playhead — premium blue line */}
             <div
               className={`tl-playhead ${isScrubbing ? "scrubbing" : ""}`}
               style={{
                 position: "absolute", left: `${timeToX(playheadPos, pxPerSec)}px`, top: 0,
                 width: "2px", height: "100%",
-                background: "linear-gradient(180deg, #75aadb 0%, rgba(117,170,219,0.5) 100%)",
+                background: "linear-gradient(180deg, #75aadb 0%, rgba(117,170,219,0.4) 100%)",
                 zIndex: 50, pointerEvents: "none",
-                boxShadow: "0 0 10px rgba(117,170,219,0.6), -1px 0 0 rgba(117,170,219,0.2), 1px 0 0 rgba(117,170,219,0.2)",
+                boxShadow: "0 0 12px rgba(117,170,219,0.5), -1px 0 0 rgba(117,170,219,0.15), 1px 0 0 rgba(117,170,219,0.15)",
                 animation: isScrubbing ? "none" : "playhead-pulse 2s ease-in-out infinite",
               }}
             >
-              {/* Playhead triangle */}
+              {/* Playhead indicator — rounded diamond shape */}
               <div style={{
-                width: "14px", height: "14px",
+                width: "12px", height: "12px",
                 background: "linear-gradient(135deg, #75aadb 0%, #5a8cbf 100%)",
-                position: "absolute", top: "-7px", left: "-6px",
-                clipPath: "polygon(50% 100%, 0% 0%, 100% 0%)",
-                filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.4))",
+                position: "absolute", top: "-6px", left: "-5px",
+                borderRadius: "2px",
+                transform: "rotate(45deg)",
+                filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.5))",
+                border: "1px solid rgba(255,255,255,0.2)",
               }} />
               {/* Time tooltip while scrubbing */}
               {isScrubbing && (
                 <div style={{
-                  position: "absolute", top: "-26px", left: "-22px",
-                  background: "rgba(10,14,20,0.95)", border: "1px solid rgba(117,170,219,0.4)",
-                  borderRadius: "4px", padding: "2px 6px", fontSize: "9px",
-                  color: "#75aadb", fontFamily: "monospace", fontWeight: 600, whiteSpace: "nowrap",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.4)", pointerEvents: "none",
+                  position: "absolute", top: "-28px", left: "-26px",
+                  background: "rgba(8,10,14,0.97)", border: "1px solid rgba(117,170,219,0.4)",
+                  borderRadius: "4px", padding: "3px 8px", fontSize: "9px",
+                  color: "#75aadb", fontFamily: "'JetBrains Mono', monospace", fontWeight: 600, whiteSpace: "nowrap",
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.5)", pointerEvents: "none",
                 }}>
                   {formatTimecode(playheadPos)}
                 </div>
               )}
             </div>
 
-            {/* Video track */}
+            {/* Video track — taller */}
             <div
               onDragOver={(e) => handleDragOver(e, "video")}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, "video")}
               style={{
-                height: "60px", position: "relative", marginLeft: "12px", marginBottom: "8px",
+                height: "68px", position: "relative", marginLeft: "12px", marginBottom: "6px",
                 borderRadius: "6px",
-                background: trackMutes.video ? "rgba(117,170,219,0.02)" : "linear-gradient(180deg, rgba(117,170,219,0.04) 0%, rgba(117,170,219,0.01) 100%)",
-                border: `1px solid ${trackLocks.video ? "rgba(245,158,11,0.2)" : "rgba(255,255,255,0.03)"}`,
+                background: trackMutes.video
+                  ? "rgba(117,170,219,0.02)"
+                  : "linear-gradient(180deg, rgba(117,170,219,0.05) 0%, rgba(117,170,219,0.015) 100%)",
+                border: `1px solid ${trackLocks.video ? "rgba(245,158,11,0.2)" : "rgba(117,170,219,0.06)"}`,
                 opacity: trackMutes.video ? 0.35 : 1,
                 transition: "opacity 0.2s ease, border-color 0.2s ease",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
               }}
               role="list" aria-label="Video track"
             >
@@ -1158,18 +1222,21 @@ const Timeline = ({
               {videoClips.length === 0 && <EmptyTrackPlaceholder type="video" isDragOver={dragOverTrack === "video"} />}
             </div>
 
-            {/* Audio track */}
+            {/* Audio track — taller */}
             <div
               onDragOver={(e) => handleDragOver(e, "audio")}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, "audio")}
               style={{
-                height: "52px", position: "relative", marginLeft: "12px",
+                height: "60px", position: "relative", marginLeft: "12px",
                 borderRadius: "6px",
-                background: trackMutes.audio ? "rgba(52,211,153,0.02)" : "linear-gradient(180deg, rgba(52,211,153,0.04) 0%, rgba(52,211,153,0.01) 100%)",
-                border: `1px solid ${trackLocks.audio ? "rgba(245,158,11,0.2)" : "rgba(255,255,255,0.03)"}`,
+                background: trackMutes.audio
+                  ? "rgba(52,211,153,0.02)"
+                  : "linear-gradient(180deg, rgba(52,211,153,0.05) 0%, rgba(52,211,153,0.015) 100%)",
+                border: `1px solid ${trackLocks.audio ? "rgba(245,158,11,0.2)" : "rgba(52,211,153,0.06)"}`,
                 opacity: trackMutes.audio ? 0.35 : 1,
                 transition: "opacity 0.2s ease, border-color 0.2s ease",
+                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.02)",
               }}
               role="list" aria-label="Audio track"
             >

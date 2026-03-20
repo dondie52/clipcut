@@ -10,28 +10,28 @@ const TOOLBAR_CSS = `
     transition: all 0.15s ease;
     border-radius: 6px;
   }
-  
+
   .toolbar-btn:hover {
+    background: rgba(117, 170, 219, 0.08);
+  }
+
+  .toolbar-btn.active {
     background: rgba(117, 170, 219, 0.1);
   }
-  
-  .toolbar-btn.active {
-    background: rgba(117, 170, 219, 0.15);
-  }
-  
+
   .toolbar-btn::before {
     content: '';
     position: absolute;
-    bottom: 0;
+    bottom: 2px;
     left: 50%;
     transform: translateX(-50%) scaleX(0);
-    width: 24px;
+    width: 20px;
     height: 2px;
     background: #75aadb;
     border-radius: 1px;
     transition: transform 0.2s ease;
   }
-  
+
   .toolbar-btn.active::before {
     transform: translateX(-50%) scaleX(1);
   }
@@ -124,8 +124,8 @@ const ToolbarButton = memo(({
         flexDirection: "column",
         alignItems: "center",
         gap: "2px",
-        padding: "8px 16px",
-        color: isActive ? "#75aadb" : isHovered ? "#94a3b8" : "#64748b",
+        padding: "6px 14px",
+        color: isActive ? "#75aadb" : isHovered ? "#94a3b8" : "#4a5568",
       }}
       role="tab"
       aria-selected={isActive}
@@ -133,22 +133,22 @@ const ToolbarButton = memo(({
       tabIndex={isActive ? 0 : -1}
     >
       <span className="toolbar-icon">
-        <Icon 
-          i={item.icon} 
-          s={22} 
-          c={isActive ? "#75aadb" : isHovered ? "#94a3b8" : "#64748b"} 
+        <Icon
+          i={item.icon}
+          s={20}
+          c={isActive ? "#75aadb" : isHovered ? "#94a3b8" : "#4a5568"}
         />
       </span>
       <span style={{
-        fontSize: "9px",
+        fontSize: "8px",
         fontWeight: isActive ? 700 : 600,
         textTransform: "uppercase",
-        letterSpacing: "1.2px",
+        letterSpacing: "1px",
         transition: 'color 0.15s ease'
       }}>
         {item.label}
       </span>
-      
+
       {/* Tooltip */}
       <div className="toolbar-tooltip">
         {item.label}

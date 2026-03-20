@@ -442,50 +442,61 @@ MediaItem.displayName = 'MediaItem';
 
 /* ========== EMPTY STATE COMPONENT ========== */
 const EmptyState = memo(() => (
-  <div 
+  <div
     className="empty-state-icon"
     style={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      height: '200px',
+      height: '220px',
       color: '#475569',
       textAlign: 'center',
-      padding: '20px'
+      padding: '24px',
     }}
     role="status"
     aria-label="No media imported"
   >
     <div style={{
-      width: '80px',
-      height: '80px',
-      borderRadius: '50%',
-      background: 'rgba(117, 170, 219, 0.1)',
+      width: '72px',
+      height: '72px',
+      borderRadius: '18px',
+      background: 'linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.02) 100%)',
+      border: '1px solid rgba(117,170,219,0.08)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: '16px'
+      marginBottom: '16px',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
     }}>
-      <Icon i="video_library" s={36} c="#475569" />
+      <Icon i="video_library" s={32} c="#3d4a5c" />
     </div>
-    <p style={{ 
-      fontSize: '13px', 
+    <p style={{
+      fontSize: '13px',
       margin: '0 0 6px 0',
-      fontWeight: 500,
+      fontWeight: 600,
       color: '#64748b'
     }}>
-      No media imported
+      No media yet
     </p>
-    <p style={{ 
-      fontSize: '11px', 
-      color: '#475569', 
-      margin: 0,
+    <p style={{
+      fontSize: '11px',
+      color: '#3d4a5c',
+      margin: '0 0 16px 0',
       lineHeight: 1.5
     }}>
-      Click Import or drag & drop<br />
-      video and audio files here
+      Import video and audio to start editing
     </p>
+    <div style={{ display: "flex", gap: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <Icon i="keyboard" s={12} c="#2d3748" />
+        <span style={{ fontSize: "9px", color: "#334155" }}>Ctrl+I</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <Icon i="mouse" s={12} c="#2d3748" />
+        <span style={{ fontSize: "9px", color: "#334155" }}>Drag & Drop</span>
+      </div>
+    </div>
   </div>
 ));
 
@@ -566,17 +577,35 @@ const MediaPanel = ({
   }, [handleImportClick]);
   
   return (
-    <aside 
+    <aside
       style={styles.leftPanel}
       role="complementary"
       aria-label="Media panel"
     >
-      {/* Spinner animation */}
       <style>{MEDIA_PANEL_CSS}</style>
-      
-      <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: "14px" }}>
+
+      {/* Panel header */}
+      <div style={{
+        height: "32px", display: "flex", alignItems: "center", padding: "0 14px",
+        borderBottom: "1px solid rgba(117,170,219,0.04)",
+        background: "rgba(15,23,42,0.3)",
+      }}>
+        <span style={{ fontSize: "10px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+          Media
+        </span>
+        {mediaItems.length > 0 && (
+          <span style={{
+            marginLeft: "auto", fontSize: "9px", fontWeight: 600, color: "#75aadb",
+            background: "rgba(117,170,219,0.1)", padding: "2px 8px", borderRadius: "10px",
+          }}>
+            {mediaItems.length} {mediaItems.length === 1 ? "file" : "files"}
+          </span>
+        )}
+      </div>
+
+      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ display: "flex", gap: "16px" }} role="tablist" aria-label="Media sources">
+          <div style={{ display: "flex", gap: "0" }} role="tablist" aria-label="Media sources">
             {["Local", "Library"].map(t => (
               <button
                 key={t}
@@ -587,10 +616,10 @@ const MediaPanel = ({
                 className={`tab-btn ${mediaTab === t.toLowerCase() ? 'active' : ''}`}
                 style={{
                   ...styles.ghost,
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  paddingBottom: "6px",
-                  color: mediaTab === t.toLowerCase() ? "#75aadb" : "#64748b",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  padding: "4px 12px 6px",
+                  color: mediaTab === t.toLowerCase() ? "#75aadb" : "#4a5568",
                 }}
               >
                 {t}
@@ -598,32 +627,34 @@ const MediaPanel = ({
             ))}
           </div>
           {mediaTab === 'local' && (
-            <div style={{ display: "flex", gap: "4px" }} role="group" aria-label="View mode">
+            <div style={{ display: "flex", gap: "2px" }} role="group" aria-label="View mode">
               <button
                 onClick={() => setViewMode('list')}
                 className="view-toggle-btn"
                 style={{
                   ...styles.ghost,
-                  background: viewMode === 'list' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
+                  background: viewMode === 'list' ? 'rgba(117,170,219,0.12)' : 'transparent',
+                  borderRadius: "4px", padding: "4px",
                 }}
                 aria-label="List view"
                 aria-pressed={viewMode === 'list'}
                 title="List view"
               >
-                <Icon i="list" s={18} c={viewMode === 'list' ? '#75aadb' : '#475569'} />
+                <Icon i="list" s={16} c={viewMode === 'list' ? '#75aadb' : '#475569'} />
               </button>
               <button
                 onClick={() => setViewMode('grid')}
                 className="view-toggle-btn"
                 style={{
                   ...styles.ghost,
-                  background: viewMode === 'grid' ? 'rgba(117, 170, 219, 0.15)' : 'transparent'
+                  background: viewMode === 'grid' ? 'rgba(117,170,219,0.12)' : 'transparent',
+                  borderRadius: "4px", padding: "4px",
                 }}
                 aria-label="Grid view"
                 aria-pressed={viewMode === 'grid'}
                 title="Grid view"
               >
-                <Icon i="grid_view" s={18} c={viewMode === 'grid' ? '#75aadb' : '#cbd5e1'} />
+                <Icon i="grid_view" s={16} c={viewMode === 'grid' ? '#75aadb' : '#475569'} />
               </button>
             </div>
           )}
@@ -631,7 +662,6 @@ const MediaPanel = ({
 
         {mediaTab === 'local' && (
           <>
-            {/* Import button / Drop zone */}
             <input
               ref={fileInputRef}
               type="file"
@@ -652,10 +682,14 @@ const MediaPanel = ({
               className={`import-btn ${dragOver ? 'import-btn-dragover' : ''}`}
               style={{
                 ...styles.importBtn,
-                borderColor: dragOver ? '#75aadb' : 'rgba(255,255,255,0.08)',
-                background: dragOver ? 'rgba(117,170,219,0.1)' : 'transparent',
+                padding: "12px",
+                borderColor: dragOver ? '#75aadb' : 'rgba(117,170,219,0.12)',
+                background: dragOver ? 'rgba(117,170,219,0.08)' : 'rgba(117,170,219,0.02)',
                 opacity: isImporting ? 0.6 : 1,
-                cursor: isImporting ? 'wait' : 'pointer'
+                cursor: isImporting ? 'wait' : 'pointer',
+                flexDirection: "row",
+                gap: "10px",
+                justifyContent: "center",
               }}
               aria-label={isImporting ? 'Importing media...' : 'Import media files'}
               title="Click to browse or drag & drop files"
@@ -663,65 +697,36 @@ const MediaPanel = ({
               {isImporting ? (
                 <>
                   <div style={{
-                    width: '26px',
-                    height: '26px',
-                    border: '2px solid #75aadb',
-                    borderTopColor: 'transparent',
-                    borderRadius: '50%',
-                    animation: 'spin 1s linear infinite'
+                    width: '20px', height: '20px',
+                    border: '2px solid #75aadb', borderTopColor: 'transparent',
+                    borderRadius: '50%', animation: 'spin 1s linear infinite',
                   }} />
-                  <span style={{ fontSize: "12px", color: "#75aadb", fontWeight: 500 }}>Importing...</span>
+                  <span style={{ fontSize: "11px", color: "#75aadb", fontWeight: 600 }}>Importing...</span>
                 </>
               ) : (
                 <>
                   <div style={{
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: dragOver ? 'rgba(117, 170, 219, 0.2)' : 'rgba(100, 116, 139, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s ease'
+                    width: "28px", height: "28px", borderRadius: "6px",
+                    background: dragOver ? 'rgba(117,170,219,0.2)' : 'rgba(117,170,219,0.08)',
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    border: "1px solid rgba(117,170,219,0.12)",
+                    transition: "all 0.2s ease",
                   }}>
-                    <Icon i={dragOver ? "file_download" : "add_circle"} s={24} c={dragOver ? "#75aadb" : "#64748b"} />
+                    <Icon i={dragOver ? "file_download" : "add"} s={16} c={dragOver ? "#75aadb" : "#64748b"} />
                   </div>
-                  <span style={{
-                    fontSize: "12px",
-                    color: dragOver ? "#75aadb" : "#64748b",
-                    fontWeight: dragOver ? 500 : 400,
-                    transition: 'all 0.2s ease'
-                  }}>
-                    {dragOver ? 'Release to import' : 'Import'}
-                  </span>
-                  <span style={{
-                    fontSize: "10px",
-                    color: "#475569"
-                  }}>
-                    or drag & drop
-                  </span>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "1px" }}>
+                    <span style={{
+                      fontSize: "11px", fontWeight: 600,
+                      color: dragOver ? "#75aadb" : "#94a3b8",
+                      transition: "all 0.2s ease",
+                    }}>
+                      {dragOver ? 'Release to import' : 'Import Media'}
+                    </span>
+                    <span style={{ fontSize: "9px", color: "#3d4a5c" }}>
+                      Video, audio — drag & drop or click
+                    </span>
+                  </div>
                 </>
-              )}
-              {mediaItems.length > 0 && !isImporting && (
-                <div style={{
-                  position: "absolute",
-                  top: "8px",
-                  right: "8px",
-                  minWidth: "20px",
-                  height: "20px",
-                  background: "#75aadb",
-                  borderRadius: "10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "10px",
-                  fontWeight: 700,
-                  color: "#0a0a0a",
-                  padding: "0 6px",
-                  boxShadow: '0 2px 8px rgba(117, 170, 219, 0.3)'
-                }}>
-                  {mediaItems.length}
-                </div>
               )}
             </button>
           </>

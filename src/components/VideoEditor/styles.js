@@ -6,26 +6,31 @@ export const CSS_VARIABLES = `
     --color-primary-hover: #5a8cbf;
     --color-primary-muted: rgba(117, 170, 219, 0.7);
     --color-primary-subtle: rgba(117, 170, 219, 0.15);
-    
-    --color-bg-dark: #0a0a0a;
+    --color-primary-glow: rgba(117, 170, 219, 0.08);
+
+    --color-bg-dark: #08090c;
     --color-bg-panel: #0e1218;
+    --color-bg-panel-alt: #111720;
     --color-bg-card: #1a2332;
     --color-bg-elevated: #1e293b;
-    
+    --color-bg-inset: #060810;
+    --color-bg-surface: #131a24;
+
     --color-border: rgba(255, 255, 255, 0.06);
     --color-border-hover: rgba(255, 255, 255, 0.12);
     --color-border-active: rgba(117, 170, 219, 0.5);
-    
+    --color-border-panel: rgba(117, 170, 219, 0.08);
+
     --color-text-primary: #f1f5f9;
     --color-text-secondary: #cbd5e1;
     --color-text-muted: #94a3b8;
     --color-text-dimmed: #64748b;
     --color-text-subtle: #475569;
-    
+
     --color-success: #22c55e;
     --color-error: #ef4444;
     --color-warning: #eab308;
-    
+
     /* Spacing */
     --spacing-xs: 4px;
     --spacing-sm: 8px;
@@ -33,33 +38,35 @@ export const CSS_VARIABLES = `
     --spacing-lg: 16px;
     --spacing-xl: 24px;
     --spacing-2xl: 32px;
-    
+
     /* Border Radius */
     --radius-sm: 4px;
     --radius-md: 6px;
     --radius-lg: 8px;
     --radius-xl: 12px;
     --radius-full: 9999px;
-    
+
     /* Transitions */
     --transition-fast: 0.1s ease;
     --transition-normal: 0.15s ease;
     --transition-slow: 0.2s ease;
     --transition-slower: 0.3s ease;
-    
+
     /* Shadows */
-    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.15);
-    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.2);
-    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.3);
-    
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.15);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.45);
+    --shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+    --shadow-glow: 0 0 20px rgba(117, 170, 219, 0.15);
+
     /* Font Sizes */
     --font-xs: 9px;
     --font-sm: 10px;
     --font-md: 12px;
     --font-lg: 14px;
     --font-xl: 16px;
-    
+
     /* Z-Index Layers */
     --z-base: 1;
     --z-dropdown: 10;
@@ -126,7 +133,7 @@ export const styles = {
     height: "100vh",
     display: "flex",
     flexDirection: "column",
-    background: "var(--color-bg-dark, #0a0a0a)",
+    background: "var(--color-bg-dark, #08090c)",
     color: "var(--color-text-primary, #f1f5f9)",
     overflow: "hidden",
     fontFamily: "'Spline Sans', sans-serif"
@@ -141,13 +148,13 @@ export const styles = {
     transition: "all var(--transition-normal, 0.15s ease)"
   },
   topBar: {
-    height: "40px",
-    background: "var(--color-bg-panel, #0e1218)",
-    borderBottom: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    height: "42px",
+    background: "linear-gradient(180deg, #111720 0%, #0e1218 100%)",
+    borderBottom: "1px solid rgba(117, 170, 219, 0.08)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "0 12px",
+    padding: "0 14px",
     flexShrink: 0,
     position: "relative",
     zIndex: 3000
@@ -160,55 +167,58 @@ export const styles = {
     border: "1px solid transparent",
     outline: "none",
     textAlign: "center",
-    fontSize: "var(--font-md, 12px)",
+    fontSize: "12px",
     fontWeight: 500,
-    color: "var(--color-text-secondary, #cbd5e1)",
-    width: "200px",
-    padding: "4px 12px",
-    borderRadius: "var(--radius-sm, 4px)",
+    color: "#cbd5e1",
+    width: "220px",
+    padding: "5px 14px",
+    borderRadius: "4px",
     fontFamily: "'Spline Sans', sans-serif",
-    transition: "all var(--transition-normal, 0.15s ease)"
+    transition: "all 0.15s ease"
   },
   exportBtn: {
     marginLeft: "6px",
-    background: "var(--color-primary, #75aadb)",
-    color: "var(--color-bg-dark, #0a0a0a)",
-    padding: "6px 20px",
-    borderRadius: "var(--radius-sm, 4px)",
-    fontSize: "var(--font-md, 12px)",
+    background: "linear-gradient(135deg, #75aadb 0%, #5a8cbf 100%)",
+    color: "#0a0a0a",
+    padding: "7px 22px",
+    borderRadius: "6px",
+    fontSize: "11px",
     fontWeight: 700,
     border: "none",
     cursor: "pointer",
     fontFamily: "'Spline Sans', sans-serif",
-    transition: "all var(--transition-normal, 0.15s ease)",
+    transition: "all 0.15s ease",
     display: "flex",
     alignItems: "center",
-    gap: "6px"
+    gap: "6px",
+    boxShadow: "0 2px 8px rgba(117, 170, 219, 0.25)",
+    letterSpacing: "0.3px",
+    textTransform: "uppercase"
   },
   toolbar: {
-    height: "54px",
-    background: "var(--color-bg-panel, #0e1218)",
-    borderBottom: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    height: "46px",
+    background: "#0e1218",
+    borderBottom: "1px solid rgba(117, 170, 219, 0.06)",
     display: "flex",
     alignItems: "center",
-    padding: "0 16px",
+    padding: "0 8px",
     gap: 0,
     flexShrink: 0
   },
   leftPanel: {
-    width: "300px",
-    borderRight: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    width: "280px",
+    borderRight: "1px solid rgba(117, 170, 219, 0.08)",
     display: "flex",
     flexDirection: "column",
-    background: "var(--color-bg-panel, #0e1218)",
+    background: "linear-gradient(180deg, #0f1620 0%, #0e1218 100%)",
     flexShrink: 0
   },
   importBtn: {
     width: "100%",
-    background: "rgba(255,255,255,0.02)",
-    border: "1px dashed rgba(255,255,255,0.1)",
-    borderRadius: "var(--radius-lg, 8px)",
-    padding: "16px",
+    background: "rgba(117, 170, 219, 0.03)",
+    border: "1.5px dashed rgba(117, 170, 219, 0.15)",
+    borderRadius: "8px",
+    padding: "14px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -217,20 +227,20 @@ export const styles = {
     position: "relative",
     fontFamily: "'Spline Sans', sans-serif",
     color: "inherit",
-    transition: "all var(--transition-normal, 0.15s ease)"
+    transition: "all 0.15s ease"
   },
   rightPanel: {
-    width: "280px",
-    borderLeft: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    width: "300px",
+    borderLeft: "1px solid rgba(117, 170, 219, 0.08)",
     display: "flex",
     flexDirection: "column",
-    background: "var(--color-bg-panel, #0e1218)",
+    background: "linear-gradient(180deg, #0f1620 0%, #0e1218 100%)",
     flexShrink: 0
   },
   controls: {
-    height: "56px",
-    background: "var(--color-bg-panel, #0e1218)",
-    borderTop: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    height: "52px",
+    background: "linear-gradient(180deg, #0e1218 0%, #0b0f15 100%)",
+    borderTop: "1px solid rgba(117, 170, 219, 0.06)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -238,18 +248,18 @@ export const styles = {
     position: "relative"
   },
   timeline: {
-    height: "35%",
-    background: "var(--color-bg-dark, #0a0a0a)",
-    borderTop: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    height: "38%",
+    background: "#08090c",
+    borderTop: "2px solid rgba(117, 170, 219, 0.1)",
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
     position: "relative"
   },
   tlToolbar: {
-    height: "40px",
-    background: "var(--color-bg-panel, #0e1218)",
-    borderBottom: "1px solid var(--color-border, rgba(255,255,255,0.06))",
+    height: "38px",
+    background: "linear-gradient(180deg, #111720 0%, #0e1218 100%)",
+    borderBottom: "1px solid rgba(117, 170, 219, 0.06)",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -261,11 +271,11 @@ export const styles = {
 export const hoverStyles = {
   button: {
     transform: 'translateY(-1px)',
-    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)'
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.25)'
   },
   card: {
     borderColor: 'rgba(117, 170, 219, 0.3)',
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.3)'
   },
   input: {
     borderColor: 'rgba(117, 170, 219, 0.5)'
@@ -285,7 +295,7 @@ export const activeStyles = {
 
 /* ========== DISABLED STYLES HELPER ========== */
 export const disabledStyles = {
-  opacity: 0.5,
+  opacity: 0.4,
   cursor: 'not-allowed',
   pointerEvents: 'none'
 };

@@ -598,143 +598,212 @@ const Player = ({
   }, [onPlayPause, skip, stepFrame, toggleFS, togglePiP, seekTo, dDur]);
 
   return (
-    <section ref={containerRef} className="player-root" style={{ flex: 1, display: "flex", flexDirection: "column", background: "#0a0a0a", minWidth: 0 }} role="region" aria-label="Video player">
+    <section ref={containerRef} className="player-root" style={{ flex: 1, display: "flex", flexDirection: "column", background: "#08090c", minWidth: 0 }} role="region" aria-label="Video player">
       <style>{PLAYER_CSS}</style>
 
-      {/* Header */}
-      <div className="player-header" style={{ height: "32px", display: "flex", alignItems: "center", padding: "0 16px" }}>
-        <span style={{ fontSize: "10px", fontWeight: 700, color: "#64748b", textTransform: "uppercase", letterSpacing: "1.5px" }}>Player</span>
-        {isPiP && (
-          <div className="pip-indicator" style={{ marginLeft: "auto" }}>
-            <Icon i="picture_in_picture_alt" s={12} c="white" />
-            <span style={{ marginLeft: "4px" }}>PiP</span>
+      {/* Viewport — the visual heart of the editor */}
+      <div className="player-viewport" style={{
+        flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "12px 20px 8px",
+        background: "radial-gradient(ellipse at center, rgba(117,170,219,0.02) 0%, transparent 70%)",
+      }}>
+        <div style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: "960px", gap: "0" }}>
+          {/* Preview label bar */}
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "0 2px 6px",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{
+                width: "6px", height: "6px", borderRadius: "50%",
+                background: videoSrc ? (isPlaying ? "#22c55e" : "#75aadb") : "#334155",
+                boxShadow: videoSrc && isPlaying ? "0 0 6px rgba(34,197,94,0.5)" : "none",
+                transition: "all 0.3s ease",
+              }} />
+              <span style={{ fontSize: "10px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+                Preview
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              {isPiP && (
+                <div className="pip-indicator">
+                  <Icon i="picture_in_picture_alt" s={11} c="white" />
+                  <span style={{ marginLeft: "3px" }}>PiP</span>
+                </div>
+              )}
+              {videoSrc && (
+                <span style={{ fontSize: "9px", color: "#475569", fontFamily: "monospace" }}>
+                  {fitLabels[fitMode]}
+                </span>
+              )}
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* Viewport */}
-      <div className="player-viewport" style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "8px 24px" }}>
-        <div className="player-container" onClick={onPlayPause} style={{
-          width: "100%", maxWidth: "900px", aspectRatio: "16/9", background: "#000",
-          borderRadius: "3px", border: "1px solid rgba(255,255,255,0.04)",
-          boxShadow: "0 16px 48px rgba(0,0,0,0.5)", overflow: "hidden", position: "relative",
-        }}>
-          {videoSrc ? (
-            <>
-              {videoError ? (
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px", color: "#ef4444", width: "100%", height: "100%", justifyContent: "center", padding: "20px" }}>
-                  <div style={{ width: "72px", height: "72px", borderRadius: "50%", background: "rgba(239,68,68,0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Icon i="error" s={32} c="#ef4444" />
-                  </div>
-                  <span style={{ fontSize: "13px", fontWeight: 500 }}>{videoError}</span>
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button onClick={() => { setVideoError(null); if (videoRef.current) videoRef.current.load(); }} style={{
-                      background: "#75aadb", border: "none", borderRadius: "4px", padding: "6px 12px",
-                      fontSize: "11px", fontWeight: 600, color: "#0a0a0a", cursor: "pointer"
-                    }}>
-                      Retry
-                    </button>
-                    {videoError === "Video format not supported" && onVideoError && (
-                      <button onClick={() => { setVideoError("Converting video..."); onVideoError(videoSrc); }} style={{
-                        background: "#22c55e", border: "none", borderRadius: "4px", padding: "6px 12px",
-                        fontSize: "11px", fontWeight: 600, color: "#0a0a0a", cursor: "pointer"
+          {/* Video canvas with premium framing */}
+          <div className="player-container" onClick={onPlayPause} style={{
+            width: "100%", aspectRatio: "16/9", background: "#000",
+            borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
+            boxShadow: "0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)",
+            overflow: "hidden", position: "relative",
+          }}>
+            {videoSrc ? (
+              <>
+                {videoError ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px", color: "#ef4444", width: "100%", height: "100%", justifyContent: "center", padding: "20px", background: "radial-gradient(circle at center, rgba(239,68,68,0.05) 0%, transparent 70%)" }}>
+                    <div style={{ width: "64px", height: "64px", borderRadius: "50%", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.15)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Icon i="error" s={28} c="#ef4444" />
+                    </div>
+                    <span style={{ fontSize: "13px", fontWeight: 500 }}>{videoError}</span>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button onClick={(e) => { e.stopPropagation(); setVideoError(null); if (videoRef.current) videoRef.current.load(); }} style={{
+                        background: "linear-gradient(135deg, #75aadb 0%, #5a8cbf 100%)", border: "none", borderRadius: "6px", padding: "7px 16px",
+                        fontSize: "11px", fontWeight: 600, color: "#0a0a0a", cursor: "pointer", boxShadow: "0 2px 8px rgba(117,170,219,0.3)"
                       }}>
-                        Convert Format
+                        Retry
                       </button>
-                    )}
+                      {videoError === "Video format not supported" && onVideoError && (
+                        <button onClick={(e) => { e.stopPropagation(); setVideoError("Converting video..."); onVideoError(videoSrc); }} style={{
+                          background: "linear-gradient(135deg, #22c55e 0%, #16a34a 100%)", border: "none", borderRadius: "6px", padding: "7px 16px",
+                          fontSize: "11px", fontWeight: 600, color: "#0a0a0a", cursor: "pointer", boxShadow: "0 2px 8px rgba(34,197,94,0.3)"
+                        }}>
+                          Convert Format
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <video
+                      ref={videoRef}
+                      src={videoSrc}
+                      preload="metadata"
+                      playsInline
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={handleMeta}
+                      onEnded={handleEnded}
+                      style={{ width: "100%", height: "100%", objectFit: fitStyles[fitMode], ...videoPreviewStyle }}
+                    />
+                    {/* Center play/pause overlay */}
+                    <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
+                      position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "radial-gradient(circle at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 70%)",
+                      pointerEvents: isPlaying ? "none" : "auto",
+                    }}>
+                      <button className="big-play" onClick={(e) => { e.stopPropagation(); onPlayPause?.(); }} style={{
+                        width: "64px", height: "64px", borderRadius: "50%",
+                        background: "rgba(117,170,219,0.15)", border: "2px solid rgba(255,255,255,0.25)",
+                        display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                        backdropFilter: "blur(12px)",
+                        boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+                      }}>
+                        <Icon i={isPlaying ? "pause" : "play_arrow"} s={32} c="white" />
+                      </button>
+                    </div>
+                    {/* Safe area / letterbox corners */}
+                    <div style={{ position: "absolute", top: "8px", left: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+                    <div style={{ position: "absolute", top: "8px", right: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+                    <div style={{ position: "absolute", bottom: "8px", left: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+                    <div style={{ position: "absolute", bottom: "8px", right: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+                  </>
+                )}
+              </>
+            ) : (
+              /* Premium empty state */
+              <div style={{
+                display: "flex", flexDirection: "column", alignItems: "center", gap: "16px",
+                color: "#475569", width: "100%", height: "100%", justifyContent: "center",
+                background: "radial-gradient(ellipse at center, rgba(117,170,219,0.04) 0%, transparent 60%)",
+              }}>
+                <div style={{
+                  width: "80px", height: "80px", borderRadius: "50%",
+                  background: "linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.03) 100%)",
+                  border: "1px solid rgba(117,170,219,0.1)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+                }}>
+                  <Icon i="play_circle" s={36} c="#475569" />
+                </div>
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>No media loaded</p>
+                  <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
+                    Import media and add clips to the timeline to preview
+                  </p>
+                </div>
+                <div style={{
+                  display: "flex", gap: "16px", marginTop: "4px",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                    <Icon i="upload_file" s={13} c="#334155" />
+                    <span style={{ fontSize: "10px", color: "#334155" }}>Ctrl+I to import</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                    <Icon i="space_bar" s={13} c="#334155" />
+                    <span style={{ fontSize: "10px", color: "#334155" }}>Space to play</span>
                   </div>
                 </div>
-              ) : (
-                <>
-                  <video
-                    ref={videoRef}
-                    src={videoSrc}
-                    preload="metadata"
-                    playsInline
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleMeta}
-                    onEnded={handleEnded}
-                    style={{ width: "100%", height: "100%", objectFit: fitStyles[fitMode], ...videoPreviewStyle }}
-                  />
-                  {/* Center play/pause overlay */}
-                  <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
-                    position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                    background: "radial-gradient(circle at center, rgba(0,0,0,0.35) 0%, rgba(0,0,0,0.1) 70%)",
-                    pointerEvents: isPlaying ? "none" : "auto",
-                  }}>
-                    <button className="big-play" onClick={(e) => { e.stopPropagation(); onPlayPause?.(); }} style={{
-                      width: "60px", height: "60px", borderRadius: "50%",
-                      background: "rgba(0,0,0,0.5)", border: "2px solid rgba(255,255,255,0.2)",
-                      display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-                      backdropFilter: "blur(6px)",
-                    }}>
-                      <Icon i={isPlaying ? "pause" : "play_arrow"} s={30} c="white" />
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px", color: "#475569", width: "100%", height: "100%", justifyContent: "center" }}>
-              <div style={{ width: "72px", height: "72px", borderRadius: "50%", background: "rgba(117,170,219,0.08)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Icon i="movie" s={32} c="#475569" />
               </div>
-              <span style={{ fontSize: "13px", fontWeight: 500 }}>Import media to preview</span>
-              <span style={{ fontSize: "10px", color: "#334155" }}>Double-click a clip or drag to timeline</span>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
       {/* Seekbar */}
       {videoSrc && (
-        <div style={{ padding: "0 16px" }}>
+        <div style={{ padding: "0 20px" }}>
           <Seekbar currentTime={dTime} duration={dDur} onSeek={seekTo} buffered={buffered} />
         </div>
       )}
 
-      {/* Controls bar */}
-      <div style={{ ...styles.controls, height: "52px", gap: "8px" }} className="player-controls">
-        {/* Timecode */}
-        <div style={{ fontFamily: "monospace", fontSize: "13px", letterSpacing: "1.5px", display: "flex", gap: "2px", minWidth: "170px" }}>
-          <span style={{ color: "#75aadb" }}>{fmtTC(dTime).slice(0, 8)}</span>
-          <span style={{ color: "rgba(117,170,219,0.5)" }}>:{fmtTC(dTime).slice(9)}</span>
-          <span style={{ color: "#334155", margin: "0 5px" }}>/</span>
-          <span style={{ color: "#64748b" }}>{fmtTC(dDur)}</span>
+      {/* Controls bar — professional transport controls */}
+      <div style={{ ...styles.controls, height: "48px", gap: "8px" }} className="player-controls">
+        {/* Timecode display */}
+        <div style={{
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: "12px", letterSpacing: "1px",
+          display: "flex", gap: "2px", minWidth: "160px",
+          background: "rgba(0,0,0,0.3)", padding: "4px 10px", borderRadius: "4px",
+          border: "1px solid rgba(117,170,219,0.06)",
+        }}>
+          <span style={{ color: "#75aadb", fontWeight: 600 }}>{fmtTC(dTime).slice(0, 8)}</span>
+          <span style={{ color: "rgba(117,170,219,0.4)" }}>:{fmtTC(dTime).slice(9)}</span>
+          <span style={{ color: "#1e293b", margin: "0 4px" }}>/</span>
+          <span style={{ color: "#475569" }}>{fmtTC(dDur)}</span>
         </div>
 
         {/* Center transport */}
-        <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: "6px" }}>
           <button onClick={() => stepFrame(false)} className="ctrl-btn" style={styles.ghost} title="Prev frame (,)">
-            <Icon i="first_page" s={17} c="#64748b" />
+            <Icon i="first_page" s={16} c="#475569" />
           </button>
           <button onClick={() => skip(-5)} className="ctrl-btn" style={styles.ghost} title="Skip -5s (←)">
-            <Icon i="skip_previous" s={21} c="#94a3b8" />
+            <Icon i="skip_previous" s={20} c="#94a3b8" />
           </button>
           <button onClick={onPlayPause} className="play-glow" style={{
-            ...styles.ghost, width: "42px", height: "42px", borderRadius: "50%",
-            background: "rgba(117,170,219,0.12)", display: "flex", alignItems: "center", justifyContent: "center",
+            ...styles.ghost, width: "40px", height: "40px", borderRadius: "50%",
+            background: isPlaying ? "rgba(117,170,219,0.2)" : "rgba(117,170,219,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            border: "1px solid rgba(117,170,219,0.15)",
+            boxShadow: isPlaying ? "0 0 12px rgba(117,170,219,0.2)" : "none",
           }} title={`${isPlaying ? "Pause" : "Play"} (Space)`}>
-            <Icon i={isPlaying ? "pause" : "play_arrow"} s={32} c="white" />
+            <Icon i={isPlaying ? "pause" : "play_arrow"} s={28} c="white" />
           </button>
           <button onClick={() => skip(5)} className="ctrl-btn" style={styles.ghost} title="Skip +5s (→)">
-            <Icon i="skip_next" s={21} c="#94a3b8" />
+            <Icon i="skip_next" s={20} c="#94a3b8" />
           </button>
           <button onClick={() => stepFrame(true)} className="ctrl-btn" style={styles.ghost} title="Next frame (.)">
-            <Icon i="last_page" s={17} c="#64748b" />
+            <Icon i="last_page" s={16} c="#475569" />
           </button>
         </div>
 
         {/* Right controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
           <VolumeControl volume={volume} onChange={setVolume} muted={muted} onToggleMute={() => setMuted(m => !m)} />
           <SpeedControl speed={speed} onChange={setSpeed} />
           <button onClick={cycleFit} className="chip-btn" title="Fit mode">{fitLabels[fitMode]}</button>
           <button onClick={togglePiP} className="ctrl-btn" style={styles.ghost} title="Picture-in-Picture (P)">
-            <Icon i="picture_in_picture_alt" s={17} c="#64748b" />
+            <Icon i="picture_in_picture_alt" s={16} c="#475569" />
           </button>
           <button onClick={toggleFS} className="ctrl-btn" style={styles.ghost} title="Fullscreen (F)">
-            <Icon i="fullscreen" s={18} c="#94a3b8" />
+            <Icon i="fullscreen" s={17} c="#94a3b8" />
           </button>
         </div>
       </div>

@@ -132,7 +132,7 @@ export const Section = memo(({ t, children, defaultExpanded = true, onToggle }) 
     <div className="section-collapsible">
       <style>{INSPECTOR_CSS}</style>
       
-      <div 
+      <div
         className="section-header"
         onClick={handleToggle}
         onKeyDown={handleKeyDown}
@@ -141,27 +141,27 @@ export const Section = memo(({ t, children, defaultExpanded = true, onToggle }) 
         aria-expanded={isExpanded}
         aria-controls={`section-${t.toLowerCase().replace(/\s+/g, '-')}`}
       >
-        <div style={{ 
-          display: "flex", 
-          alignItems: "center", 
+        <div style={{
+          display: "flex",
+          alignItems: "center",
           justifyContent: "space-between"
         }}>
           <h3 style={{
-            fontSize: "11px",
+            fontSize: "10px",
             fontWeight: 700,
-            color: "#94a3b8",
+            color: "#64748b",
             textTransform: "uppercase",
-            letterSpacing: "1.5px",
+            letterSpacing: "1.2px",
             margin: 0,
             display: "flex",
             alignItems: "center",
             gap: "6px"
           }}>
-            <span 
+            <span
               className={`section-toggle-icon ${isExpanded ? '' : 'collapsed'}`}
               style={{ display: 'flex' }}
             >
-              <Icon i="expand_more" s={16} c="#64748b" />
+              <Icon i="expand_more" s={14} c="#475569" />
             </span>
             {t}
           </h3>
@@ -313,14 +313,19 @@ export const Slider = memo(({
         justifyContent: "space-between",
         alignItems: "center",
         fontSize: "10px",
-        color: "#64748b",
-        marginBottom: "6px"
+        color: "#4a5568",
+        marginBottom: "5px"
       }}>
-        <span>{l}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ fontWeight: 500 }}>{l}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <span style={{
-            color: currentValue !== defaultValue ? '#75aadb' : '#64748b',
-            fontWeight: currentValue !== defaultValue ? 500 : 400
+            color: currentValue !== defaultValue ? '#75aadb' : '#4a5568',
+            fontWeight: currentValue !== defaultValue ? 600 : 400,
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: "9px",
+            background: currentValue !== defaultValue ? 'rgba(117,170,219,0.08)' : 'transparent',
+            padding: "1px 5px",
+            borderRadius: "3px",
           }}>
             {displayValue}
           </span>
@@ -333,14 +338,14 @@ export const Slider = memo(({
                 border: 'none',
                 padding: 0,
                 cursor: 'pointer',
-                color: '#64748b',
+                color: '#4a5568',
                 display: 'flex',
                 alignItems: 'center'
               }}
               aria-label={`Reset ${l} to default`}
               title="Reset to default"
             >
-              <Icon i="refresh" s={12} />
+              <Icon i="refresh" s={11} />
             </button>
           )}
         </div>
@@ -360,7 +365,7 @@ export const Slider = memo(({
           width: "100%",
           accentColor: "#75aadb",
           cursor: disabled ? 'not-allowed' : 'pointer',
-          opacity: disabled ? 0.5 : 1
+          opacity: disabled ? 0.4 : 1
         }}
         aria-label={`${l}: ${displayValue}`}
         aria-valuemin={min}
@@ -405,18 +410,20 @@ export const SmallInput = memo(({
   
   return (
     <div>
-      <label 
+      <label
         style={{
-          fontSize: "10px",
-          color: isFocused ? "#75aadb" : "#64748b",
+          fontSize: "9px",
+          fontWeight: 500,
+          color: isFocused ? "#75aadb" : "#4a5568",
           display: "block",
           marginBottom: "4px",
-          transition: 'color 0.15s ease'
+          transition: 'color 0.15s ease',
+          letterSpacing: "0.3px",
         }}
       >
         {l}
       </label>
-      <input 
+      <input
         type={type}
         value={value}
         onChange={handleChange}
@@ -429,16 +436,16 @@ export const SmallInput = memo(({
         className="inspector-input"
         style={{
           width: "100%",
-          background: "#1e293b",
-          border: "1px solid transparent",
-          borderRadius: "4px",
-          fontSize: "12px",
+          background: "rgba(30,41,59,0.6)",
+          border: "1px solid rgba(117,170,219,0.08)",
+          borderRadius: "5px",
+          fontSize: "11px",
           padding: "6px 8px",
           color: "#75aadb",
           textAlign: "center",
           outline: "none",
           boxSizing: "border-box",
-          fontFamily: "'Spline Sans',sans-serif"
+          fontFamily: "'JetBrains Mono', monospace",
         }}
         aria-label={l}
       />
@@ -458,45 +465,47 @@ export const EffectCard = memo(({
   onToggle
 }) => {
   return (
-    <div 
+    <div
       className="effect-card"
       style={{
-        background: "rgba(26,35,50,0.5)",
-        borderRadius: "4px",
-        padding: "10px",
+        background: "rgba(26,35,50,0.4)",
+        borderRadius: "6px",
+        padding: "8px 10px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        border: "1px solid rgba(255,255,255,0.05)",
-        opacity: enabled ? 1 : 0.5
+        border: enabled ? "1px solid rgba(117,170,219,0.1)" : "1px solid rgba(255,255,255,0.03)",
+        opacity: enabled ? 1 : 0.45,
+        transition: "all 0.15s ease",
       }}
       role="listitem"
       aria-label={`${name} effect${enabled ? '' : ' (disabled)'}`}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button
           onClick={onToggle}
           style={{
-            background: 'none',
+            background: enabled ? 'rgba(117,170,219,0.1)' : 'rgba(255,255,255,0.03)',
             border: 'none',
-            padding: 0,
+            padding: '4px',
             cursor: 'pointer',
-            display: 'flex'
+            display: 'flex',
+            borderRadius: '4px',
           }}
           aria-label={enabled ? 'Disable effect' : 'Enable effect'}
           title={enabled ? 'Disable' : 'Enable'}
         >
-          <Icon 
-            i={enabled ? "visibility" : "visibility_off"} 
-            s={14} 
-            c={enabled ? "#75aadb" : "#64748b"} 
+          <Icon
+            i={enabled ? "visibility" : "visibility_off"}
+            s={13}
+            c={enabled ? "#75aadb" : "#4a5568"}
           />
         </button>
         <div>
-          <span style={{ fontSize: "10px", color: "#94a3b8", display: "block" }}>
-            NO {number}
+          <span style={{ fontSize: "8px", color: "#4a5568", display: "block", fontWeight: 600, letterSpacing: "0.5px" }}>
+            FX {number}
           </span>
-          <span style={{ fontSize: "12px", fontWeight: 500, color: "#e2e8f0" }}>
+          <span style={{ fontSize: "11px", fontWeight: 500, color: enabled ? "#e2e8f0" : "#64748b" }}>
             {name}
           </span>
         </div>
@@ -629,11 +638,11 @@ ColorPicker.displayName = 'ColorPicker';
 
 /* ========== HORIZONTAL RULE COMPONENT ========== */
 export const Hr = memo(() => (
-  <div 
-    style={{ 
-      height: "1px", 
-      background: "rgba(255,255,255,0.05)",
-      margin: "4px 0"
+  <div
+    style={{
+      height: "1px",
+      background: "linear-gradient(90deg, transparent 0%, rgba(117,170,219,0.08) 50%, transparent 100%)",
+      margin: "2px 0"
     }}
     role="separator"
   />

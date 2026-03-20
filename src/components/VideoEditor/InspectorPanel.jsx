@@ -170,6 +170,9 @@ const InspectorPanel = ({
   const clipEffects = selectedClip?.effects || [];
   const clipSpeed = Math.round(cp(selectedClip, 'speed') * 100);
 
+  /* Tab icon mapping for visual richness */
+  const tabIcons = { video: "movie", audio: "music_note", speed: "speed", animate: "animation", adjust: "tune" };
+
   return (
     <aside
       style={styles.rightPanel}
@@ -178,13 +181,33 @@ const InspectorPanel = ({
     >
       <style>{INSPECTOR_CSS}</style>
 
-      {/* Main tabs */}
+      {/* Panel header */}
+      <div style={{
+        height: "32px", display: "flex", alignItems: "center", padding: "0 14px",
+        borderBottom: "1px solid rgba(117,170,219,0.04)",
+        background: "rgba(15,23,42,0.3)",
+      }}>
+        <span style={{ fontSize: "10px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+          Inspector
+        </span>
+        {hasClip && (
+          <span style={{
+            marginLeft: "auto", fontSize: "9px", fontWeight: 500, color: "#75aadb",
+            background: "rgba(117,170,219,0.1)", padding: "2px 8px", borderRadius: "10px",
+          }}>
+            {selectedClip?.name || "Clip"}
+          </span>
+        )}
+      </div>
+
+      {/* Main tabs — with icons */}
       <nav
         style={{
           display: "flex",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-          height: "40px",
-          flexShrink: 0
+          borderBottom: "1px solid rgba(117,170,219,0.06)",
+          height: "38px",
+          flexShrink: 0,
+          background: "rgba(15,23,42,0.2)",
         }}
         role="tablist"
         aria-label="Inspector categories"
@@ -198,16 +221,18 @@ const InspectorPanel = ({
             style={{
               ...styles.ghost,
               flex: 1,
-              fontSize: "10px",
+              fontSize: "9px",
               fontWeight: 700,
-              color: rightTab === t.toLowerCase() ? "#75aadb" : "#64748b",
+              color: rightTab === t.toLowerCase() ? "#75aadb" : "#4a5568",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1px",
             }}
             role="tab"
             aria-selected={rightTab === t.toLowerCase()}
             aria-controls={`panel-${t.toLowerCase()}`}
             tabIndex={rightTab === t.toLowerCase() ? 0 : -1}
           >
-            {t}
+            <Icon i={tabIcons[t.toLowerCase()]} s={14} c={rightTab === t.toLowerCase() ? "#75aadb" : "#4a5568"} />
+            <span style={{ letterSpacing: "0.5px" }}>{t}</span>
           </button>
         ))}
       </nav>
@@ -216,9 +241,10 @@ const InspectorPanel = ({
       <nav
         style={{
           display: "flex",
-          height: "32px",
-          background: "rgba(15,23,42,0.5)",
-          flexShrink: 0
+          height: "30px",
+          background: "rgba(8,10,14,0.5)",
+          flexShrink: 0,
+          borderBottom: "1px solid rgba(255,255,255,0.03)",
         }}
         role="tablist"
         aria-label="Inspector sub-categories"
@@ -236,8 +262,9 @@ const InspectorPanel = ({
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              color: rightSubTab === t.toLowerCase() ? "white" : "#64748b",
-              background: rightSubTab === t.toLowerCase() ? "rgba(30,41,59,0.8)" : "transparent",
+              color: rightSubTab === t.toLowerCase() ? "#cbd5e1" : "#4a5568",
+              background: rightSubTab === t.toLowerCase() ? "rgba(117,170,219,0.08)" : "transparent",
+              borderBottom: rightSubTab === t.toLowerCase() ? "1px solid rgba(117,170,219,0.3)" : "1px solid transparent",
             }}
             role="tab"
             aria-selected={rightSubTab === t.toLowerCase()}
@@ -253,17 +280,17 @@ const InspectorPanel = ({
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "16px",
+          padding: "14px",
           display: "flex",
           flexDirection: "column",
-          gap: "20px"
+          gap: "16px"
         }}
         className="cs"
         id={`panel-${rightTab}`}
         role="tabpanel"
         aria-label={`${rightTab} settings`}
       >
-        {/* Empty state for no clip selected */}
+        {/* Premium empty state */}
         {!hasClip && (
           <div
             style={{
@@ -274,16 +301,46 @@ const InspectorPanel = ({
               flex: 1,
               color: '#475569',
               textAlign: 'center',
-              padding: '20px'
+              padding: '24px 16px',
             }}
           >
-            <Icon i="select_all" s={36} c="#334155" />
-            <p style={{ fontSize: '12px', margin: '12px 0 4px 0' }}>
-              Select a clip to edit
+            <div style={{
+              width: "64px", height: "64px", borderRadius: "16px",
+              background: "linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.02) 100%)",
+              border: "1px solid rgba(117,170,219,0.08)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              marginBottom: "16px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
+            }}>
+              <Icon i="touch_app" s={28} c="#3d4a5c" />
+            </div>
+            <p style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', margin: '0 0 6px 0' }}>
+              No clip selected
             </p>
-            <p style={{ fontSize: '11px', color: '#334155', margin: 0 }}>
-              Properties will appear here
+            <p style={{ fontSize: '11px', color: '#3d4a5c', margin: '0 0 20px 0', lineHeight: 1.5 }}>
+              Select a clip on the timeline to edit its properties
             </p>
+            {/* Property preview hints */}
+            <div style={{
+              display: "flex", flexDirection: "column", gap: "8px", width: "100%",
+              padding: "12px", borderRadius: "8px",
+              background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.03)",
+            }}>
+              {[
+                { icon: "tune", label: "Transform & Position" },
+                { icon: "palette", label: "Filters & Color" },
+                { icon: "speed", label: "Speed & Time" },
+                { icon: "animation", label: "Keyframes & Animation" },
+              ].map(hint => (
+                <div key={hint.label} style={{
+                  display: "flex", alignItems: "center", gap: "10px",
+                  padding: "4px 0",
+                }}>
+                  <Icon i={hint.icon} s={14} c="#2d3748" />
+                  <span style={{ fontSize: "10px", color: "#334155" }}>{hint.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

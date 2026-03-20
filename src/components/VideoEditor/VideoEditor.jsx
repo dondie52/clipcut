@@ -52,13 +52,13 @@ const VIDEO_EDITOR_CSS = `
 /* ========== LAZY LOADING FALLBACKS ========== */
 const PanelLoadingFallback = memo(({ width, height = "100%" }) => (
   <div style={{
-    width, height, background: "#0e1820",
+    width, height, background: "linear-gradient(180deg, #0f1620 0%, #0c1018 100%)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    borderRight: "1px solid rgba(117,170,219,0.08)",
+    borderRight: "1px solid rgba(117,170,219,0.06)",
   }}>
     <div style={{
-      width: "24px", height: "24px",
-      border: "2px solid rgba(117,170,219,0.2)", borderTopColor: "#75aadb",
+      width: "20px", height: "20px",
+      border: "2px solid rgba(117,170,219,0.15)", borderTopColor: "#75aadb",
       borderRadius: "50%", animation: "spin 0.8s linear infinite",
     }} />
   </div>
@@ -67,17 +67,17 @@ PanelLoadingFallback.displayName = "PanelLoadingFallback";
 
 const TimelineLoadingFallback = memo(() => (
   <div style={{
-    height: "200px", background: "#0e1820",
+    height: "220px", background: "linear-gradient(180deg, #0c1018 0%, #08090c 100%)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    borderTop: "1px solid rgba(117,170,219,0.1)",
+    borderTop: "2px solid rgba(117,170,219,0.08)",
   }}>
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
       <div style={{
-        width: "24px", height: "24px",
-        border: "2px solid rgba(117,170,219,0.2)", borderTopColor: "#75aadb",
+        width: "20px", height: "20px",
+        border: "2px solid rgba(117,170,219,0.15)", borderTopColor: "#75aadb",
         borderRadius: "50%", animation: "spin 0.8s linear infinite",
       }} />
-      <span style={{ color: "rgba(255,255,255,0.5)", fontSize: "12px" }}>Loading timeline...</span>
+      <span style={{ color: "#3d4a5c", fontSize: "11px", fontWeight: 500 }}>Loading timeline...</span>
     </div>
   </div>
 ));
@@ -900,7 +900,7 @@ const VideoEditor = () => {
         </ErrorBoundary>
         {editorLayout !== 'compact' && (
           <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
-            <Suspense fallback={<PanelLoadingFallback width="280px" />}>
+            <Suspense fallback={<PanelLoadingFallback width="300px" />}>
               <InspectorPanel
                 rightTab={rightTab} onRightTabChange={setRightTab}
                 rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
