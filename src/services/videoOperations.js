@@ -588,11 +588,14 @@ export async function cropToVertical(inputFile, startTime, duration, onProgress 
         await exec([
           ...seekArgs,
           '-vf', vf,
+          '-map', '0:v:0',
+          '-map', '0:a:0?',
           '-c:v', 'libx264',
           '-preset', 'ultrafast',
           '-crf', '26',
           '-c:a', 'aac',
           '-b:a', '128k',
+          '-af', 'aresample=async=1',
           '-movflags', '+faststart',
           '-threads', '0',
           outputName

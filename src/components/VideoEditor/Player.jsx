@@ -274,34 +274,35 @@ const Player = ({
   const [isPiP, setIsPiP] = useState(false);
   const [videoError, setVideoError] = useState(null);
 
-  // ---- Sync video element ----
+  // Refs for decoupling effects from render-triggered deps
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const pendingSeekRef = useRef(null);
+
+  // ---- Effect 1: Handle video source changes (load, error, initial seek) ----
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoSrc) {
       setVideoError(null);
       return;
     }
-    
-    // Clear previous error when source changes
+
     setVideoError(null);
-    
+
     const onReady = () => {
-      if (v && currentTime >= 0) { 
-        v.currentTime = currentTime; 
-        setDTime(currentTime); 
+      if (v && currentTime >= 0) {
+        v.currentTime = currentTime;
+        setDTime(currentTime);
       }
-      if (isPlaying && v.paused) {
+      if (isPlayingRef.current && v.paused) {
         v.play().catch((err) => {
-          // Ignore AbortError - it's expected when pause() interrupts play()
-          if (err.name !== 'AbortError') {
-            console.warn("Video play failed:", err);
-          }
+          if (err.name !== 'AbortError') console.warn("Video play failed:", err);
         });
-      } else if (!isPlaying && !v.paused) {
+      } else if (!isPlayingRef.current && !v.paused) {
         v.pause();
       }
     };
-    
+
     const onError = (e) => {
       console.error("Video error:", e);
       const error = v.error;
@@ -310,61 +311,53 @@ const Player = ({
         let shouldConvert = false;
         switch (error.code) {
           case error.MEDIA_ERR_ABORTED:
-            errorMsg = "Video loading aborted";
-            break;
+            errorMsg = "Video loading aborted"; break;
           case error.MEDIA_ERR_NETWORK:
-            errorMsg = "Network error while loading video";
-            break;
+            errorMsg = "Network error while loading video"; break;
           case error.MEDIA_ERR_DECODE:
-            errorMsg = "Video decoding error";
-            shouldConvert = true;
-            break;
+            errorMsg = "Video decoding error"; shouldConvert = true; break;
           case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            errorMsg = "Video format not supported";
-            shouldConvert = true;
-            break;
+            errorMsg = "Video format not supported"; shouldConvert = true; break;
         }
         setVideoError(errorMsg);
-        
-        // If format is not supported, try to convert it
-        if (shouldConvert && onVideoError && videoSrc) {
-          onVideoError(videoSrc);
-        }
+        if (shouldConvert && onVideoError && videoSrc) onVideoError(videoSrc);
       }
     };
-    
+
     v.addEventListener("loadedmetadata", onReady);
     v.addEventListener("canplay", onReady);
-    v.addEventListener("canplaythrough", onReady);
     v.addEventListener("error", onError);
-    
-    // If video is already loaded, trigger ready
-    if (v.readyState >= 2) {
-      if (currentTime >= 0) { 
-        v.currentTime = currentTime; 
-        setDTime(currentTime); 
-      }
-      if (isPlaying && v.paused) {
-        v.play().catch((err) => {
-          // Ignore AbortError - it's expected when pause() interrupts play()
-          if (err.name !== 'AbortError') {
-            console.warn("Video play failed:", err);
-          }
-        });
-      } else if (!isPlaying && !v.paused) {
-        v.pause();
-      }
-    }
-    
-    return () => { 
-      if (v) { 
-        v.removeEventListener("loadedmetadata", onReady); 
+
+    if (v.readyState >= 2) onReady();
+
+    return () => {
+      if (v) {
+        v.removeEventListener("loadedmetadata", onReady);
         v.removeEventListener("canplay", onReady);
-        v.removeEventListener("canplaythrough", onReady);
         v.removeEventListener("error", onError);
-      } 
+      }
     };
-  }, [isPlaying, videoSrc, currentTime]);
+    // Intentionally omit currentTime and isPlaying — source-change only.
+    // Uses isPlayingRef.current for play state reads.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoSrc]);
+
+  // ---- Effect 2: Seek video when paused (scrub, timeline click) ----
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !videoSrc) return;
+
+    // During playback the video element drives its own time — don't micro-seek.
+    if (isPlaying) return;
+
+    v.currentTime = currentTime;
+    setDTime(currentTime);
+    pendingSeekRef.current = currentTime;
+    const target = currentTime;
+    setTimeout(() => {
+      if (pendingSeekRef.current === target) pendingSeekRef.current = null;
+    }, 100);
+  }, [currentTime, isPlaying, videoSrc]);
 
   // Handle play/pause state changes
   useEffect(() => {
@@ -402,45 +395,20 @@ const Player = ({
     }
   }, [isPlaying, videoSrc, onPlayPause]);
   
-  // Sync state with actual video playback state
+  // Sync state when browser pauses video externally (e.g., tab backgrounded)
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoSrc) return;
-    
-    const handlePlay = () => {
-      // Video started playing - if state says paused, sync it
-      // But only if it wasn't paused by user action (check if paused was called)
-      if (!isPlaying && onPlayPause) {
-        // Small delay to avoid race conditions
-        requestAnimationFrame(() => {
-          if (videoRef.current && !videoRef.current.paused && !isPlaying) {
-            onPlayPause();
-          }
-        });
+
+    const handleBrowserPause = () => {
+      if (isPlayingRef.current && v.paused && onPlayPause) {
+        onPlayPause();
       }
     };
-    
-    const handlePause = () => {
-      // Video paused - if state says playing, sync it
-      // But only if it wasn't paused intentionally
-      if (isPlaying && onPlayPause) {
-        // Small delay to avoid race conditions
-        requestAnimationFrame(() => {
-          if (videoRef.current && videoRef.current.paused && isPlaying) {
-            onPlayPause();
-          }
-        });
-      }
-    };
-    
-    v.addEventListener("play", handlePlay);
-    v.addEventListener("pause", handlePause);
-    
-    return () => {
-      v.removeEventListener("play", handlePlay);
-      v.removeEventListener("pause", handlePause);
-    };
-  }, [isPlaying, videoSrc, onPlayPause]);
+
+    v.addEventListener("pause", handleBrowserPause);
+    return () => v.removeEventListener("pause", handleBrowserPause);
+  }, [videoSrc, onPlayPause]);
   
   useEffect(() => { if (videoRef.current) { videoRef.current.volume = volume; videoRef.current.muted = muted; } }, [volume, muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = speed; }, [speed]);
@@ -448,6 +416,8 @@ const Player = ({
   const handleTimeUpdate = useCallback(() => {
     const v = videoRef.current; if (!v) return;
     setDTime(v.currentTime);
+    // Skip propagation if a seek is pending — stale timeupdate would overwrite it
+    if (pendingSeekRef.current !== null) return;
     onTimeUpdate?.(v.currentTime);
     const b = v.buffered;
     if (b.length > 0) setBuffered(b.end(b.length - 1));

@@ -698,10 +698,16 @@ const VideoEditor = () => {
 
   const onTimeUpdate = useCallback((t) => {
     if (pb.currentClip) {
-      // t is the video element's currentTime (includes trimStart offset)
       const trimStart = pb.currentClip.trimStart || 0;
-      pb.setCurrentTime(pb.currentClip.startTime + (t - trimStart));
-    } else {
+      const expectedPbTime = pb.currentClip.startTime + (t - trimStart);
+      if (pb.isPlaying) {
+        // During playback, only correct significant drift to avoid micro-seeking
+        const drift = Math.abs(pb.currentTime - expectedPbTime);
+        if (drift > 0.3) pb.setCurrentTime(expectedPbTime);
+      } else {
+        pb.setCurrentTime(expectedPbTime);
+      }
+    } else if (!pb.isPlaying) {
       pb.setCurrentTime(t);
     }
   }, [pb]);
