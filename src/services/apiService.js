@@ -133,3 +133,86 @@ export function getDownloadUrl(jobId, segmentId) {
 export function getThumbnailUrl(jobId, segmentId) {
   return `${API_BASE}/api/thumbnail/${jobId}/${segmentId}`;
 }
+
+/**
+ * Check if the server-side export endpoint is available.
+ * @returns {Promise<boolean>}
+ */
+export async function isServerExportAvailable() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(`${API_BASE}/api/editor/health`, { signal: controller.signal });
+    clearTimeout(timeout);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Export a video via the server (native FFmpeg — much faster than WASM).
+ * @param {Blob} videoBlob - The merged video blob
+ * @param {string} resolution - Target resolution (480p, 720p, 1080p)
+ * @param {Object} [options] - Additional export options
+ * @param {File} [options.audioFile] - Background music file
+ * @param {number} [options.audioVolume] - Background music volume (0-1)
+ * @param {string} [options.text] - Text overlay content
+ * @param {string} [options.textPosition] - Text position preset
+ * @param {number} [options.textSize] - Text font size
+ * @param {string} [options.textColor] - Text color
+ * @param {string} [options.textBgColor] - Text background color
+ * @param {(pct: number) => void} [onProgress] - Upload progress callback
+ * @returns {Promise<Blob>} Exported video as a Blob
+ */
+export function serverExport(videoBlob, resolution, options = {}, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const formData = new FormData();
+    formData.append('video', videoBlob, 'input.mp4');
+    formData.append('resolution', resolution);
+
+    if (options.audioFile) {
+      formData.append('audio', options.audioFile);
+      formData.append('audio_volume', String(options.audioVolume ?? 0.3));
+    }
+    if (options.text) {
+      formData.append('text', options.text);
+      formData.append('text_position', options.textPosition || 'bottom-center');
+      formData.append('text_size', String(options.textSize || 48));
+      formData.append('text_color', options.textColor || 'white');
+      formData.append('text_bg_color', options.textBgColor || '');
+    }
+
+    // Track upload progress (upload is typically the slow part)
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) {
+        // Upload is ~50% of total time, processing is the other ~50%
+        onProgress(Math.round((e.loaded / e.total) * 50));
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status === 200) {
+        resolve(xhr.response);
+      } else {
+        let detail = `Server export failed: ${xhr.status}`;
+        try {
+          // Response might be JSON error if not binary
+          const text = new TextDecoder().decode(xhr.response);
+          const err = JSON.parse(text);
+          if (err.detail) detail = err.detail;
+        } catch { /* use default */ }
+        reject(new Error(detail));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Server export failed — check connection'));
+    xhr.ontimeout = () => reject(new Error('Server export timed out'));
+    xhr.responseType = 'blob';
+    xhr.timeout = 300000; // 5 minutes
+
+    xhr.open('POST', `${API_BASE}/api/editor/export`);
+    xhr.send(formData);
+  });
+}
