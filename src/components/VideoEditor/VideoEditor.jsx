@@ -1012,8 +1012,6 @@ const VideoEditor = () => {
               onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
               onVideoError={handleVideoFormatError}
               clipProperties={pb.currentClip || selectedClip}
-              nextClipSrc={pb.nextClip?.blobUrl || null}
-              nextClipSeekTo={pb.nextClip?.trimStart || 0}
             />
           </Suspense>
         </ErrorBoundary>
