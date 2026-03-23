@@ -250,23 +250,35 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
   const isSavingRef = useRef(false);
   const projectIdRef = useRef(projectId);
 
+  // Refs so the interval callback always reads current values
+  // without restarting the timer on every edit.
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
+  const totalDurationRef = useRef(totalDuration);
+  totalDurationRef.current = totalDuration;
+  const resolutionRef = useRef(resolution);
+  resolutionRef.current = resolution;
+
   // Update ref when projectId changes
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
 
   useEffect(() => {
-    if (clips.length === 0) return;
-
     const doSave = async () => {
+      if (clipsRef.current.length === 0) return;
       if (isSavingRef.current) return;
       isSavingRef.current = true;
 
       try {
+        const currentClips = clipsRef.current;
+        const currentName = projectNameRef.current;
         const projectData = {
           id: projectIdRef.current,
-          name: projectName,
-          clips: clips.map(c => ({
+          name: currentName,
+          clips: currentClips.map(c => ({
             id: c.id,
             mediaId: c.mediaId,
             name: c.name,
@@ -275,8 +287,8 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
             duration: c.duration,
             storagePath: c.storagePath || null,
           })),
-          duration: totalDuration,
-          resolution: resolution || '1080p',
+          duration: totalDurationRef.current,
+          resolution: resolutionRef.current || '1080p',
         };
 
         // Save to cloud if user is authenticated, otherwise localStorage
@@ -289,11 +301,11 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
         } else {
           // Fallback to localStorage for unauthenticated users
           const data = {
-            projectName,
+            projectName: currentName,
             clips: projectData.clips,
             savedAt: new Date().toISOString(),
           };
-          localStorage.setItem(`clipcut_autosave_${projectName}`, JSON.stringify(data));
+          localStorage.setItem(`clipcut_autosave_${currentName}`, JSON.stringify(data));
         }
 
         setLastSaved(new Date());
@@ -306,7 +318,7 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 
     const timer = setInterval(doSave, interval);
     return () => clearInterval(timer);
-  }, [projectName, clips, userId, totalDuration, resolution, interval]);
+  }, [userId, interval]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Return both lastSaved and the current projectId
   return { lastSaved, projectId: projectIdRef.current };
@@ -489,10 +501,15 @@ const VideoEditor = () => {
   }, [pb.currentClip, selectedMediaId, mediaItems]);
 
   // ---- Clip mutations (push to undo stack) ----
+  // Use a ref to always read the latest clips inside the callback,
+  // so the callback identity is stable and doesn't cascade re-renders.
+  const clipsSnapshotRef = useRef(tlState.clips);
+  clipsSnapshotRef.current = tlState.clips;
   const setClips = useCallback((fn) => {
-    const next = typeof fn === "function" ? fn(tlState.clips) : fn;
+    const current = clipsSnapshotRef.current;
+    const next = typeof fn === "function" ? fn(current) : fn;
     tlDispatch({ type: "SET_CLIPS", clips: next });
-  }, [tlState.clips]);
+  }, []);
 
   const undo = useCallback(() => tlDispatch({ type: "UNDO" }), []);
   const redo = useCallback(() => tlDispatch({ type: "REDO" }), []);
@@ -503,7 +520,7 @@ const VideoEditor = () => {
   const addToTimeline = useCallback((mi, startTime = null) => {
     let start = startTime;
     if (start === null) {
-      const same = clips.filter(c => c.type === mi.type);
+      const same = clipsSnapshotRef.current.filter(c => c.type === mi.type);
       const last = same.length > 0 ? same.reduce((a, b) => a.startTime + a.duration > b.startTime + b.duration ? a : b) : null;
       start = last ? last.startTime + last.duration : 0;
     }
@@ -515,7 +532,7 @@ const VideoEditor = () => {
     };
     setClips(p => [...p, clip]);
     setSelectedClipId(clip.id);
-  }, [clips, setClips]);
+  }, [setClips]);
 
   // ---- Import ----
   const importMedia = useCallback(async (files) => {
@@ -576,13 +593,19 @@ const VideoEditor = () => {
   // ---- Remove media ----
   const removeMedia = useCallback((id) => {
     setMediaItems(p => { const item = p.find(m => m.id === id); if (item) requestAnimationFrame(() => { if (item.blobUrl) URL.revokeObjectURL(item.blobUrl); if (item.thumbnail) URL.revokeObjectURL(item.thumbnail); }); return p.filter(m => m.id !== id); });
-    setClips(p => p.filter(c => c.mediaId !== id));
+    // Revoke blob URLs from clips that reference this media before removing them
+    setClips(p => {
+      p.filter(c => c.mediaId === id).forEach(c => {
+        if (c.blobUrl) requestAnimationFrame(() => URL.revokeObjectURL(c.blobUrl));
+      });
+      return p.filter(c => c.mediaId !== id);
+    });
     if (selectedMediaId === id) setSelectedMediaId(null);
   }, [selectedMediaId, setClips]);
 
   // ---- Split (non-destructive — instant, no FFmpeg) ----
   const splitClip = useCallback((clipId, splitTime) => {
-    const clip = clips.find(c => c.id === clipId);
+    const clip = clipsSnapshotRef.current.find(c => c.id === clipId);
     if (!clip) return;
 
     // Create two clips referencing the same source file.
@@ -610,11 +633,11 @@ const VideoEditor = () => {
     });
     setSelectedClipId(c1.id);
     notify("success", "Clip split");
-  }, [clips, setClips, notify]);
+  }, [setClips, notify]);
 
   // ---- Trim ----
   const trimClip = useCallback(async (clipId, start, dur) => {
-    const clip = clips.find(c => c.id === clipId);
+    const clip = clipsSnapshotRef.current.find(c => c.id === clipId);
     if (!clip?.file) return;
     setIsProcessing(true); setLoadMsg("Trimming...");
     try {
@@ -625,7 +648,7 @@ const VideoEditor = () => {
       notify("success", "Clip trimmed");
     } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
     finally { setIsProcessing(false); setLoadMsg(""); ffmpeg.resetProgress(); }
-  }, [clips, ffmpeg, setClips, notify]);
+  }, [ffmpeg, setClips, notify]);
 
   // ---- Apply non-destructive clip effects via FFmpeg ----
   const applyClipEffects = useCallback(async (clip, index, total) => {
