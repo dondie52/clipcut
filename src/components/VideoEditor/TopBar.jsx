@@ -124,9 +124,12 @@ const ExportModal = memo(({
   progress,
   operationLabel = 'Processing',
   resolutions,
+  exportPresets = {},
   onCancel
 }) => {
   const [selectedResolution, setSelectedResolution] = useState('1080p');
+  const [exportTab, setExportTab] = useState('resolution'); // 'resolution' | 'platform'
+  const [selectedPreset, setSelectedPreset] = useState('youtube-1080p');
   
   // Handle escape key to close modal
   useEffect(() => {
@@ -240,58 +243,64 @@ const ExportModal = memo(({
         {!isExporting ? (
           <>
             <div style={{ marginBottom: '20px' }}>
-              <label 
-                id="resolution-label"
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: '#94a3b8',
-                  marginBottom: '10px',
-                  textTransform: 'uppercase',
-                  letterSpacing: '1px',
-                  fontWeight: 600
-                }}
-              >
-                Select Resolution
-              </label>
-              <div 
-                style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}
-                role="radiogroup"
-                aria-labelledby="resolution-label"
-              >
-                {Object.entries(resolutions).map(([key, { label }]) => (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedResolution(key)}
-                    className="resolution-option"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '14px 16px',
-                      background: selectedResolution === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
-                      border: selectedResolution === key ? '2px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontFamily: "'Spline Sans', sans-serif"
-                    }}
-                    role="radio"
-                    aria-checked={selectedResolution === key}
-                    tabIndex={selectedResolution === key ? 0 : -1}
-                  >
-                    <span style={{
-                      fontSize: '14px',
-                      color: selectedResolution === key ? '#75aadb' : 'white',
-                      fontWeight: selectedResolution === key ? 600 : 400
-                    }}>
-                      {label}
-                    </span>
-                    {selectedResolution === key && (
-                      <Icon i="check_circle" s={20} c="#75aadb" />
-                    )}
-                  </button>
+              {/* Tab switcher: Resolution vs Platform presets */}
+              <div style={{ display: 'flex', gap: '4px', marginBottom: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '3px' }}>
+                {[['resolution', 'Resolution'], ['platform', 'Platform']].map(([id, lbl]) => (
+                  <button key={id} onClick={() => setExportTab(id)} style={{
+                    flex: 1, padding: '8px', border: 'none', borderRadius: '6px', cursor: 'pointer',
+                    fontSize: '11px', fontWeight: 600, fontFamily: "'Spline Sans', sans-serif",
+                    background: exportTab === id ? 'rgba(117,170,219,0.15)' : 'transparent',
+                    color: exportTab === id ? '#75aadb' : '#94a3b8',
+                  }}>{lbl}</button>
                 ))}
               </div>
+
+              {exportTab === 'resolution' ? (
+                <>
+                  <label id="resolution-label" style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>
+                    Select Resolution
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="radiogroup" aria-labelledby="resolution-label">
+                    {Object.entries(resolutions).map(([key, { label }]) => (
+                      <button key={key} onClick={() => setSelectedResolution(key)} className="resolution-option" style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '14px 16px',
+                        background: selectedResolution === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+                        border: selectedResolution === key ? '2px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                        borderRadius: '8px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif"
+                      }} role="radio" aria-checked={selectedResolution === key} tabIndex={selectedResolution === key ? 0 : -1}>
+                        <span style={{ fontSize: '14px', color: selectedResolution === key ? '#75aadb' : 'white', fontWeight: selectedResolution === key ? 600 : 400 }}>
+                          {label}
+                        </span>
+                        {selectedResolution === key && <Icon i="check_circle" s={20} c="#75aadb" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>
+                    Platform Presets
+                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="radiogroup">
+                    {Object.entries(exportPresets).map(([key, p]) => (
+                      <button key={key} onClick={() => setSelectedPreset(key)} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '12px 16px', borderRadius: '8px', cursor: 'pointer',
+                        fontFamily: "'Spline Sans', sans-serif",
+                        background: selectedPreset === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+                        border: selectedPreset === key ? '2px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                      }} role="radio" aria-checked={selectedPreset === key}>
+                        <div>
+                          <div style={{ fontSize: '13px', color: selectedPreset === key ? '#75aadb' : 'white', fontWeight: selectedPreset === key ? 600 : 400 }}>{p.label}</div>
+                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>{p.description} &middot; {p.width}&times;{p.height}</div>
+                        </div>
+                        {selectedPreset === key && <Icon i="check_circle" s={20} c="#75aadb" />}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
             
             <div style={{
@@ -318,7 +327,7 @@ const ExportModal = memo(({
             </div>
             
             <button
-              onClick={() => onExport(selectedResolution)}
+              onClick={() => onExport(exportTab === 'platform' ? `preset:${selectedPreset}` : selectedResolution)}
               className="export-btn"
               style={{
                 width: '100%',
@@ -336,10 +345,10 @@ const ExportModal = memo(({
                 gap: '8px',
                 fontFamily: "'Spline Sans', sans-serif"
               }}
-              aria-label={`Export video at ${selectedResolution}`}
+              aria-label={`Export video${exportTab === 'platform' ? ` for ${exportPresets[selectedPreset]?.label}` : ` at ${selectedResolution}`}`}
             >
               <Icon i="download" s={18} c="#0a0a0a" />
-              Export at {selectedResolution}
+              {exportTab === 'platform' ? `Export for ${exportPresets[selectedPreset]?.label}` : `Export at ${selectedResolution}`}
             </button>
           </>
         ) : (
@@ -615,6 +624,7 @@ const TopBar = ({
   currentOperation = '',
   hasMediaToExport = false,
   resolutions = {},
+  exportPresets = {},
   lastSaved = null,
   canUndo = false,
   canRedo = false,
@@ -914,6 +924,7 @@ const TopBar = ({
         progress={exportProgress}
         operationLabel={currentOperation ? `${currentOperation}...` : 'Exporting video...'}
         resolutions={resolutions}
+        exportPresets={exportPresets}
         onCancel={isExporting ? onCancelExport : undefined}
       />
 

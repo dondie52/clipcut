@@ -302,3 +302,54 @@ export const disabledStyles = {
   cursor: 'not-allowed',
   pointerEvents: 'none'
 };
+
+/* ========== RESPONSIVE CSS ========== */
+export const RESPONSIVE_CSS = `
+  /* Mobile: stack layout vertically, hide side panels */
+  @media (max-width: 768px) {
+    /* Prevent horizontal scroll */
+    body, #root { overflow-x: hidden; max-width: 100vw; }
+
+    /* Touch-friendly minimum targets */
+    button, a, [role="button"] { min-height: 44px; min-width: 44px; }
+
+    /* Prevent iOS zoom on input focus */
+    input, select, textarea { font-size: 16px !important; }
+
+    /* Timeline: larger clip height for fat fingers */
+    .timeline-clip { min-height: 56px !important; }
+
+    /* Resize handles: wider on touch */
+    .resize-handle { min-width: 18px !important; }
+
+    /* Inspector as bottom sheet overlay */
+    .inspector-mobile-drawer {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      max-height: 60vh;
+      z-index: 3100;
+      background: #0e1218;
+      border-top: 2px solid rgba(117, 170, 219, 0.15);
+      border-radius: 12px 12px 0 0;
+      overflow-y: auto;
+      transform: translateY(100%);
+      transition: transform 0.3s ease;
+      -webkit-overflow-scrolling: touch;
+    }
+    .inspector-mobile-drawer.open {
+      transform: translateY(0);
+    }
+    .inspector-mobile-drawer .drawer-handle {
+      width: 36px; height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px;
+      margin: 8px auto;
+    }
+  }
+
+  /* Tablet: narrower panels */
+  @media (min-width: 769px) and (max-width: 1024px) {
+    .editor-left-panel { width: 220px !important; }
+    .editor-right-panel { width: 240px !important; }
+  }
+`;

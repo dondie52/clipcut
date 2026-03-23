@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useReducer, useRef, memo, la
 import { useLocation, useNavigate } from "react-router-dom";
 import TopBar from './TopBar';
 import Toolbar from './Toolbar';
-import { styles } from './styles';
+import { styles, RESPONSIVE_CSS } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
@@ -10,7 +10,7 @@ import { saveProject, loadProject, getProjectMediaUrl } from '../../services/pro
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
-import { getUserFriendlyMessage } from '../../utils/errorHandling';
+import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
 import ErrorBoundary from '../ErrorBoundary';
 import {
@@ -49,6 +49,7 @@ const VIDEO_EDITOR_CSS = `
     animation: shimmer 1.5s ease-in-out infinite;
   }
   ${SCROLLBAR_CSS}
+  ${RESPONSIVE_CSS}
 `;
 
 /* ========== LAZY LOADING FALLBACKS ========== */
@@ -84,6 +85,57 @@ const TimelineLoadingFallback = memo(() => (
   </div>
 ));
 TimelineLoadingFallback.displayName = "TimelineLoadingFallback";
+
+/* ========== ONBOARDING WALKTHROUGH ========== */
+const WALKTHROUGH_STEPS = [
+  { target: 'media-panel', title: 'Media Library', desc: 'Import videos and audio files here. Drag them to the timeline to start editing.', position: 'right' },
+  { target: 'player', title: 'Preview', desc: 'Watch your edit in real-time. Effects and text overlays preview live without rendering.', position: 'bottom' },
+  { target: 'inspector', title: 'Inspector', desc: 'Adjust clip properties \u2014 filters, speed, volume, text overlays, and transforms.', position: 'left' },
+  { target: 'timeline', title: 'Timeline', desc: 'Arrange, trim, split, and reorder clips. Use Ctrl+C/V to copy/paste.', position: 'top' },
+];
+
+const WalkthroughOverlay = memo(({ onComplete }) => {
+  const [step, setStep] = useState(0);
+  const current = WALKTHROUGH_STEPS[step];
+  const isLast = step === WALKTHROUGH_STEPS.length - 1;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onComplete(); }}>
+      <div style={{
+        background: '#1a2332', borderRadius: '12px', padding: '24px', maxWidth: '380px', width: '90%',
+        border: '1px solid rgba(117,170,219,0.2)', boxShadow: '0 16px 64px rgba(0,0,0,0.5)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(117,170,219,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, color: '#75aadb' }}>
+            {step + 1}
+          </div>
+          <span style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9' }}>{current.title}</span>
+        </div>
+        <p style={{ fontSize: '13px', color: '#94a3b8', lineHeight: 1.6, margin: '0 0 16px' }}>{current.desc}</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {WALKTHROUGH_STEPS.map((_, i) => (
+              <div key={i} style={{ width: '8px', height: '8px', borderRadius: '50%', background: i === step ? '#75aadb' : 'rgba(255,255,255,0.1)' }} />
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button onClick={onComplete} style={{
+              padding: '8px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px',
+              background: 'transparent', color: '#94a3b8', fontSize: '12px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+            }}>Skip</button>
+            <button onClick={() => isLast ? onComplete() : setStep(s => s + 1)} style={{
+              padding: '8px 20px', border: 'none', borderRadius: '6px',
+              background: 'linear-gradient(135deg, #75aadb, #5a8cbf)', color: '#0a0a0a',
+              fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+            }}>{isLast ? 'Get Started' : 'Next'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+WalkthroughOverlay.displayName = "WalkthroughOverlay";
 
 /* ========== UNDO/REDO SYSTEM ========== */
 const timelineReducer = (state, action) => {
@@ -294,9 +346,12 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 
         // Save to cloud if user is authenticated, otherwise localStorage
         if (userId) {
-          const saved = await saveProject(userId, projectData);
+          const saved = await retryWithBackoff(
+            () => saveProject(userId, projectData),
+            { maxRetries: 2, baseDelay: 1000, maxDelay: 5000 }
+          );
           // Update projectId ref if this was a new project
-          if (!projectIdRef.current && saved.id) {
+          if (!projectIdRef.current && saved?.id) {
             projectIdRef.current = saved.id;
           }
         } else {
@@ -311,7 +366,20 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 
         setLastSaved(new Date());
       } catch (e) {
-        console.warn("Auto-save failed:", e);
+        console.warn("Auto-save failed after retries:", e);
+        // Fall back to localStorage on persistent cloud failure
+        try {
+          const name = projectNameRef.current;
+          const SKIP_KEYS_FB = new Set(['file', 'blobUrl', 'thumbnail', 'isProcessing']);
+          const fbClips = clipsRef.current.map(c => {
+            const s = {};
+            for (const [k, v] of Object.entries(c)) { if (!SKIP_KEYS_FB.has(k)) s[k] = v; }
+            return s;
+          });
+          localStorage.setItem(`clipcut_autosave_${name}`, JSON.stringify({
+            projectName: name, clips: fbClips, savedAt: new Date().toISOString(),
+          }));
+        } catch { /* localStorage full or unavailable */ }
       } finally {
         isSavingRef.current = false;
       }
@@ -441,6 +509,15 @@ const VideoEditor = () => {
   const [rightSubTab, setRightSubTab] = useState("basic");
   const [mediaTab, setMediaTab] = useState("local");
   const [editorLayout, setEditorLayout] = useState("default");
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('clipcut_onboarded'));
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // Media library
   const [mediaItems, setMediaItems] = useState([]);
@@ -584,10 +661,36 @@ const VideoEditor = () => {
             }
           }
         } catch (e) {
-          console.error("Error processing:", e);
-          setMediaItems(p => p.map(m =>
-            m.id === id ? { ...m, isProcessing: false } : m
-          ));
+          // Browser can't play this format — try auto-converting to MP4 via FFmpeg
+          const canConvert = !isAudio && /\.(mov|avi|mkv|flv|wmv)$/i.test(file.name);
+          if (canConvert) {
+            try {
+              setLoadMsg(`Converting ${file.name} to MP4...`);
+              if (!ffmpeg.isReady) await ffmpeg.initialize();
+              const converted = await ffmpeg.convertFormat(file, 'mp4');
+              const convertedFile = new File([converted], file.name.replace(/\.\w+$/, '.mp4'), { type: 'video/mp4' });
+              const newBlobUrl = URL.createObjectURL(convertedFile);
+              URL.revokeObjectURL(blobUrl);
+              const info = await getVideoInfoFast(convertedFile);
+              setMediaItems(p => p.map(m =>
+                m.id === id ? { ...m, file: convertedFile, blobUrl: newBlobUrl, duration: info.duration, width: info.width, height: info.height, isProcessing: false } : m
+              ));
+              const thumbBlob = await generateThumbnailFast(convertedFile, 0).catch(() => null);
+              if (thumbBlob) {
+                const thumbUrl = URL.createObjectURL(thumbBlob);
+                setMediaItems(p => p.map(m => m.id === id ? { ...m, thumbnail: thumbUrl } : m));
+              }
+              notify("info", `Converted ${file.name} to MP4`);
+            } catch (convErr) {
+              console.error("Auto-convert failed:", convErr);
+              setMediaItems(p => p.map(m => m.id === id ? { ...m, isProcessing: false } : m));
+            }
+          } else {
+            console.error("Error processing:", e);
+            setMediaItems(p => p.map(m =>
+              m.id === id ? { ...m, isProcessing: false } : m
+            ));
+          }
         }
       }
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
@@ -850,6 +953,15 @@ const VideoEditor = () => {
       videoFile = await ffmpeg.mixAudio(videoFile, bgMusic.file, bgMusic.volume ?? 0.3);
     }
 
+    // Export: use platform preset or resolution
+    if (res.startsWith('preset:')) {
+      const presetKey = res.slice(7);
+      const preset = ffmpeg.exportPresets?.[presetKey];
+      setLoadMsg(`Exporting for ${preset?.label || presetKey}...`);
+      const blob = await ffmpeg.exportWithPreset(videoFile, presetKey);
+      if (!blob || blob.size === 0) throw new Error("Export produced an empty file.");
+      return blob;
+    }
     setLoadMsg(`Exporting at ${res}...`);
     const blob = await ffmpeg.exportVideo(videoFile, res);
     if (!blob || blob.size === 0) throw new Error("Export produced an empty file.");
@@ -1257,14 +1369,22 @@ const VideoEditor = () => {
   }, []);
 
   return (
-    <div style={styles.root}>
+    <div style={styles.root} role="application" aria-label="ClipCut Video Editor">
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       <style>{VIDEO_EDITOR_CSS}</style>
+
+      {/* Skip link for keyboard/screen reader users */}
+      <a href="#editor-timeline" className="skip-link">Skip to timeline</a>
+
+      {/* ARIA live region for status announcements */}
+      <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
+        {isExporting ? `Exporting video... ${ffmpeg.progress}%` : loadMsg || ''}
+      </div>
 
       <TopBar
         projectName={projectName} onProjectNameChange={setProjectName}
         onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress} currentOperation={ffmpeg.currentOperation}
-        hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions}
+        hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions} exportPresets={ffmpeg.exportPresets}
         lastSaved={lastSaved} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
         onCancelExport={ffmpeg.cancelOperation}
         onNewProject={handleNewProject} onSave={handleSave} onSettings={handleSettings}
@@ -1272,8 +1392,8 @@ const VideoEditor = () => {
       />
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
-      <main style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", overflow: "hidden" }}>
-        {editorLayout !== 'compact' && (
+      <main aria-label="Editor workspace" style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", overflow: "hidden" }}>
+        {editorLayout !== 'compact' && !isMobile && (
           <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
             <Suspense fallback={<PanelLoadingFallback width="280px" />}>
               <MediaPanel
@@ -1296,7 +1416,7 @@ const VideoEditor = () => {
             />
           </Suspense>
         </ErrorBoundary>
-        {editorLayout !== 'compact' && (
+        {editorLayout !== 'compact' && !isMobile && (
           <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
             <Suspense fallback={<PanelLoadingFallback width="300px" />}>
               <InspectorPanel
@@ -1311,9 +1431,45 @@ const VideoEditor = () => {
         )}
       </main>
 
+      {/* Mobile inspector drawer */}
+      {isMobile && (
+        <>
+          <button
+            onClick={() => setMobileDrawerOpen(v => !v)}
+            aria-label={mobileDrawerOpen ? "Close inspector" : "Open inspector"}
+            style={{
+              position: "fixed", bottom: "16px", right: "16px", zIndex: 3050,
+              width: "48px", height: "48px", borderRadius: "50%",
+              background: "linear-gradient(135deg, #75aadb, #5a8cbf)", border: "none",
+              color: "#0a0a0a", fontSize: "20px", cursor: "pointer",
+              boxShadow: "0 4px 16px rgba(117,170,219,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <span className="material-symbols-outlined" style={{ fontSize: "22px" }}>
+              {mobileDrawerOpen ? "close" : "tune"}
+            </span>
+          </button>
+          <div className={`inspector-mobile-drawer ${mobileDrawerOpen ? "open" : ""}`}>
+            <div className="drawer-handle" />
+            <ErrorBoundary name="inspector-mobile" inline message="Inspector error">
+              <Suspense fallback={<PanelLoadingFallback width="100%" height="200px" />}>
+                <InspectorPanel
+                  rightTab={rightTab} onRightTabChange={setRightTab}
+                  rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                  selectedClip={selectedClip} onClipUpdate={updateClip}
+                  bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                  onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        </>
+      )}
+
       <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
         <Suspense fallback={<TimelineLoadingFallback />}>
-          <Timeline
+          <Timeline id="editor-timeline"
             clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
             onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
             onAddClip={addClip} onRippleDelete={rippleDelete}
@@ -1328,6 +1484,7 @@ const VideoEditor = () => {
       {ffmpeg.isLoading && !ffmpeg.currentOperation && !loadMsg && <FFmpegInitBar progress={ffmpeg.loadProgress} />}
       {/* Full-screen overlay only during active operations (import, export, trim, etc.) */}
       {(loadMsg || ffmpeg.currentOperation) && <LoadingOverlay message={loadMsg || "Processing..."} progress={ffmpeg.currentOperation != null ? ffmpeg.progress : ffmpeg.loadProgress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} onCancel={ffmpeg.currentOperation ? ffmpeg.cancelOperation : undefined} />}
+      {showWalkthrough && <WalkthroughOverlay onComplete={() => { setShowWalkthrough(false); localStorage.setItem('clipcut_onboarded', '1'); }} />}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
     </div>
   );

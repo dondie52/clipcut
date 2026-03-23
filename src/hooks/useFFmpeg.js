@@ -14,6 +14,7 @@ import {
   cancelCurrentOperation,
   createAbortController,
   clearAllFiles,
+  terminateFFmpeg,
   getMemoryUsage,
   isMemoryLimitExceeded,
   formatBytes
@@ -146,6 +147,14 @@ export function useFFmpeg() {
         setProgress(0);
         setCurrentOperation(null);
       }
+      // Auto-recover from WASM crashes — terminate and allow re-init on next operation
+      const msg = (err?.message || '').toLowerCase();
+      if (msg.includes('wasm') || msg.includes('memory') || msg.includes('abort') || msg.includes('sharedarraybuffer')) {
+        try {
+          await terminateFFmpeg();
+          if (isMounted.current) setIsReady(false);
+        } catch { /* terminate may itself fail if instance is already dead */ }
+      }
       throw err;
     }
   }, [initialize, handleProgress]);
@@ -170,11 +179,18 @@ export function useFFmpeg() {
   }, [executeOperation]);
   
   const exportVideo = useCallback(async (file, resolution) => {
-    return executeOperation('export video', (onProgress) => 
+    return executeOperation('export video', (onProgress) =>
       videoOperations.exportVideo(file, resolution, onProgress)
     );
   }, [executeOperation]);
-  
+
+  const exportWithPreset = useCallback(async (file, presetKey) => {
+    const preset = videoOperations.EXPORT_PRESETS[presetKey];
+    return executeOperation(`export for ${preset?.label || presetKey}`, (onProgress) =>
+      videoOperations.exportWithPreset(file, presetKey, onProgress)
+    );
+  }, [executeOperation]);
+
   const getVideoInfo = useCallback(async (file) => {
     return videoOperations.getVideoInfo(file);
   }, []);
@@ -367,6 +383,7 @@ export function useFFmpeg() {
     splitVideo,
     mergeClips,
     exportVideo,
+    exportWithPreset,
     getVideoInfo,
     generateThumbnail,
     convertToWebFormat,
@@ -393,6 +410,7 @@ export function useFFmpeg() {
 
     // Constants
     resolutions: videoOperations.RESOLUTIONS,
+    exportPresets: videoOperations.EXPORT_PRESETS,
     textPositions: effects.TEXT_POSITIONS,
     transitionTypes: effects.TRANSITION_TYPES
   };

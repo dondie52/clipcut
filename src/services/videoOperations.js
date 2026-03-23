@@ -24,7 +24,44 @@ import { trackVideoOperation, METRIC_TYPES } from '../utils/performance';
 export const RESOLUTIONS = {
   '480p': { width: 854, height: 480, label: '480p (SD)' },
   '720p': { width: 1280, height: 720, label: '720p (HD)' },
-  '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)' }
+  '1080p': { width: 1920, height: 1080, label: '1080p (Full HD)' },
+};
+
+/**
+ * Platform-optimized export presets
+ * Each includes resolution, codec settings, and aspect ratio
+ */
+export const EXPORT_PRESETS = {
+  'youtube-1080p': {
+    label: 'YouTube 1080p',
+    width: 1920, height: 1080, aspect: '16:9',
+    crf: 20, preset: 'medium', audioBitrate: '192k',
+    description: 'Best for YouTube uploads',
+  },
+  'instagram-reels': {
+    label: 'Instagram Reels',
+    width: 1080, height: 1920, aspect: '9:16',
+    crf: 23, preset: 'veryfast', audioBitrate: '128k',
+    description: '9:16 vertical, 60s max',
+  },
+  'tiktok': {
+    label: 'TikTok',
+    width: 1080, height: 1920, aspect: '9:16',
+    crf: 23, preset: 'veryfast', audioBitrate: '128k',
+    description: '9:16 vertical, up to 10 min',
+  },
+  'twitter': {
+    label: 'Twitter / X',
+    width: 1280, height: 720, aspect: '16:9',
+    crf: 23, preset: 'veryfast', audioBitrate: '128k',
+    description: '720p, 2 min 20s max',
+  },
+  'whatsapp': {
+    label: 'WhatsApp Status',
+    width: 960, height: 540, aspect: '16:9',
+    crf: 28, preset: 'veryfast', audioBitrate: '96k',
+    description: 'Small file, 30s max',
+  },
 };
 
 /**
@@ -265,6 +302,53 @@ export async function exportVideo(inputFile, resolution = '1080p', onProgress = 
       resolution,
       fileSize: inputFile.size,
     }
+  );
+}
+
+/**
+ * Export video using a platform preset (YouTube, TikTok, etc.)
+ * Uses preset-specific resolution, CRF, and bitrate settings.
+ * Note: exec() below is FFmpeg WASM's in-memory exec, not child_process.
+ */
+export async function exportWithPreset(inputFile, presetKey, onProgress = null) {
+  const preset = EXPORT_PRESETS[presetKey];
+  if (!preset) throw new Error(`Unknown export preset: ${presetKey}`);
+
+  return trackVideoOperation(
+    METRIC_TYPES.VIDEO_EXPORT,
+    async () => {
+      await loadFFmpeg();
+      if (onProgress) setProgressCallback(onProgress);
+
+      const { width, height, crf, preset: encPreset, audioBitrate } = preset;
+      const inputName = 'input_preset.mp4';
+      const outputName = 'output_preset.mp4';
+
+      try {
+        await writeFile(inputName, inputFile);
+        // FFmpeg WASM in-memory execution (not shell exec)
+        await exec([
+          '-i', inputName,
+          '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`,
+          '-c:v', 'libx264',
+          '-preset', encPreset,
+          '-crf', String(crf),
+          '-tune', 'fastdecode',
+          '-c:a', 'aac',
+          '-b:a', audioBitrate,
+          '-movflags', '+faststart',
+          '-threads', '0',
+          outputName
+        ]);
+
+        const data = await readFile(outputName);
+        return toBlob(data, 'video/mp4');
+      } finally {
+        clearProgressCallback();
+        await cleanup([inputName, outputName]);
+      }
+    },
+    { preset: presetKey, fileSize: inputFile.size }
   );
 }
 

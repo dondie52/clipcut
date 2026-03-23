@@ -520,6 +520,7 @@ TlBtn.displayName = "TlBtn";
 
 /* ========== MAIN TIMELINE COMPONENT ========== */
 const Timeline = ({
+  id,
   clips = [], selectedClipId, onSelectClip, onUpdateClip,
   onDeleteClip, onSplitClip, onAddClip, onRippleDelete,
   currentTime = 0, onSeek, totalDuration = 30, isProcessing = false,
@@ -1108,7 +1109,7 @@ const Timeline = ({
   //  RENDER
   // ────────────────────────────────────────────────────────────
   return (
-    <footer style={styles.timeline} role="region" aria-label="Timeline editor">
+    <footer id={id} style={styles.timeline} role="region" aria-label="Timeline editor">
       <style>{TIMELINE_CSS}</style>
 
       {/* ── Toolbar ─────────────────────────────────────── */}
