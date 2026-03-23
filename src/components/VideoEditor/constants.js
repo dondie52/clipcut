@@ -271,6 +271,14 @@ export const DEFAULT_CLIP_PROPERTIES = {
   trimStart: 0,
   trimEnd: 0,
   colorGrading: { shadows: '#1a1a2e', midtones: '#4a4a5e', highlights: '#ffffff' },
+  // Text overlay
+  text: '',
+  textColor: '#ffffff',
+  textSize: 48,
+  textPosition: 'bottom-center',
+  textBgColor: '',
+  textStartTime: 0,
+  textDuration: 0,
 };
 
 /* ========== FILTER PRESETS ========== */
@@ -299,6 +307,19 @@ export const ANIMATION_PRESETS = [
   { name: 'Fade Out', key: 'fadeOut', value: 1.0 },
   { name: 'Scale Up', key: 'scaleUp', value: true },
   { name: 'Slide Left', key: 'slideLeft', value: true },
+];
+
+/* ========== TEXT POSITION PRESETS ========== */
+export const TEXT_POSITION_PRESETS = [
+  { value: 'top-left', label: 'Top Left', icon: 'north_west' },
+  { value: 'top-center', label: 'Top', icon: 'north' },
+  { value: 'top-right', label: 'Top Right', icon: 'north_east' },
+  { value: 'center-left', label: 'Left', icon: 'west' },
+  { value: 'center', label: 'Center', icon: 'center_focus_strong' },
+  { value: 'center-right', label: 'Right', icon: 'east' },
+  { value: 'bottom-left', label: 'Bottom Left', icon: 'south_west' },
+  { value: 'bottom-center', label: 'Bottom', icon: 'south' },
+  { value: 'bottom-right', label: 'Bottom Right', icon: 'south_east' },
 ];
 
 /* ========== SPEED PRESETS ========== */

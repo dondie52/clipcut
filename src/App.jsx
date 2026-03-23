@@ -10,7 +10,7 @@ import { ProtectedRoute, PublicRoute } from './supabase/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import ClipCutSplash from './components/ClipCutSplash.jsx'
 import { useSessionTimeout } from './hooks/useSessionTimeout'
-import { SPLASH_DURATION, MOBILE_BREAKPOINT } from './constants'
+import { SPLASH_DURATION } from './constants'
 import { performanceMonitor } from './utils/performance'
 import { initAnalytics, trackPageView, trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './utils/analytics'
 import { onNetworkStatusChange } from './utils/errorHandling'
@@ -197,7 +197,6 @@ const fabItemStyle = {
 
 const AppContent = () => {
   const [showSplash, setShowSplash] = useState(true)
-  const [isMobile, setIsMobile] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const analyticsInitialized = useRef(false)
@@ -223,17 +222,6 @@ const AppContent = () => {
   }, [location.pathname, showSplash])
 
   useEffect(() => {
-    const checkMobile = () => {
-      const width = window.innerWidth
-      setIsMobile(width < MOBILE_BREAKPOINT)
-    }
-
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
-
-  useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false)
       if (window.location.pathname === '/') {
@@ -245,10 +233,6 @@ const AppContent = () => {
 
   if (showSplash) {
     return <ClipCutSplash />
-  }
-
-  if (isMobile) {
-    return <div style={{ padding: '20px', color: 'white' }}>Mobile version coming soon</div>
   }
 
   return (

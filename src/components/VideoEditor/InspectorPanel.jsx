@@ -1,7 +1,7 @@
-import { useCallback, memo } from 'react';
+import { useCallback, useRef, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
+import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { Section, Row, Slider, SmallInput, Hr, EffectCard, ColorPicker } from './InspectorComponents';
 
 /* ========== CSS ANIMATIONS ========== */
@@ -101,8 +101,13 @@ const InspectorPanel = ({
   rightSubTab,
   onRightSubTabChange,
   selectedClip,
-  onClipUpdate
+  onClipUpdate,
+  bgMusic,
+  onImportBgMusic,
+  onUpdateBgMusicVolume,
+  onRemoveBgMusic,
 }) => {
+  const bgMusicFileRef = useRef(null);
   // Helper to update a clip property
   const update = useCallback((key, value) => {
     if (!selectedClip) return;
@@ -503,6 +508,96 @@ const InspectorPanel = ({
                     defaultValue={100}
                   />
                 </Section>
+
+                <Hr />
+
+                {/* Text Overlay Section */}
+                <Section t="Text Overlay">
+                  <SmallInput
+                    l="Text"
+                    v={cp(selectedClip, 'text') || ''}
+                    onChange={(val) => update('text', val)}
+                    placeholder="Enter text..."
+                  />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "4px" }}>
+                    <SmallInput
+                      l="Font Size"
+                      v={String(cp(selectedClip, 'textSize'))}
+                      type="number"
+                      onChange={(val) => update('textSize', Math.max(8, Math.min(200, Number(val) || 48)))}
+                    />
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px', fontWeight: 500 }}>Color</div>
+                      <input
+                        type="color"
+                        value={cp(selectedClip, 'textColor') || '#ffffff'}
+                        onChange={(e) => update('textColor', e.target.value)}
+                        style={{
+                          width: '100%', height: '28px', border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '2px'
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '6px', fontWeight: 500 }}>Position</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                      {TEXT_POSITION_PRESETS.map(p => (
+                        <button
+                          key={p.value}
+                          onClick={() => update('textPosition', p.value)}
+                          title={p.label}
+                          style={{
+                            background: cp(selectedClip, 'textPosition') === p.value ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
+                            border: cp(selectedClip, 'textPosition') === p.value ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                            borderRadius: '4px', padding: '6px', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                        >
+                          <Icon i={p.icon} s={14} c={cp(selectedClip, 'textPosition') === p.value ? '#75aadb' : '#64748b'} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "8px" }}>
+                    <div>
+                      <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px', fontWeight: 500 }}>Bg Color</div>
+                      <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                        <input
+                          type="color"
+                          value={cp(selectedClip, 'textBgColor') || '#000000'}
+                          onChange={(e) => update('textBgColor', e.target.value)}
+                          disabled={!cp(selectedClip, 'textBgColor')}
+                          style={{
+                            width: '28px', height: '28px', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '2px',
+                            opacity: cp(selectedClip, 'textBgColor') ? 1 : 0.4,
+                          }}
+                        />
+                        <button
+                          onClick={() => update('textBgColor', cp(selectedClip, 'textBgColor') ? '' : '#000000')}
+                          style={{
+                            background: cp(selectedClip, 'textBgColor') ? 'rgba(117,170,219,0.15)' : 'rgba(30,41,59,0.5)',
+                            border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px',
+                            padding: '4px 8px', color: '#94a3b8', fontSize: '9px', cursor: 'pointer',
+                          }}
+                        >
+                          {cp(selectedClip, 'textBgColor') ? 'On' : 'Off'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  {cp(selectedClip, 'text') && (
+                    <div style={{
+                      marginTop: '8px', padding: '8px 10px', borderRadius: '6px',
+                      background: 'rgba(117,170,219,0.06)', border: '1px solid rgba(117,170,219,0.1)',
+                      fontSize: '10px', color: '#75aadb', display: 'flex', alignItems: 'center', gap: '6px'
+                    }}>
+                      <Icon i="info" s={12} c="#75aadb" />
+                      Text rendered during export via FFmpeg
+                    </div>
+                  )}
+                </Section>
               </>
             )}
 
@@ -544,18 +639,66 @@ const InspectorPanel = ({
 
                 <Hr />
 
-                <Section t="Audio Effects">
-                  <div
-                    style={{
-                      padding: '20px',
-                      textAlign: 'center',
-                      color: '#475569',
-                      fontSize: '12px'
+                <Section t="Background Music">
+                  <input
+                    ref={bgMusicFileRef}
+                    type="file"
+                    accept="audio/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      if (e.target.files?.[0]) onImportBgMusic?.(e.target.files[0]);
+                      e.target.value = '';
                     }}
-                  >
-                    <Icon i="music_note" s={32} c="#334155" />
-                    <p style={{ margin: '12px 0 0 0' }}>No audio effects applied</p>
-                  </div>
+                  />
+                  {bgMusic ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: '8px',
+                        padding: '8px 10px', borderRadius: '6px',
+                        background: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.15)',
+                      }}>
+                        <Icon i="music_note" s={16} c="#34d399" />
+                        <span style={{ flex: 1, fontSize: '11px', color: '#cbd5e1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {bgMusic.name}
+                        </span>
+                        <button
+                          onClick={onRemoveBgMusic}
+                          style={{
+                            background: 'rgba(239,68,68,0.15)', border: 'none', borderRadius: '4px',
+                            padding: '2px 6px', cursor: 'pointer', color: '#ef4444', fontSize: '10px',
+                          }}
+                          aria-label="Remove background music"
+                        >
+                          <Icon i="close" s={12} c="#ef4444" />
+                        </button>
+                      </div>
+                      <Slider
+                        l="Music Volume"
+                        value={Math.round((bgMusic.volume ?? 0.3) * 100)}
+                        onChange={(val) => onUpdateBgMusicVolume?.(val / 100)}
+                        min={0}
+                        max={100}
+                        defaultValue={30}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => bgMusicFileRef.current?.click()}
+                      style={{
+                        width: '100%', padding: '14px',
+                        background: 'transparent',
+                        border: '1px dashed rgba(52,211,153,0.3)',
+                        borderRadius: '6px', color: '#34d399',
+                        fontSize: '11px', fontWeight: 500,
+                        cursor: 'pointer', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center', gap: '8px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Icon i="add" s={16} c="#34d399" />
+                      Add Background Music
+                    </button>
+                  )}
                 </Section>
               </>
             )}

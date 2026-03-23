@@ -460,6 +460,9 @@ const VideoEditor = () => {
   // Playback
   const pb = usePlaybackEngine(clips, totalDuration);
 
+  // Background music
+  const [bgMusic, setBgMusic] = useState(null); // { file, name, blobUrl, volume }
+
   // Processing
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -590,6 +593,29 @@ const VideoEditor = () => {
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
   }, [notify]);
 
+  // ---- Background music ----
+  const importBgMusic = useCallback((file) => {
+    if (!file || !file.type.startsWith('audio/')) {
+      notify('warning', 'Please select an audio file');
+      return;
+    }
+    // Revoke previous bg music blob
+    if (bgMusic?.blobUrl) URL.revokeObjectURL(bgMusic.blobUrl);
+    const blobUrl = URL.createObjectURL(file);
+    setBgMusic({ file, name: file.name, blobUrl, volume: 0.3 });
+    notify('success', `Background music: ${file.name}`);
+  }, [bgMusic, notify]);
+
+  const updateBgMusicVolume = useCallback((volume) => {
+    setBgMusic(prev => prev ? { ...prev, volume } : null);
+  }, []);
+
+  const removeBgMusic = useCallback(() => {
+    if (bgMusic?.blobUrl) URL.revokeObjectURL(bgMusic.blobUrl);
+    setBgMusic(null);
+    notify('info', 'Background music removed');
+  }, [bgMusic, notify]);
+
   // ---- Remove media ----
   const removeMedia = useCallback((id) => {
     setMediaItems(p => { const item = p.find(m => m.id === id); if (item) requestAnimationFrame(() => { if (item.blobUrl) URL.revokeObjectURL(item.blobUrl); if (item.thumbnail) URL.revokeObjectURL(item.thumbnail); }); return p.filter(m => m.id !== id); });
@@ -662,8 +688,9 @@ const VideoEditor = () => {
     const hasFilter = clip.filterName;
     const hasTrim = clip.trimStart > 0 || clip.trimEnd > 0;
     const hasEffects = clip.effects?.some(e => e.enabled);
+    const hasText = clip.text && clip.text.trim().length > 0;
 
-    const noEffects = !hasSpeedChange && !hasBrightnessContrast && !hasSaturation && !hasRotation && !hasVolume && !hasFade && !hasFilter && !hasTrim && !hasEffects;
+    const noEffects = !hasSpeedChange && !hasBrightnessContrast && !hasSaturation && !hasRotation && !hasVolume && !hasFade && !hasFilter && !hasTrim && !hasEffects && !hasText;
     if (noEffects) return file;
 
     const label = `clip ${index + 1}/${total}`;
@@ -714,6 +741,17 @@ const VideoEditor = () => {
         }
       }
     }
+    if (hasText) {
+      setLoadMsg(`Adding text overlay to ${label}...`);
+      file = await ffmpeg.addTextOverlay(file, clip.text, {
+        position: clip.textPosition || 'bottom-center',
+        fontSize: clip.textSize || 48,
+        fontColor: clip.textColor || 'white',
+        backgroundColor: clip.textBgColor || null,
+        startTime: clip.textStartTime || 0,
+        duration: clip.textDuration || 0,
+      });
+    }
 
     return file;
   }, [ffmpeg]);
@@ -759,7 +797,6 @@ const VideoEditor = () => {
 
     try {
       if (!ffmpeg.isReady) {
-        setLoadMsg("Initializing FFmpeg...");
         const initialized = await ffmpeg.initialize();
         if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
       }
@@ -773,16 +810,22 @@ const VideoEditor = () => {
       }
       setLoadSub("");
 
-      let blob;
+      let videoFile;
       if (processedFiles.length === 1) {
-        setLoadMsg(`Exporting at ${res}...`);
-        blob = await ffmpeg.exportVideo(processedFiles[0], res);
+        videoFile = processedFiles[0];
       } else {
         setLoadMsg(`Merging ${processedFiles.length} clips...`);
-        const m = await ffmpeg.mergeClips(processedFiles);
-        setLoadMsg(`Exporting at ${res}...`);
-        blob = await ffmpeg.exportVideo(m, res);
+        videoFile = await ffmpeg.mergeClips(processedFiles);
       }
+
+      // Mix background music if set
+      if (bgMusic?.file) {
+        setLoadMsg("Mixing background music...");
+        videoFile = await ffmpeg.mixAudio(videoFile, bgMusic.file, bgMusic.volume ?? 0.3);
+      }
+
+      setLoadMsg(`Exporting at ${res}...`);
+      const blob = await ffmpeg.exportVideo(videoFile, res);
 
       if (!blob || blob.size === 0) throw new Error("Export produced an empty file. Please try again.");
 
@@ -804,7 +847,7 @@ const VideoEditor = () => {
       setLoadSub("");
       ffmpeg.resetProgress();
     }
-  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects]);
+  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic]);
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
@@ -1022,6 +1065,8 @@ const VideoEditor = () => {
                 rightTab={rightTab} onRightTabChange={setRightTab}
                 rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
                 selectedClip={selectedClip} onClipUpdate={updateClip}
+                bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
               />
             </Suspense>
           </ErrorBoundary>

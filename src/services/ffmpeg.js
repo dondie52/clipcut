@@ -20,6 +20,9 @@ let ffmpegInstance = null;
 let loadingPromise = null;
 let moduleLoadingPromise = null;
 
+const DEFAULT_FFMPEG_CORE_BASE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+const FFMPEG_CORE_BASE_URL = (import.meta.env?.VITE_FFMPEG_CORE_BASE_URL || DEFAULT_FFMPEG_CORE_BASE_URL).replace(/\/+$/, '');
+
 /**
  * Dynamically load FFmpeg modules
  * @returns {Promise<void>}
@@ -147,8 +150,8 @@ export async function preloadFFmpeg() {
   if (isFFmpegLoaded() || loadingPromise) {
     return;
   }
-  
-  const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+
+  const baseURL = FFMPEG_CORE_BASE_URL;
   
   try {
     // Fetch WASM files to browser cache (using fetch with cache: 'force-cache')
@@ -157,6 +160,7 @@ export async function preloadFFmpeg() {
     await Promise.all([
       fetch(`${baseURL}/ffmpeg-core.js`, cacheOptions),
       fetch(`${baseURL}/ffmpeg-core.wasm`, cacheOptions),
+      fetch(`${baseURL}/ffmpeg-core.worker.js`, cacheOptions),
     ]);
     
     console.log('[FFmpeg] WASM files preloaded to cache');
@@ -197,7 +201,7 @@ export async function loadFFmpeg(onProgress = null) {
   loadingPromise = (async () => {
     let loadRampTimer = null;
     try {
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+      const baseURL = FFMPEG_CORE_BASE_URL;
 
       const bump = (pct) => {
         loadingState.loadProgress = pct;
@@ -207,9 +211,10 @@ export async function loadFFmpeg(onProgress = null) {
 
       bump(12);
 
-      const [coreURL, wasmURL] = await Promise.all([
+      const [coreURL, wasmURL, workerURL] = await Promise.all([
         ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
       ]);
 
       bump(42);
@@ -223,6 +228,7 @@ export async function loadFFmpeg(onProgress = null) {
       await ffmpeg.load({
         coreURL,
         wasmURL,
+        workerURL,
       });
 
       if (loadRampTimer) {

@@ -18,9 +18,6 @@ export { default as Player } from './Player';
 export { default as InspectorPanel } from './InspectorPanel';
 export { default as Timeline } from './Timeline';
 
-// Modal components
-export { default as ExportModal } from './ExportModal';
-
 // UI primitives
 export { default as Icon } from './Icon';
 export { default as GhostBtn } from './GhostBtn';

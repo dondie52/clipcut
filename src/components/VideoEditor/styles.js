@@ -129,7 +129,10 @@ export const FOCUS_STYLES = `
 /* ========== STYLES ========== */
 export const styles = {
   root: {
-    width: "100vw",
+    width: "100%",
+    maxWidth: "100vw",
+    minWidth: 0,
+    minHeight: 0,
     height: "100vh",
     display: "flex",
     flexDirection: "column",
