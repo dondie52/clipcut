@@ -8,6 +8,7 @@ import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject } from '../../services/projectService';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
+import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage } from '../../utils/errorHandling';
 import ErrorBoundary from '../ErrorBoundary';
@@ -520,7 +521,7 @@ const VideoEditor = () => {
   const importMedia = useCallback(async (files) => {
     setIsImporting(true);
     try {
-      if (!ffmpeg.isReady) { setLoadMsg("Initializing FFmpeg..."); await ffmpeg.initialize(); }
+      // No FFmpeg init needed — browser-native APIs handle import
       let n = 0;
       for (const file of files) {
         setLoadMsg(`Importing ${file.name}...`);
@@ -528,28 +529,49 @@ const VideoEditor = () => {
         const id = genId();
         const blobUrl = URL.createObjectURL(file);
         const isAudio = file.type.startsWith("audio/");
-        setMediaItems(p => [...p, { id, name: file.name, file, blobUrl, thumbnail: null, duration: 0, width: 0, height: 0, type: isAudio ? "audio" : "video", isProcessing: true }]);
+
+        setMediaItems(p => [...p, {
+          id, name: file.name, file, blobUrl,
+          thumbnail: null, duration: 0, width: 0, height: 0,
+          type: isAudio ? "audio" : "video",
+          isProcessing: true,
+        }]);
+
         try {
-          const info = await ffmpeg.getVideoInfo(file);
-          setMediaItems(p => p.map(m => m.id === id ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false } : m));
+          // FAST: Browser-native metadata extraction (~10ms vs ~3s)
+          const info = await getVideoInfoFast(file);
+          setMediaItems(p => p.map(m =>
+            m.id === id
+              ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false }
+              : m
+          ));
+
+          // FAST: Browser-native thumbnail generation (~100ms vs ~3s)
           if (!isAudio) {
-            const videoId = `${file.name}_${file.size}_${file.lastModified}`;
-            getCachedThumbnail(videoId, 0).then(async (cached) => {
-              const blob = cached || await ffmpeg.generateThumbnail(file, 0);
+            try {
+              const videoId = `${file.name}_${file.size}_${file.lastModified}`;
+              const cached = await getCachedThumbnail(videoId, 0);
+              const blob = cached || await generateThumbnailFast(file, 0);
               if (!cached) cacheThumbnail(videoId, 0, blob).catch(() => {});
-              const u = URL.createObjectURL(blob);
-              setMediaItems(p => p.map(m => m.id === id ? { ...m, thumbnail: u } : m));
-            }).catch(() => {});
+              const thumbUrl = URL.createObjectURL(blob);
+              setMediaItems(p => p.map(m =>
+                m.id === id ? { ...m, thumbnail: thumbUrl } : m
+              ));
+            } catch (e) {
+              console.warn("Thumbnail generation failed:", e);
+            }
           }
         } catch (e) {
           console.error("Error processing:", e);
-          setMediaItems(p => p.map(m => m.id === id ? { ...m, isProcessing: false } : m));
+          setMediaItems(p => p.map(m =>
+            m.id === id ? { ...m, isProcessing: false } : m
+          ));
         }
       }
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
-    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
+    } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [ffmpeg, notify]);
+  }, [notify]);
 
   // ---- Remove media ----
   const removeMedia = useCallback((id) => {
@@ -763,7 +785,7 @@ const VideoEditor = () => {
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
-    pb.currentClip && t < pb.currentClip.duration ? pb.seek(pb.currentClip.startTime + t) : pb.seek(t);
+    pb.seek(t);
   }, [pb]);
 
   const onTimeUpdate = useCallback((t) => {
@@ -899,12 +921,9 @@ const VideoEditor = () => {
     }
   }, []); // eslint-disable-line
 
-  // ---- Warm FFmpeg cache + init in background (first visit still pays WASM compile cost) ----
+  // ---- Preload WASM files to browser cache (full init deferred to first export/trim) ----
   useEffect(() => {
     void ffmpeg.preload();
-    if (!ffmpeg.isReady) {
-      ffmpeg.initialize().catch(() => {});
-    }
   }, []); // eslint-disable-line
 
   // ---- Global shortcuts ----
