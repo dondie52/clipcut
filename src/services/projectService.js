@@ -98,20 +98,12 @@ export async function saveProject(userId, projectData) {
   // Sanitize project name before saving (max 100 chars, remove HTML, trim)
   const sanitizedName = sanitizeTextInput(name || "Untitled Project", { maxLength: 100 });
 
-  // Prepare project data for database (without large binary data)
+  // Prepare project data for database — clips already come pre-serialized
+  // (binary fields stripped by caller), so store them as-is to preserve all effects
   const dbProjectData = {
     name: sanitizedName,
     project_data: {
-      clips: clips.map((c) => ({
-        id: c.id,
-        mediaId: c.mediaId,
-        name: c.name,
-        type: c.type,
-        startTime: c.startTime,
-        duration: c.duration,
-        // Store storage path instead of blob URL
-        storagePath: c.storagePath || null,
-      })),
+      clips: clips,
       savedAt: new Date().toISOString(),
     },
     duration_seconds: Math.round(duration || 0),
@@ -505,14 +497,7 @@ function saveProjectToLocalStorage(projectData) {
     id,
     name: sanitizedName,
     project_data: {
-      clips: projectData.clips.map((c) => ({
-        id: c.id,
-        mediaId: c.mediaId,
-        name: c.name,
-        type: c.type,
-        startTime: c.startTime,
-        duration: c.duration,
-      })),
+      clips: projectData.clips,
       savedAt: new Date().toISOString(),
     },
     duration_seconds: Math.round(projectData.duration || 0),

@@ -6,7 +6,7 @@ import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
-import { saveProject, loadProject } from '../../services/projectService';
+import { saveProject, loadProject, getProjectMediaUrl } from '../../services/projectService';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
@@ -276,18 +276,18 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
       try {
         const currentClips = clipsRef.current;
         const currentName = projectNameRef.current;
+        // Serialize full clip properties (exclude binary data: file, blobUrl, thumbnail)
+        const SKIP_KEYS = new Set(['file', 'blobUrl', 'thumbnail', 'isProcessing']);
         const projectData = {
           id: projectIdRef.current,
           name: currentName,
-          clips: currentClips.map(c => ({
-            id: c.id,
-            mediaId: c.mediaId,
-            name: c.name,
-            type: c.type,
-            startTime: c.startTime,
-            duration: c.duration,
-            storagePath: c.storagePath || null,
-          })),
+          clips: currentClips.map(c => {
+            const serialized = {};
+            for (const [k, v] of Object.entries(c)) {
+              if (!SKIP_KEYS.has(k)) serialized[k] = v;
+            }
+            return serialized;
+          }),
           duration: totalDurationRef.current,
           resolution: resolutionRef.current || '1080p',
         };
@@ -662,6 +662,19 @@ const VideoEditor = () => {
     notify("success", "Clip split");
   }, [setClips, notify]);
 
+  // ---- Add clip directly (used by paste/duplicate) ----
+  const addClip = useCallback((clipData) => {
+    setClips(p => [...p, clipData]);
+    setSelectedClipId(clipData.id);
+  }, [setClips]);
+
+  // ---- Ripple delete (delete clip + shift later clips left) ----
+  const rippleDelete = useCallback((newClips) => {
+    setClips(() => newClips);
+    setSelectedClipId(null);
+    notify("success", "Clip deleted (ripple)");
+  }, [setClips, notify]);
+
   // ---- Trim ----
   const trimClip = useCallback(async (clipId, start, dur) => {
     const clip = clipsSnapshotRef.current.find(c => c.id === clipId);
@@ -810,8 +823,24 @@ const VideoEditor = () => {
     if (processedFiles.length === 1) {
       videoFile = processedFiles[0];
     } else {
+      // Merge clips, applying transitions between adjacent clips that have them
       setLoadMsg(`Merging ${processedFiles.length} clips...`);
-      videoFile = await ffmpeg.mergeClips(processedFiles);
+      videoFile = processedFiles[0];
+      for (let i = 1; i < processedFiles.length; i++) {
+        const prevClip = vClips[i - 1];
+        if (prevClip.transition) {
+          setLoadSub(`Adding ${prevClip.transition} transition...`);
+          videoFile = await ffmpeg.addTransition(
+            videoFile, processedFiles[i],
+            prevClip.transition,
+            prevClip.transitionDuration || 1
+          );
+        } else {
+          // No transition — simple merge of the two
+          videoFile = await ffmpeg.mergeClips([videoFile, processedFiles[i]]);
+        }
+      }
+      setLoadSub("");
     }
 
     // Mix background music if set
@@ -1060,16 +1089,112 @@ const VideoEditor = () => {
     const projectData = location.state?.projectData;
     const projectName = location.state?.projectName;
     
-    if (projectId && projectData) {
+    if (projectId) {
       window.history.replaceState({ ...location.state, projectId: null, projectData: null, projectName: null }, "");
-      // Sanitize and set project name (max 100 chars, remove HTML, trim)
-      if (projectName) {
-        const sanitizedName = sanitizeTextInput(projectName, { maxLength: 100 });
-        setProjectName(sanitizedName || "Untitled Project");
-      }
-      // Load project data would require loading media items first
-      // For now, just set the project name
-      console.log("Loading project:", projectId);
+      // Restore project from saved data
+      const restoreProject = async () => {
+        setIsProcessing(true);
+        setLoadMsg("Loading project...");
+        try {
+          // Load full project data from Supabase if not provided
+          let pData = projectData;
+          if (!pData && user?.id) {
+            pData = await loadProject(projectId, user.id);
+          }
+          if (!pData) { notify("error", "Could not load project data"); return; }
+
+          const pName = projectName || pData.name || "Untitled Project";
+          setProjectName(sanitizeTextInput(pName, { maxLength: 100 }) || "Untitled Project");
+          setProjectId(projectId);
+          if (pData.resolution) setProjectResolution(pData.resolution);
+
+          // Restore clips from project_data
+          const savedClips = pData.project_data?.clips || pData.clips || [];
+          if (savedClips.length === 0) {
+            notify("info", `Loaded project "${pName}" (no clips)`);
+            return;
+          }
+
+          // Group clips by mediaId to avoid re-downloading the same media
+          const mediaMap = new Map(); // mediaId → { blobUrl, file }
+          const restoredClips = [];
+          let loadedCount = 0;
+
+          for (const clipData of savedClips) {
+            setLoadSub(`Restoring clip ${++loadedCount} of ${savedClips.length}`);
+
+            // Try to get media for this clip
+            let blobUrl = null;
+            let file = null;
+
+            if (clipData.mediaId && mediaMap.has(clipData.mediaId)) {
+              // Already loaded this media
+              const cached = mediaMap.get(clipData.mediaId);
+              blobUrl = cached.blobUrl;
+              file = cached.file;
+            } else if (clipData.storagePath && user?.id) {
+              // Download from Supabase storage
+              try {
+                const url = await getProjectMediaUrl(clipData.storagePath);
+                const response = await fetch(url);
+                if (response.ok) {
+                  const blob = await response.blob();
+                  file = new File([blob], clipData.name || 'media', { type: blob.type });
+                  blobUrl = URL.createObjectURL(blob);
+                }
+              } catch (e) {
+                console.warn("Failed to download media:", clipData.storagePath, e);
+              }
+            }
+
+            if (blobUrl && clipData.mediaId) {
+              mediaMap.set(clipData.mediaId, { blobUrl, file });
+            }
+
+            // Reconstruct clip with all saved properties + restored media
+            restoredClips.push({
+              ...DEFAULT_CLIP_PROPERTIES,
+              ...clipData,
+              file: file || null,
+              blobUrl: blobUrl || null,
+              thumbnail: null,
+            });
+          }
+
+          // Reconstruct media items from unique media references
+          const newMediaItems = [];
+          const seenMedia = new Set();
+          for (const clip of restoredClips) {
+            if (clip.mediaId && !seenMedia.has(clip.mediaId) && clip.blobUrl) {
+              seenMedia.add(clip.mediaId);
+              newMediaItems.push({
+                id: clip.mediaId,
+                name: clip.name,
+                file: clip.file,
+                blobUrl: clip.blobUrl,
+                thumbnail: null,
+                duration: clip.duration,
+                width: 0,
+                height: 0,
+                type: clip.type || 'video',
+                isProcessing: false,
+              });
+            }
+          }
+
+          setMediaItems(newMediaItems);
+          setClips(restoredClips);
+          notify("success", `Loaded "${pName}" (${restoredClips.length} clips)`);
+        } catch (e) {
+          console.error("Project load error:", e);
+          notify("error", "Failed to load project");
+        } finally {
+          setIsProcessing(false);
+          setLoadMsg("");
+          setLoadSub("");
+        }
+      };
+      restoreProject();
     }
   }, []); // eslint-disable-line
 
@@ -1164,6 +1289,7 @@ const VideoEditor = () => {
           <Timeline
             clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
             onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
+            onAddClip={addClip} onRippleDelete={rippleDelete}
             currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
             isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
             mediaItems={mediaItems} onAddToTimeline={addToTimeline}

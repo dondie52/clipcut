@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
-import { listProjects as listCloudProjects, deleteProject as deleteCloudProject } from "../services/projectService";
+import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject } from "../services/projectService";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
@@ -468,6 +468,8 @@ const Dashboard = () => {
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
 
   // Derived state
   const displayName = user?.user_metadata?.full_name
@@ -559,6 +561,27 @@ const Dashboard = () => {
       }
     }
   }, [user?.id]);
+
+  const handleStartRename = useCallback((e, project) => {
+    e.stopPropagation();
+    setRenamingId(project.id);
+    setRenameValue(project.name);
+  }, []);
+
+  const handleFinishRename = useCallback(async (projectId) => {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === projects.find(p => p.id === projectId)?.name) {
+      setRenamingId(null);
+      return;
+    }
+    try {
+      await updateCloudProject(projectId, user?.id, { name: trimmed });
+      setProjects(prev => prev.map(p => p.id === projectId ? { ...p, name: trimmed } : p));
+    } catch (err) {
+      logger.error("Failed to rename project", { error: err });
+    }
+    setRenamingId(null);
+  }, [renameValue, projects, user?.id]);
 
   const sanitizedQuery = sanitizeSearchQuery(searchQuery);
   const filteredProjects = projects.filter((p) =>
@@ -741,7 +764,33 @@ const Dashboard = () => {
                         </button>
                       </div>
                       <div className="project-info">
-                        <p className="name">{project.name}</p>
+                        {renamingId === project.id ? (
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onBlur={() => handleFinishRename(project.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleFinishRename(project.id);
+                              if (e.key === 'Escape') setRenamingId(null);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              background: 'rgba(117,170,219,0.1)', border: '1px solid rgba(117,170,219,0.3)',
+                              borderRadius: '4px', padding: '2px 6px', color: 'white',
+                              fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
+                              width: '100%', outline: 'none',
+                            }}
+                          />
+                        ) : (
+                          <p
+                            className="name"
+                            onDoubleClick={(e) => handleStartRename(e, project)}
+                            title="Double-click to rename"
+                          >
+                            {project.name}
+                          </p>
+                        )}
                         <p className="meta">
                           {project.resolution} · {project.duration || "0:00"} · {relativeTime(project.savedAt)}
                         </p>

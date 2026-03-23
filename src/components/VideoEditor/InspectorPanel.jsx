@@ -1,7 +1,7 @@
 import { useCallback, useRef, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
+import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, TRANSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { Section, Row, Slider, SmallInput, Hr, EffectCard, ColorPicker } from './InspectorComponents';
 
 /* ========== CSS ANIMATIONS ========== */
@@ -596,6 +596,43 @@ const InspectorPanel = ({
                       <Icon i="info" s={12} c="#75aadb" />
                       Text rendered during export via FFmpeg
                     </div>
+                  )}
+                </Section>
+
+                <Hr />
+
+                {/* Transition Section */}
+                <Section t="Transition (to next clip)">
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px' }}>
+                    {TRANSITION_PRESETS.map(t => (
+                      <button
+                        key={t.label}
+                        onClick={() => update('transition', t.value)}
+                        title={t.label}
+                        style={{
+                          background: cp(selectedClip, 'transition') === t.value ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
+                          border: cp(selectedClip, 'transition') === t.value ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '4px', padding: '6px 4px', cursor: 'pointer',
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
+                          fontSize: '9px', color: cp(selectedClip, 'transition') === t.value ? '#75aadb' : '#64748b',
+                        }}
+                      >
+                        <Icon i={t.icon} s={14} c={cp(selectedClip, 'transition') === t.value ? '#75aadb' : '#64748b'} />
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                  {cp(selectedClip, 'transition') && (
+                    <Slider
+                      l="Duration"
+                      value={Math.round((cp(selectedClip, 'transitionDuration') || 1) * 10)}
+                      onChange={(val) => update('transitionDuration', val / 10)}
+                      min={2}
+                      max={30}
+                      defaultValue={10}
+                      unit="s"
+                      v={`${(cp(selectedClip, 'transitionDuration') || 1).toFixed(1)}s`}
+                    />
                   )}
                 </Section>
               </>

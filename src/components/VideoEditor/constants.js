@@ -268,9 +268,13 @@ export const DEFAULT_CLIP_PROPERTIES = {
   effects: [],
   fadeIn: 0,
   fadeOut: 0,
+  track: 0,  // 0 = V1/A1 (default), 1 = V2/A2, 2 = V3/A3
   trimStart: 0,
   trimEnd: 0,
   colorGrading: { shadows: '#1a1a2e', midtones: '#4a4a5e', highlights: '#ffffff' },
+  // Transition (applied between this clip and the next)
+  transition: null,        // null | 'fade' | 'dissolve' | 'wipeleft' etc.
+  transitionDuration: 1.0, // seconds
   // Text overlay
   text: '',
   textColor: '#ffffff',
@@ -307,6 +311,19 @@ export const ANIMATION_PRESETS = [
   { name: 'Fade Out', key: 'fadeOut', value: 1.0 },
   { name: 'Scale Up', key: 'scaleUp', value: true },
   { name: 'Slide Left', key: 'slideLeft', value: true },
+];
+
+/* ========== TRANSITION PRESETS ========== */
+export const TRANSITION_PRESETS = [
+  { value: null, label: 'None', icon: 'block' },
+  { value: 'fade', label: 'Fade', icon: 'gradient' },
+  { value: 'fadeblack', label: 'Fade Black', icon: 'brightness_1' },
+  { value: 'fadewhite', label: 'Fade White', icon: 'brightness_7' },
+  { value: 'dissolve', label: 'Dissolve', icon: 'blur_on' },
+  { value: 'wipeleft', label: 'Wipe Left', icon: 'arrow_back' },
+  { value: 'wiperight', label: 'Wipe Right', icon: 'arrow_forward' },
+  { value: 'slideup', label: 'Slide Up', icon: 'arrow_upward' },
+  { value: 'slidedown', label: 'Slide Down', icon: 'arrow_downward' },
 ];
 
 /* ========== TEXT POSITION PRESETS ========== */

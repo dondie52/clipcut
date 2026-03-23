@@ -464,7 +464,7 @@ TlBtn.displayName = "TlBtn";
 /* ========== MAIN TIMELINE COMPONENT ========== */
 const Timeline = ({
   clips = [], selectedClipId, onSelectClip, onUpdateClip,
-  onDeleteClip, onSplitClip,
+  onDeleteClip, onSplitClip, onAddClip, onRippleDelete,
   currentTime = 0, onSeek, totalDuration = 30, isProcessing = false,
   canUndo = false, canRedo = false, onUndo, onRedo,
   mediaItems = [], onAddToTimeline,
@@ -528,8 +528,10 @@ const Timeline = ({
   pxPerSecRef.current = pxPerSec;
 
   const tlWidth = useMemo(() => Math.max(totalDuration * pxPerSec + 200, 900), [totalDuration, pxPerSec]);
-  const videoClips = useMemo(() => clips.filter((c) => c.type !== "audio"), [clips]);
-  const audioClips = useMemo(() => clips.filter((c) => c.type === "audio"), [clips]);
+  const videoClips = useMemo(() => clips.filter((c) => c.type !== "audio" && (c.track || 0) === 0), [clips]);
+  const videoClips2 = useMemo(() => clips.filter((c) => c.type !== "audio" && c.track === 1), [clips]);
+  const audioClips = useMemo(() => clips.filter((c) => c.type === "audio" && (c.track || 0) === 0), [clips]);
+  const audioClips2 = useMemo(() => clips.filter((c) => c.type === "audio" && c.track === 1), [clips]);
   const timeMarkers = useMemo(() => generateMarkers(totalDuration, pxPerSec), [totalDuration, pxPerSec]);
 
   // ── Sync playhead from currentTime prop ──────────────────────
@@ -922,6 +924,65 @@ const Timeline = ({
     if (selectedClipId && !isProcessing) onDeleteClip?.(selectedClipId);
   }, [selectedClipId, isProcessing, onDeleteClip]);
 
+  // ── Clipboard (copy/paste/duplicate) ──────────────────────
+  const clipboardRef = useRef(null);
+
+  const handleCopy = useCallback(() => {
+    if (!selectedClipId) return;
+    const clip = clips.find(c => c.id === selectedClipId);
+    if (clip) {
+      // Store a copy of the clip properties (excluding binary refs)
+      const { file, blobUrl, thumbnail, ...data } = clip;
+      clipboardRef.current = { ...data, _sourceFile: file, _sourceBlobUrl: blobUrl };
+    }
+  }, [selectedClipId, clips]);
+
+  const handlePaste = useCallback(() => {
+    const src = clipboardRef.current;
+    if (!src || !onUpdateClip) return;
+    // Place pasted clip at playhead position
+    const newId = `clip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const pasted = {
+      ...src,
+      id: newId,
+      startTime: playheadPos,
+      file: src._sourceFile || null,
+      blobUrl: src._sourceBlobUrl || null,
+      thumbnail: null,
+    };
+    delete pasted._sourceFile;
+    delete pasted._sourceBlobUrl;
+    // Use the onAddClip prop or fallback to manual approach via parent
+    onAddClip?.(pasted);
+  }, [playheadPos, onAddClip]);
+
+  const handleDuplicate = useCallback(() => {
+    if (!selectedClipId) return;
+    const clip = clips.find(c => c.id === selectedClipId);
+    if (!clip) return;
+    const newId = `clip-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const dup = {
+      ...clip,
+      id: newId,
+      name: `${clip.name} (copy)`,
+      startTime: clip.startTime + clip.duration, // Place right after original
+    };
+    onAddClip?.(dup);
+  }, [selectedClipId, clips, onAddClip]);
+
+  const handleRippleDelete = useCallback(() => {
+    if (!selectedClipId || isProcessing) return;
+    const clip = clips.find(c => c.id === selectedClipId);
+    if (!clip) return;
+    const gap = clip.duration;
+    const clipEnd = clip.startTime + clip.duration;
+    // Delete the clip, then shift all later clips left to fill the gap
+    const updated = clips
+      .filter(c => c.id !== selectedClipId)
+      .map(c => c.startTime >= clipEnd ? { ...c, startTime: Math.max(0, c.startTime - gap) } : c);
+    onRippleDelete?.(updated);
+  }, [selectedClipId, isProcessing, clips, onRippleDelete]);
+
   // ────────────────────────────────────────────────────────────
   //  KEYBOARD SHORTCUTS
   // ────────────────────────────────────────────────────────────
@@ -947,8 +1008,17 @@ const Timeline = ({
         case "Home": e.preventDefault(); setPlayheadPos(0); onSeek?.(0); break;
         case "End": e.preventDefault(); setPlayheadPos(totalDuration); onSeek?.(totalDuration); break;
         case "Escape": onSelectClip?.(null); break;
-        case "v": case "V": if (!e.ctrlKey && !e.metaKey) setActiveTool("select"); break;
-        case "c": case "C": if (!e.ctrlKey && !e.metaKey) setActiveTool("cut"); break;
+        case "v": case "V":
+          if (e.ctrlKey || e.metaKey) { e.preventDefault(); handlePaste(); }
+          else setActiveTool("select");
+          break;
+        case "c": case "C":
+          if (e.ctrlKey || e.metaKey) { e.preventDefault(); handleCopy(); }
+          else setActiveTool("cut");
+          break;
+        case "d": case "D":
+          if ((e.ctrlKey || e.metaKey) && selectedClipId) { e.preventDefault(); handleDuplicate(); }
+          break;
         case "=": case "+": e.preventDefault(); setZoom(z => Math.min(100, z + 5)); break;
         case "-": case "_": e.preventDefault(); setZoom(z => Math.max(0, z - 5)); break;
         default: break;
@@ -956,7 +1026,7 @@ const Timeline = ({
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [selectedClipId, isProcessing, playheadPos, totalDuration, onDeleteClip, onSeek, onSelectClip, handleSplit]);
+  }, [selectedClipId, isProcessing, playheadPos, totalDuration, onDeleteClip, onSeek, onSelectClip, handleSplit, handleCopy, handlePaste, handleDuplicate]);
 
   // ── Cleanup on unmount ───────────────────────────────────────
   useEffect(() => () => {
@@ -991,7 +1061,8 @@ const Timeline = ({
           {/* Clip actions */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <TlBtn icon="carpenter" onClick={handleSplit} disabled={!canSplit} label="Split at playhead" shortcut="S" />
-            <TlBtn icon="delete" onClick={handleDelete} disabled={!canDelete} label="Delete selected" shortcut="Del" />
+            <TlBtn icon="content_copy" onClick={handleDuplicate} disabled={!canSplit} label="Duplicate clip" shortcut="Ctrl+D" />
+            <TlBtn icon="delete" onClick={handleRippleDelete} disabled={!canDelete} label="Ripple delete" shortcut="Del" />
           </div>
         </div>
 
@@ -1094,11 +1165,25 @@ const Timeline = ({
             onToggleMute={() => setTrackMutes((p) => ({ ...p, video: !p.video }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, video: !p.video }))}
           />
+          {videoClips2.length > 0 && (
+            <TrackLabel icon="visibility" lockIcon="lock_open" label="V2" trackType="video" height={76}
+              isMuted={trackMutes.video2} isLocked={trackLocks.video2}
+              onToggleMute={() => setTrackMutes((p) => ({ ...p, video2: !p.video2 }))}
+              onToggleLock={() => setTrackLocks((p) => ({ ...p, video2: !p.video2 }))}
+            />
+          )}
           <TrackLabel icon="volume_up" lockIcon="lock_open" label="A1" trackType="audio" height={68}
             isMuted={trackMutes.audio} isLocked={trackLocks.audio}
             onToggleMute={() => setTrackMutes((p) => ({ ...p, audio: !p.audio }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, audio: !p.audio }))}
           />
+          {audioClips2.length > 0 && (
+            <TrackLabel icon="volume_up" lockIcon="lock_open" label="A2" trackType="audio" height={68}
+              isMuted={trackMutes.audio2} isLocked={trackLocks.audio2}
+              onToggleMute={() => setTrackMutes((p) => ({ ...p, audio2: !p.audio2 }))}
+              onToggleLock={() => setTrackLocks((p) => ({ ...p, audio2: !p.audio2 }))}
+            />
+          )}
         </div>
 
         {/* Timeline content (scrollable) */}
@@ -1223,6 +1308,29 @@ const Timeline = ({
               {videoClips.length === 0 && <EmptyTrackPlaceholder type="video" isDragOver={dragOverTrack === "video"} />}
             </div>
 
+            {/* V2 track — shown when clips exist on track 1 */}
+            {videoClips2.length > 0 && (
+              <div style={{
+                height: "68px", position: "relative", marginLeft: "12px", marginBottom: "6px",
+                borderRadius: "6px",
+                background: trackMutes.video2
+                  ? "rgba(117,170,219,0.02)"
+                  : "linear-gradient(180deg, rgba(117,170,219,0.04) 0%, rgba(117,170,219,0.01) 100%)",
+                border: "1px solid rgba(117,170,219,0.04)",
+                opacity: trackMutes.video2 ? 0.35 : 1,
+                transition: "opacity 0.2s ease",
+              }} role="list" aria-label="Video track 2">
+                {videoClips2.map((c) => (
+                  <TimelineClip key={c.id} clip={c} isSelected={selectedClipId === c.id}
+                    pixelsPerSecond={pxPerSec}
+                    onPointerDown={handleClipPointerDown}
+                    onResizeStart={handleResizeStart}
+                    cutMode={activeTool === "cut"}
+                  />
+                ))}
+              </div>
+            )}
+
             {/* Audio track — taller */}
             <div
               onDragOver={(e) => handleDragOver(e, "audio")}
@@ -1251,6 +1359,29 @@ const Timeline = ({
               ))}
               {audioClips.length === 0 && <EmptyTrackPlaceholder type="audio" isDragOver={dragOverTrack === "audio"} />}
             </div>
+
+            {/* A2 track — shown when clips exist on track 1 */}
+            {audioClips2.length > 0 && (
+              <div style={{
+                height: "60px", position: "relative", marginLeft: "12px", marginTop: "6px",
+                borderRadius: "6px",
+                background: trackMutes.audio2
+                  ? "rgba(52,211,153,0.02)"
+                  : "linear-gradient(180deg, rgba(52,211,153,0.04) 0%, rgba(52,211,153,0.01) 100%)",
+                border: "1px solid rgba(52,211,153,0.04)",
+                opacity: trackMutes.audio2 ? 0.35 : 1,
+                transition: "opacity 0.2s ease",
+              }} role="list" aria-label="Audio track 2">
+                {audioClips2.map((c) => (
+                  <TimelineClip key={c.id} clip={c} isSelected={selectedClipId === c.id}
+                    pixelsPerSecond={pxPerSec}
+                    onPointerDown={handleClipPointerDown}
+                    onResizeStart={handleResizeStart}
+                    cutMode={activeTool === "cut"}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
