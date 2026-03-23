@@ -11,6 +11,7 @@ import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage } from '../../utils/errorHandling';
+import { isServerExportAvailable, serverExport } from '../../services/apiService';
 import ErrorBoundary from '../ErrorBoundary';
 import {
   MAX_UNDO_HISTORY,
@@ -777,7 +778,55 @@ const VideoEditor = () => {
     navigate('/settings');
   }, [navigate]);
 
-  // ---- Export ----
+  // ---- Download helper ----
+  const downloadBlob = useCallback((blob, res) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${projectName.replace(/[^a-z0-9]/gi, "_")}_${res}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }, [projectName]);
+
+  // ---- WASM export pipeline (client-side fallback) ----
+  const wasmExport = useCallback(async (vClips, res) => {
+    if (!ffmpeg.isReady) {
+      const initialized = await ffmpeg.initialize();
+      if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
+    }
+
+    // Apply effects to each clip
+    const processedFiles = [];
+    for (let i = 0; i < vClips.length; i++) {
+      setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
+      const processed = await applyClipEffects(vClips[i], i, vClips.length);
+      processedFiles.push(processed);
+    }
+    setLoadSub("");
+
+    let videoFile;
+    if (processedFiles.length === 1) {
+      videoFile = processedFiles[0];
+    } else {
+      setLoadMsg(`Merging ${processedFiles.length} clips...`);
+      videoFile = await ffmpeg.mergeClips(processedFiles);
+    }
+
+    // Mix background music if set
+    if (bgMusic?.file) {
+      setLoadMsg("Mixing background music...");
+      videoFile = await ffmpeg.mixAudio(videoFile, bgMusic.file, bgMusic.volume ?? 0.3);
+    }
+
+    setLoadMsg(`Exporting at ${res}...`);
+    const blob = await ffmpeg.exportVideo(videoFile, res);
+    if (!blob || blob.size === 0) throw new Error("Export produced an empty file.");
+    return blob;
+  }, [ffmpeg, applyClipEffects, bgMusic]);
+
+  // ---- Export (tries server first, falls back to WASM) ----
   const handleExport = useCallback(async (res) => {
     if (clips.length === 0) {
       notify("warning", "No clips to export. Add media to the timeline first.");
@@ -796,48 +845,85 @@ const VideoEditor = () => {
     setLoadMsg("Preparing export...");
 
     try {
-      if (!ffmpeg.isReady) {
-        const initialized = await ffmpeg.initialize();
-        if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
-      }
+      // Check if server-side export is available (fast path)
+      const serverAvailable = await isServerExportAvailable();
 
-      // Apply effects to each clip
-      const processedFiles = [];
-      for (let i = 0; i < vClips.length; i++) {
-        setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
-        const processed = await applyClipEffects(vClips[i], i, vClips.length);
-        processedFiles.push(processed);
-      }
-      setLoadSub("");
+      if (serverAvailable) {
+        // Server export: process clips locally first, then send merged video to server
+        // for final resolution scaling (server's native FFmpeg is much faster)
+        setLoadMsg("Processing clips...");
+        setLoadSub("Server export (fast)");
 
-      let videoFile;
-      if (processedFiles.length === 1) {
-        videoFile = processedFiles[0];
+        if (!ffmpeg.isReady) {
+          const initialized = await ffmpeg.initialize();
+          if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
+        }
+
+        // Apply effects and merge locally (still needed — effects are clip-specific)
+        const processedFiles = [];
+        for (let i = 0; i < vClips.length; i++) {
+          setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
+          const processed = await applyClipEffects(vClips[i], i, vClips.length);
+          processedFiles.push(processed);
+        }
+        setLoadSub("");
+
+        let mergedBlob;
+        if (processedFiles.length === 1) {
+          mergedBlob = processedFiles[0] instanceof Blob ? processedFiles[0] : new Blob([processedFiles[0]], { type: 'video/mp4' });
+        } else {
+          setLoadMsg("Merging clips...");
+          mergedBlob = await ffmpeg.mergeClips(processedFiles);
+        }
+
+        // Ensure we have a Blob
+        if (!(mergedBlob instanceof Blob)) {
+          mergedBlob = new Blob([mergedBlob], { type: 'video/mp4' });
+        }
+
+        setLoadMsg("Uploading to server for fast export...");
+
+        // Collect text overlay info from first clip that has text (for server-side rendering)
+        const textClip = vClips.find(c => c.text?.trim());
+        const options = {};
+        if (bgMusic?.file) {
+          options.audioFile = bgMusic.file;
+          options.audioVolume = bgMusic.volume ?? 0.3;
+        }
+        if (textClip) {
+          options.text = textClip.text;
+          options.textPosition = textClip.textPosition;
+          options.textSize = textClip.textSize;
+          options.textColor = textClip.textColor;
+          options.textBgColor = textClip.textBgColor;
+        }
+
+        try {
+          const blob = await serverExport(mergedBlob, res, options, (pct) => {
+            setLoadMsg(pct < 50 ? "Uploading to server..." : "Server processing...");
+            setLoadSub(`${pct}%`);
+          });
+          setLoadSub("");
+
+          if (!blob || blob.size === 0) throw new Error("Server export returned empty file.");
+          downloadBlob(blob, res);
+          notify("success", `Exported at ${res} (server)`);
+        } catch (serverErr) {
+          // Server failed — fall back to WASM
+          console.warn("Server export failed, falling back to WASM:", serverErr);
+          setLoadMsg("Server unavailable, exporting locally...");
+          setLoadSub("WASM fallback");
+          const blob = await wasmExport(vClips, res);
+          downloadBlob(blob, res);
+          notify("success", `Exported at ${res} (local)`);
+        }
       } else {
-        setLoadMsg(`Merging ${processedFiles.length} clips...`);
-        videoFile = await ffmpeg.mergeClips(processedFiles);
+        // WASM-only export (server unreachable)
+        setLoadSub("Local export");
+        const blob = await wasmExport(vClips, res);
+        downloadBlob(blob, res);
+        notify("success", `Exported at ${res}`);
       }
-
-      // Mix background music if set
-      if (bgMusic?.file) {
-        setLoadMsg("Mixing background music...");
-        videoFile = await ffmpeg.mixAudio(videoFile, bgMusic.file, bgMusic.volume ?? 0.3);
-      }
-
-      setLoadMsg(`Exporting at ${res}...`);
-      const blob = await ffmpeg.exportVideo(videoFile, res);
-
-      if (!blob || blob.size === 0) throw new Error("Export produced an empty file. Please try again.");
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${projectName.replace(/[^a-z0-9]/gi, "_")}_${res}.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 2000);
-      notify("success", `Exported at ${res}`);
     } catch (e) {
       console.error("Export error:", e);
       notify("error", getUserFriendlyMessage(e, 'ffmpeg'));
@@ -847,7 +933,7 @@ const VideoEditor = () => {
       setLoadSub("");
       ffmpeg.resetProgress();
     }
-  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic]);
+  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic, wasmExport, downloadBlob]);
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
