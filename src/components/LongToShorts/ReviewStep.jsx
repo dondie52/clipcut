@@ -27,8 +27,16 @@ function getScoreLabel(score) {
   return 'Low';
 }
 
+const CAPTION_STYLES = [
+  { id: 'bold-center', label: 'Bold Center', icon: 'format_bold', desc: 'Large centered text' },
+  { id: 'lower-third', label: 'Lower Third', icon: 'subtitles', desc: 'Bottom bar overlay' },
+  { id: 'word-highlight', label: 'Word Highlight', icon: 'highlight', desc: 'Highlight word-by-word' },
+  { id: 'none', label: 'No Captions', icon: 'closed_caption_disabled', desc: 'Export without captions' },
+];
+
 export default function ReviewStep({ state, dispatch, videoRef }) {
   const [thumbnails, setThumbnails] = useState({});
+  const [captionStyle, setCaptionStyle] = useState('bold-center');
   const thumbsLoaded = useRef(new Set());
 
   // Clean up preview listeners on unmount
@@ -174,17 +182,34 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
           <span>{state.segments.length} segment{state.segments.length !== 1 ? 's' : ''}</span>
         </div>
 
-        {/* Captions toggle — only shown when transcript words are available */}
+        {/* Caption style selector — shown when transcript words are available */}
         {state.segments.some(s => s.words?.length > 0) && (
-          <label className="lts-captions-toggle">
-            <input
-              type="checkbox"
-              checked={state.captionsEnabled}
-              onChange={(e) => dispatch({ type: 'SET_CAPTIONS', enabled: e.target.checked })}
-            />
-            <span className="mi" style={{ fontSize: 16 }}>subtitles</span>
-            Burn captions into shorts
-          </label>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.5px', color: '#64748b', fontWeight: 600, marginBottom: 8 }}>
+              Caption Style
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {CAPTION_STYLES.map(cs => (
+                <button
+                  key={cs.id}
+                  onClick={() => {
+                    setCaptionStyle(cs.id);
+                    dispatch({ type: 'SET_CAPTIONS', enabled: cs.id !== 'none' });
+                  }}
+                  style={{
+                    padding: '8px 10px', borderRadius: 8, border: captionStyle === cs.id ? '1.5px solid #75AADB' : '1px solid rgba(255,255,255,0.08)',
+                    background: captionStyle === cs.id ? 'rgba(117,170,219,0.12)' : 'rgba(255,255,255,0.02)',
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                    fontFamily: "'Spline Sans', sans-serif", color: captionStyle === cs.id ? '#75AADB' : '#94a3b8',
+                    fontSize: 11, fontWeight: captionStyle === cs.id ? 600 : 400,
+                  }}
+                >
+                  <span className="mi" style={{ fontSize: 14 }}>{cs.icon}</span>
+                  {cs.label}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {state.segments.map((seg) => {
@@ -226,17 +251,38 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
                 </p>
               )}
 
+              {/* Range slider for in/out points */}
+              <div style={{ padding: '4px 0 2px', position: 'relative' }}>
+                <input
+                  type="range"
+                  min={0} max={state.videoDuration} step={0.5}
+                  value={seg.startSeconds}
+                  onChange={(e) => updateSegment(seg.id, { startSeconds: Math.min(Number(e.target.value), seg.endSeconds - 1) })}
+                  style={{ width: '100%', accentColor: '#75AADB', height: 4 }}
+                  title="Start point"
+                />
+                <input
+                  type="range"
+                  min={0} max={state.videoDuration} step={0.5}
+                  value={seg.endSeconds}
+                  onChange={(e) => updateSegment(seg.id, { endSeconds: Math.max(Number(e.target.value), seg.startSeconds + 1) })}
+                  style={{ width: '100%', accentColor: '#4ade80', height: 4, marginTop: -4 }}
+                  title="End point"
+                />
+              </div>
               <div className="lts-segment-time">
                 <input
                   value={formatTime(seg.startSeconds)}
                   onChange={(e) => updateSegment(seg.id, { startSeconds: parseTime(e.target.value) })}
                   title="Start time"
+                  aria-label="Start time"
                 />
                 <span>—</span>
                 <input
                   value={formatTime(seg.endSeconds)}
                   onChange={(e) => updateSegment(seg.id, { endSeconds: parseTime(e.target.value) })}
                   title="End time"
+                  aria-label="End time"
                 />
                 <span className="lts-segment-dur">{dur}s</span>
               </div>

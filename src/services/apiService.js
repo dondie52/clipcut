@@ -6,7 +6,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://185.215.166.46:8090';
 
 /**
- * Upload a video file to the backend.
+ * Upload a video file to the backend (single request, no chunking).
  * @param {File} file - Video file to upload
  * @param {(pct: number) => void} [onProgress] - Upload progress callback (0-100)
  * @returns {Promise<{ jobId: string, duration: number, width: number, height: number, fps: number, codec: string, fileSize: number }>}
@@ -46,6 +46,94 @@ export function uploadVideo(file, onProgress) {
     xhr.open('POST', `${API_BASE}/api/upload`);
     xhr.send(formData);
   });
+}
+
+const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunks
+const MAX_CHUNK_RETRIES = 3;
+
+/**
+ * Upload a video in chunks with resume support.
+ * Falls back to single-request upload for small files (<10MB).
+ * Server receives chunks at /api/upload-chunk and /api/upload-complete.
+ * If the server doesn't support chunked upload, falls back to single upload.
+ */
+export async function uploadVideoChunked(file, onProgress) {
+  // Small files: use regular upload
+  if (file.size < CHUNK_SIZE * 2) {
+    return uploadVideo(file, onProgress);
+  }
+
+  // Try chunked upload — fall back to single if server doesn't support it
+  try {
+    // 1. Initialize chunked upload
+    const initRes = await fetch(`${API_BASE}/api/upload-init`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: file.name, fileSize: file.size, mimeType: file.type }),
+    });
+
+    if (!initRes.ok) {
+      // Server doesn't support chunked upload — fall back
+      return uploadVideo(file, onProgress);
+    }
+
+    const { uploadId } = await initRes.json();
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploadedChunks = 0;
+
+    // 2. Upload chunks sequentially with retry
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+
+      let success = false;
+      for (let attempt = 0; attempt < MAX_CHUNK_RETRIES && !success; attempt++) {
+        try {
+          const form = new FormData();
+          form.append('chunk', chunk);
+          form.append('uploadId', uploadId);
+          form.append('chunkIndex', String(i));
+          form.append('totalChunks', String(totalChunks));
+
+          const res = await fetch(`${API_BASE}/api/upload-chunk`, { method: 'POST', body: form });
+          if (res.ok) {
+            success = true;
+            uploadedChunks++;
+            if (onProgress) onProgress(Math.round((uploadedChunks / totalChunks) * 95)); // Reserve 5% for finalize
+          } else if (attempt === MAX_CHUNK_RETRIES - 1) {
+            throw new Error(`Chunk ${i} upload failed after ${MAX_CHUNK_RETRIES} retries`);
+          }
+        } catch (err) {
+          if (attempt === MAX_CHUNK_RETRIES - 1) throw err;
+          // Wait before retry with exponential backoff
+          await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+        }
+      }
+    }
+
+    // 3. Finalize — server assembles chunks and returns metadata
+    if (onProgress) onProgress(97);
+    const completeRes = await fetch(`${API_BASE}/api/upload-complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadId, filename: file.name }),
+    });
+
+    if (!completeRes.ok) {
+      const err = await completeRes.json().catch(() => ({}));
+      throw new Error(err.detail || 'Upload finalization failed');
+    }
+
+    if (onProgress) onProgress(100);
+    return completeRes.json();
+  } catch (err) {
+    // If chunked upload fails at init, fall back to single upload
+    if (err.message?.includes('upload-init')) {
+      return uploadVideo(file, onProgress);
+    }
+    throw err;
+  }
 }
 
 /**

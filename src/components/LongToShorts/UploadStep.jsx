@@ -1,11 +1,9 @@
 import { useState, useRef, useCallback } from 'react';
-import { uploadVideo, importUrl } from '../../services/apiService';
+import { uploadVideoChunked, importUrl } from '../../services/apiService';
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
 const LARGE_FILE_WARN = 200 * 1024 * 1024; // 200MB
 const ALLOWED_TYPES = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
-const TARGET_MAX_HEIGHT = 720;
-const TARGET_BITRATE = 2_000_000; // 2 Mbps
 
 function formatFileSize(bytes) {
   if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
@@ -19,122 +17,11 @@ function formatDuration(seconds) {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-/**
- * Compress a video using canvas + MediaRecorder.
- * Scales down to 720p max, ~2Mbps bitrate. Returns a WebM blob.
- * @param {File} file
- * @param {(pct: number) => void} onProgress - 0-100
- * @returns {Promise<File>}
- */
-function compressVideo(file, onProgress) {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.src = URL.createObjectURL(file);
-
-    video.onerror = () => {
-      URL.revokeObjectURL(video.src);
-      reject(new Error('Failed to load video for compression'));
-    };
-
-    video.onloadedmetadata = () => {
-      // Calculate target dimensions (max 720p, keep aspect ratio)
-      let w = video.videoWidth;
-      let h = video.videoHeight;
-      if (h > TARGET_MAX_HEIGHT) {
-        const scale = TARGET_MAX_HEIGHT / h;
-        w = Math.round(w * scale);
-        h = TARGET_MAX_HEIGHT;
-      }
-      // Ensure even dimensions (required by some codecs)
-      w = w % 2 === 0 ? w : w + 1;
-      h = h % 2 === 0 ? h : h + 1;
-
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-
-      // Capture canvas stream + audio from video
-      const canvasStream = canvas.captureStream(30);
-      try {
-        const audioCtx = new AudioContext();
-        const source = audioCtx.createMediaElementSource(video);
-        const dest = audioCtx.createMediaStreamDestination();
-        source.connect(dest);
-        source.connect(audioCtx.destination);
-        dest.stream.getAudioTracks().forEach(t => canvasStream.addTrack(t));
-      } catch {
-        // No audio track or AudioContext not supported — continue without audio
-      }
-
-      // Pick a supported MIME type
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
-        ? 'video/webm;codecs=vp9'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
-          ? 'video/webm;codecs=vp8'
-          : 'video/webm';
-
-      const recorder = new MediaRecorder(canvasStream, {
-        mimeType,
-        videoBitsPerSecond: TARGET_BITRATE,
-      });
-
-      const chunks = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-
-      recorder.onstop = () => {
-        URL.revokeObjectURL(video.src);
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const compressed = new File([blob], file.name.replace(/\.[^.]+$/, '.webm'), {
-          type: 'video/webm',
-        });
-        resolve(compressed);
-      };
-
-      recorder.onerror = () => {
-        URL.revokeObjectURL(video.src);
-        reject(new Error('MediaRecorder error during compression'));
-      };
-
-      // Draw frames to canvas while video plays
-      const duration = video.duration;
-      function drawFrame() {
-        if (video.paused || video.ended) return;
-        ctx.drawImage(video, 0, 0, w, h);
-        onProgress(Math.round((video.currentTime / duration) * 100));
-        requestAnimationFrame(drawFrame);
-      }
-
-      video.onended = () => {
-        // Draw final frame and stop recording
-        ctx.drawImage(video, 0, 0, w, h);
-        onProgress(100);
-        recorder.stop();
-      };
-
-      // Start recording, then play the video
-      recorder.start(100); // collect data every 100ms
-      video.play().then(drawFrame).catch(() => {
-        URL.revokeObjectURL(video.src);
-        reject(new Error('Browser blocked video playback for compression'));
-      });
-    };
-  });
-}
-
 export default function UploadStep({ state, dispatch }) {
   const [tab, setTab] = useState('file'); // 'file' | 'url'
   const [dragOver, setDragOver] = useState(false);
-  const [phase, setPhase] = useState('idle'); // idle | compressing | uploading | importing
-  const [compressProgress, setCompressProgress] = useState(0);
+  const [phase, setPhase] = useState('idle'); // idle | uploading | importing
   const [uploadProgress, setUploadProgress] = useState(0);
-  const [compressEnabled, setCompressEnabled] = useState(true);
-  const [compressionSaving, setCompressionSaving] = useState(null); // { original, compressed }
   const [error, setError] = useState(null);
   const [ytUrl, setYtUrl] = useState('');
   const [importedFromUrl, setImportedFromUrl] = useState(false);
@@ -142,7 +29,6 @@ export default function UploadStep({ state, dispatch }) {
 
   const handleFile = useCallback(async (file) => {
     setError(null);
-    setCompressionSaving(null);
 
     if (!file) return;
     if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(mp4|webm|mov|avi|mkv)$/i)) {
@@ -155,28 +41,13 @@ export default function UploadStep({ state, dispatch }) {
     }
 
     const localUrl = URL.createObjectURL(file);
-    let fileToUpload = file;
 
-    // Compress if enabled
-    if (compressEnabled) {
-      setPhase('compressing');
-      setCompressProgress(0);
-      try {
-        const compressed = await compressVideo(file, (pct) => setCompressProgress(pct));
-        setCompressionSaving({ original: file.size, compressed: compressed.size });
-        fileToUpload = compressed;
-      } catch (err) {
-        console.warn('[UploadStep] Compression failed, uploading original:', err.message);
-        // Fall back to original file
-      }
-    }
-
-    // Upload
+    // Upload raw — server handles any compression with native FFmpeg (much faster)
     setPhase('uploading');
     setUploadProgress(0);
 
     try {
-      const result = await uploadVideo(fileToUpload, (pct) => setUploadProgress(pct));
+      const result = await uploadVideoChunked(file, (pct) => setUploadProgress(pct));
 
       dispatch({
         type: 'SET_VIDEO',
@@ -193,7 +64,7 @@ export default function UploadStep({ state, dispatch }) {
     } finally {
       setPhase('idle');
     }
-  }, [dispatch, compressEnabled]);
+  }, [dispatch]);
 
   const handleImportUrl = useCallback(async () => {
     setError(null);
@@ -303,30 +174,19 @@ export default function UploadStep({ state, dispatch }) {
             onChange={onFileChange}
           />
 
-          {phase === 'compressing' ? (
-            <>
-              <div className="lts-analysis-spinner" />
-              <p className="lts-upload-title">Compressing video...</p>
-              <p className="lts-upload-desc">{compressProgress}% — resizing to 720p for faster upload</p>
-              <div className="lts-analysis-progress" style={{ marginTop: 16, maxWidth: 300, margin: '16px auto 0' }}>
-                <div className="lts-analysis-bar" style={{ width: `${compressProgress}%` }} />
-              </div>
-            </>
-          ) : phase === 'uploading' ? (
+          {phase === 'uploading' ? (
             <>
               <div className="lts-analysis-spinner" />
               <p className="lts-upload-title">Uploading video...</p>
               <p className="lts-upload-desc">
-                {uploadProgress}% uploaded
-                {compressionSaving && (
-                  <span style={{ display: 'block', marginTop: 4, color: '#4ade80', fontSize: 11 }}>
-                    Compressed {formatFileSize(compressionSaving.original)} → {formatFileSize(compressionSaving.compressed)}
-                  </span>
-                )}
+                {uploadProgress}% — uploading raw video (server handles processing)
               </p>
               <div className="lts-analysis-progress" style={{ marginTop: 16, maxWidth: 300, margin: '16px auto 0' }}>
                 <div className="lts-analysis-bar" style={{ width: `${uploadProgress}%` }} />
               </div>
+              <p style={{ fontSize: 10, color: '#64748b', marginTop: 8 }}>
+                {file.size > LARGE_FILE_WARN ? 'Large file — upload resumes automatically if interrupted' : 'Chunked upload with auto-resume'}
+              </p>
             </>
           ) : !state.videoFile ? (
             <>
@@ -439,25 +299,6 @@ export default function UploadStep({ state, dispatch }) {
             </>
           )}
         </div>
-      )}
-
-      {/* Compress toggle — only in file tab before a video is selected */}
-      {tab === 'file' && !state.videoFile && !busy && (
-        <label
-          style={{
-            display: 'flex', alignItems: 'center', gap: 8, marginTop: 12,
-            fontSize: 13, fontWeight: 500, color: 'rgba(255,255,255,0.5)',
-            cursor: 'pointer',
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={compressEnabled}
-            onChange={(e) => setCompressEnabled(e.target.checked)}
-            style={{ accentColor: '#75AADB', width: 14, height: 14, cursor: 'pointer' }}
-          />
-          Compress for faster upload
-        </label>
       )}
 
       {/* Clip duration + Analyze — shown whenever a video is ready (file or URL) */}

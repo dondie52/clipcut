@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useMemo } from 'react';
 
 function sanitizeFilename(label) {
   return label
@@ -14,23 +14,46 @@ function buildFilename(result, index) {
   return `clip_${num}_${slug}.mp4`;
 }
 
+function formatDur(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 export default function DoneStep({ state, dispatch, navigate }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  const [copiedId, setCopiedId] = useState(null);
 
+  const validResults = useMemo(() => state.results.filter(r => r.downloadUrl), [state.results]);
+
+  // Analytics summary
+  const analytics = useMemo(() => {
+    const scores = validResults.filter(r => typeof r.score === 'number').map(r => r.score);
+    const durations = state.segments.map(s => (s.endSeconds || 0) - (s.startSeconds || 0));
+    return {
+      totalClips: validResults.length,
+      avgScore: scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
+      bestScore: scores.length > 0 ? Math.max(...scores) : null,
+      totalDuration: durations.reduce((a, b) => a + b, 0),
+      avgDuration: durations.length > 0 ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : 0,
+      viralCount: scores.filter(s => s >= 70).length,
+    };
+  }, [validResults, state.segments]);
+
+  // Download all as individual files (sequential)
   const handleDownloadAll = useCallback(async () => {
-    const valid = state.results.filter(r => r.downloadUrl);
     setDownloading(true);
     setDownloadProgress(0);
 
-    for (let i = 0; i < valid.length; i++) {
+    for (let i = 0; i < validResults.length; i++) {
       try {
-        const res = await fetch(valid[i].downloadUrl);
+        const res = await fetch(validResults[i].downloadUrl);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = buildFilename(valid[i], i);
+        a.download = buildFilename(validResults[i], i);
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -42,7 +65,27 @@ export default function DoneStep({ state, dispatch, navigate }) {
     }
 
     setTimeout(() => setDownloading(false), 800);
-  }, [state.results]);
+  }, [validResults]);
+
+  // Share a clip using Web Share API
+  const handleShare = useCallback(async (result, index) => {
+    const filename = buildFilename(result, index);
+    try {
+      const res = await fetch(result.downloadUrl);
+      const blob = await res.blob();
+      const file = new File([blob], filename, { type: 'video/mp4' });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: result.hookTitle || result.label, files: [file] });
+        return;
+      }
+    } catch { /* share failed or not supported */ }
+    // Fallback: copy download URL
+    try {
+      await navigator.clipboard.writeText(result.downloadUrl);
+      setCopiedId(result.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch { /* clipboard not available */ }
+  }, []);
 
   const handleSendToEditor = useCallback(async (result, index) => {
     try {
@@ -58,8 +101,6 @@ export default function DoneStep({ state, dispatch, navigate }) {
   const handleStartOver = useCallback(() => {
     dispatch({ type: 'RESET' });
   }, [dispatch]);
-
-  const validResults = state.results.filter(r => r.downloadUrl);
 
   if (validResults.length === 0) {
     return (
@@ -80,6 +121,40 @@ export default function DoneStep({ state, dispatch, navigate }) {
     <div className="lts-done">
       <p className="lts-done-title">Your shorts are ready!</p>
       <p className="lts-done-sub">{validResults.length} vertical short{validResults.length !== 1 ? 's' : ''} created</p>
+
+      {/* Analytics summary */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 10,
+        margin: '16px 0', padding: 14, borderRadius: 10,
+        background: 'rgba(117,170,219,0.06)', border: '1px solid rgba(117,170,219,0.12)',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>{analytics.totalClips}</div>
+          <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Clips</div>
+        </div>
+        {analytics.avgScore !== null && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: analytics.avgScore >= 70 ? '#4ade80' : analytics.avgScore >= 40 ? '#fbbf24' : '#f87171' }}>
+              {analytics.avgScore}
+            </div>
+            <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Avg Score</div>
+          </div>
+        )}
+        {analytics.viralCount > 0 && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#4ade80' }}>{analytics.viralCount}</div>
+            <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Viral</div>
+          </div>
+        )}
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>{formatDur(analytics.totalDuration)}</div>
+          <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#f1f5f9' }}>{analytics.avgDuration}s</div>
+          <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Avg Clip</div>
+        </div>
+      </div>
 
       <div className="lts-done-grid">
         {validResults.map((result, i) => (
@@ -107,6 +182,10 @@ export default function DoneStep({ state, dispatch, navigate }) {
                   <span className="mi" style={{ fontSize: 14 }}>download</span>
                   Download
                 </a>
+                <button className="lts-btn-secondary" onClick={() => handleShare(result, i)}>
+                  <span className="mi" style={{ fontSize: 14 }}>{copiedId === result.id ? 'check' : 'share'}</span>
+                  {copiedId === result.id ? 'Copied!' : 'Share'}
+                </button>
                 <button className="lts-btn-secondary" onClick={() => handleSendToEditor(result, i)}>
                   <span className="mi" style={{ fontSize: 14 }}>movie_edit</span>
                   Edit
