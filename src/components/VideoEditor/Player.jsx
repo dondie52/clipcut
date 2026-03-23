@@ -261,14 +261,8 @@ const Player = ({
   onTimeUpdate, onDurationChange, onEnded, onSeek,
   onVideoError = null,
   clipProperties = null,
-  nextClipSrc = null, nextClipSeekTo = 0,
 }) => {
-  // Dual video elements for seamless clip transitions
-  const videoRefA = useRef(null);
-  const videoRefB = useRef(null);
-  const [activeElement, setActiveElement] = useState('A'); // which element is currently visible
-  const activeElementRef = useRef('A');
-  const videoRef = useRef(null); // always points to active element
+  const videoRef = useRef(null);
   const containerRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
   const [dDur, setDDur] = useState(duration);
@@ -279,12 +273,6 @@ const Player = ({
   const [buffered, setBuffered] = useState(0);
   const [isPiP, setIsPiP] = useState(false);
   const [videoError, setVideoError] = useState(null);
-
-  // Keep videoRef pointing to the active element
-  useEffect(() => {
-    activeElementRef.current = activeElement;
-    videoRef.current = activeElement === 'A' ? videoRefA.current : videoRefB.current;
-  }, [activeElement]);
 
   // State machine for video element lifecycle
   const videoStateRef = useRef('idle'); // 'idle' | 'loading' | 'ready' | 'playing' | 'paused'
@@ -423,7 +411,7 @@ const Player = ({
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoSrc, isPlaying, programmaticPause, activeElement]);
+  }, [videoSrc, isPlaying, programmaticPause]);
 
   // ---- Seek video when paused (scrub, timeline click) ----
   useEffect(() => {
@@ -455,38 +443,6 @@ const Player = ({
     v.addEventListener("pause", handleBrowserPause);
     return () => v.removeEventListener("pause", handleBrowserPause);
   }, [videoSrc, onPlayPause]);
-
-  // ---- Preload next clip into standby video element ----
-  useEffect(() => {
-    if (!nextClipSrc || !isPlaying) return;
-    const standby = activeElement === 'A' ? videoRefB.current : videoRefA.current;
-    if (!standby) return;
-    // Only set src if it changed
-    if (standby.src !== nextClipSrc && standby.getAttribute('data-preload-src') !== nextClipSrc) {
-      standby.setAttribute('data-preload-src', nextClipSrc);
-      standby.src = nextClipSrc;
-      standby.currentTime = nextClipSeekTo;
-      standby.preload = 'auto';
-    }
-  }, [nextClipSrc, nextClipSeekTo, isPlaying, activeElement]);
-
-  // ---- Swap active/standby on source change (if standby is preloaded) ----
-  useEffect(() => {
-    if (!videoSrc) return;
-    const standby = activeElement === 'A' ? videoRefB.current : videoRefA.current;
-    if (standby && standby.getAttribute('data-preload-src') === videoSrc && standby.readyState >= 2) {
-      // Standby has this source preloaded — swap!
-      const prevActive = activeElement;
-      const nextActive = prevActive === 'A' ? 'B' : 'A';
-      setActiveElement(nextActive);
-      // Clean up old active element
-      const oldActive = prevActive === 'A' ? videoRefA.current : videoRefB.current;
-      if (oldActive) {
-        programmaticPause(oldActive);
-        oldActive.removeAttribute('data-preload-src');
-      }
-    }
-  }, [videoSrc, activeElement, programmaticPause]);
 
   useEffect(() => { if (videoRef.current) { videoRef.current.volume = volume; videoRef.current.muted = muted; } }, [volume, muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = speed; }, [speed]);
@@ -761,35 +717,18 @@ const Player = ({
                   </div>
                 ) : (
                   <>
-                    {/* Dual video elements for seamless clip transitions */}
                     <video
-                      ref={videoRefA}
-                      src={activeElement === 'A' ? videoSrc : undefined}
+                      ref={videoRef}
+                      src={videoSrc}
                       preload="auto"
                       playsInline
-                      onTimeUpdate={activeElement === 'A' ? handleTimeUpdate : undefined}
-                      onLoadedMetadata={activeElement === 'A' ? handleMeta : undefined}
-                      onEnded={activeElement === 'A' ? handleEnded : undefined}
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={handleMeta}
+                      onEnded={handleEnded}
                       style={{
                         position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
                         objectFit: fitStyles[fitMode],
-                        zIndex: activeElement === 'A' ? 1 : 0,
-                        ...(activeElement === 'A' ? videoPreviewStyle : {}),
-                      }}
-                    />
-                    <video
-                      ref={videoRefB}
-                      src={activeElement === 'B' ? videoSrc : undefined}
-                      preload="auto"
-                      playsInline
-                      onTimeUpdate={activeElement === 'B' ? handleTimeUpdate : undefined}
-                      onLoadedMetadata={activeElement === 'B' ? handleMeta : undefined}
-                      onEnded={activeElement === 'B' ? handleEnded : undefined}
-                      style={{
-                        position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                        objectFit: fitStyles[fitMode],
-                        zIndex: activeElement === 'B' ? 1 : 0,
-                        ...(activeElement === 'B' ? videoPreviewStyle : {}),
+                        ...videoPreviewStyle,
                       }}
                     />
                     {/* Center play/pause overlay */}
