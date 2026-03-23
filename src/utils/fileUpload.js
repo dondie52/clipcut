@@ -1,278 +1,142 @@
 /**
- * Chunked File Upload Utility
- * Handles large file uploads with chunking, resume capability, and progress tracking
+ * File Upload Utility
+ * Handles file uploads to Supabase Storage with real progress tracking and retry.
+ *
+ * Uses XHR directly against the Supabase Storage REST API instead of the
+ * supabase-js client, because fetch (used internally by supabase-js) has no
+ * upload progress events. XHR fires xhr.upload.onprogress with real byte counts.
  */
 
 import { supabase, isSupabaseConfigured } from "../supabase/supabaseClient";
 
-/**
- * Configuration for chunked uploads
- */
-const CHUNK_CONFIG = {
-  // Chunk size: 5MB (Supabase recommended max)
-  CHUNK_SIZE: 5 * 1024 * 1024,
-  // Threshold for chunked upload: 10MB
-  CHUNK_THRESHOLD: 10 * 1024 * 1024,
-  // Maximum retries per chunk
+const UPLOAD_CONFIG = {
   MAX_RETRIES: 3,
-  // Retry delay in ms (exponential backoff)
-  RETRY_DELAY: 1000,
-  // Concurrent chunk uploads (Supabase doesn't support this well, so keep at 1)
-  CONCURRENT_UPLOADS: 1,
+  RETRY_DELAY: 1000, // ms, doubled on each retry (exponential backoff)
 };
 
 /**
- * Upload state storage key prefix
+ * Upload a file to Supabase Storage via XHR.
+ * Fires real upload progress events and supports AbortSignal cancellation.
+ *
+ * @param {File|Blob} file
+ * @param {string} bucket - Supabase storage bucket name
+ * @param {string} path - Storage path (e.g. "userId/projectId/video.mp4")
+ * @param {Function} onProgress - Called with 0-100
+ * @param {AbortSignal|null} signal
+ * @returns {Promise<{path: string, url: string}>}
  */
-const UPLOAD_STATE_KEY = 'clipcut_upload_';
+async function uploadWithXHR(file, bucket, path, onProgress, signal) {
+  // Prefer session token for authenticated uploads, fall back to anon key
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-/**
- * Get stored upload state for resumable uploads
- * @param {string} fileId - Unique file identifier
- * @returns {Object|null} Stored upload state
- */
-function getUploadState(fileId) {
-  try {
-    const state = localStorage.getItem(UPLOAD_STATE_KEY + fileId);
-    return state ? JSON.parse(state) : null;
-  } catch (error) {
-    return null;
-  }
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  // Preserve path slashes; encode each segment individually
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `${supabaseUrl}/storage/v1/object/${bucket}/${encodedPath}`;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    // Wire AbortSignal → xhr.abort()
+    const onAbort = () => xhr.abort();
+    signal?.addEventListener('abort', onAbort);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      signal?.removeEventListener('abort', onAbort);
+      if (xhr.status === 200 || xhr.status === 201) {
+        const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(path);
+        onProgress(100);
+        resolve({ path, url: urlData?.publicUrl ?? '' });
+      } else {
+        let message = `Upload failed: HTTP ${xhr.status}`;
+        try {
+          const body = JSON.parse(xhr.responseText);
+          if (body.message) message = body.message;
+          else if (body.error) message = body.error;
+        } catch { /* use default */ }
+        reject(new Error(message));
+      }
+    };
+
+    xhr.onerror = () => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error('Upload failed — check your connection'));
+    };
+
+    xhr.onabort = () => {
+      signal?.removeEventListener('abort', onAbort);
+      reject(new DOMException('Upload aborted', 'AbortError'));
+    };
+
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    xhr.setRequestHeader('x-upsert', 'true');
+    if (file.type) {
+      xhr.setRequestHeader('Content-Type', file.type);
+    }
+    xhr.send(file);
+  });
 }
 
 /**
- * Save upload state for resume capability
- * @param {string} fileId - Unique file identifier
- * @param {Object} state - Upload state to save
- */
-function saveUploadState(fileId, state) {
-  try {
-    localStorage.setItem(UPLOAD_STATE_KEY + fileId, JSON.stringify(state));
-  } catch (error) {
-    console.warn('[Upload] Failed to save upload state:', error);
-  }
-}
-
-/**
- * Clear upload state after completion
- * @param {string} fileId - Unique file identifier
- */
-function clearUploadState(fileId) {
-  try {
-    localStorage.removeItem(UPLOAD_STATE_KEY + fileId);
-  } catch (error) {
-    // Ignore
-  }
-}
-
-/**
- * Generate a unique file ID for tracking uploads
- * @param {File} file - File to generate ID for
- * @returns {string} Unique file ID
- */
-function generateFileId(file) {
-  return `${file.name}_${file.size}_${file.lastModified}`;
-}
-
-/**
- * Upload a file with chunking and resume support
+ * Upload a file with progress tracking, retry, and cancellation support.
+ *
  * @param {File} file - File to upload
  * @param {string} bucket - Supabase storage bucket
  * @param {string} path - Storage path for the file
  * @param {Object} options - Upload options
  * @param {Function} options.onProgress - Progress callback (0-100)
  * @param {AbortSignal} options.signal - AbortSignal for cancellation
- * @param {boolean} options.resumable - Enable resume support (default: true)
  * @returns {Promise<{path: string, url: string}>} Upload result
  */
 export async function uploadFile(file, bucket, path, options = {}) {
   const {
     onProgress = () => {},
     signal = null,
-    resumable = true,
   } = options;
 
   if (!isSupabaseConfigured()) {
     throw new Error('Supabase is not configured');
   }
 
-  // Check if file is small enough for direct upload
-  if (file.size < CHUNK_CONFIG.CHUNK_THRESHOLD) {
-    return uploadDirect(file, bucket, path, onProgress, signal);
-  }
-
-  // Use chunked upload for large files
-  return uploadChunked(file, bucket, path, onProgress, signal, resumable);
-}
-
-/**
- * Direct upload for small files
- */
-async function uploadDirect(file, bucket, path, onProgress, signal) {
-  // Check for abort
-  if (signal?.aborted) {
-    throw new DOMException('Upload aborted', 'AbortError');
-  }
-
   onProgress(0);
 
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: true,
-    });
-
-  if (error) {
-    throw new Error(`Upload failed: ${error.message}`);
-  }
-
-  onProgress(100);
-
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(path);
-
-  return {
-    path: data.path,
-    url: urlData?.publicUrl || '',
-  };
-}
-
-/**
- * Chunked upload for large files
- */
-async function uploadChunked(file, bucket, path, onProgress, signal, resumable) {
-  const fileId = generateFileId(file);
-  const totalChunks = Math.ceil(file.size / CHUNK_CONFIG.CHUNK_SIZE);
-  
-  // Check for existing upload state (resume support)
-  let startChunk = 0;
-  if (resumable) {
-    const savedState = getUploadState(fileId);
-    if (savedState && savedState.path === path && savedState.totalChunks === totalChunks) {
-      startChunk = savedState.completedChunks;
-      console.log(`[Upload] Resuming upload from chunk ${startChunk}/${totalChunks}`);
-    }
-  }
-
-  const uploadedParts = [];
-  
-  for (let chunkIndex = startChunk; chunkIndex < totalChunks; chunkIndex++) {
-    // Check for abort
+  let lastError;
+  for (let attempt = 0; attempt < UPLOAD_CONFIG.MAX_RETRIES; attempt++) {
     if (signal?.aborted) {
       throw new DOMException('Upload aborted', 'AbortError');
     }
 
-    const start = chunkIndex * CHUNK_CONFIG.CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_CONFIG.CHUNK_SIZE, file.size);
-    const chunk = file.slice(start, end);
-    
-    // Upload chunk with retry
-    let lastError = null;
-    for (let retry = 0; retry < CHUNK_CONFIG.MAX_RETRIES; retry++) {
-      try {
-        const chunkPath = `${path}.part${chunkIndex}`;
-        
-        const { data, error } = await supabase.storage
-          .from(bucket)
-          .upload(chunkPath, chunk, {
-            cacheControl: '3600',
-            upsert: true,
-          });
-
-        if (error) {
-          throw error;
-        }
-
-        uploadedParts.push(chunkPath);
-        break;
-      } catch (error) {
-        lastError = error;
-        if (retry < CHUNK_CONFIG.MAX_RETRIES - 1) {
-          // Exponential backoff
-          const delay = CHUNK_CONFIG.RETRY_DELAY * Math.pow(2, retry);
-          await new Promise(resolve => setTimeout(resolve, delay));
-        }
+    try {
+      return await uploadWithXHR(file, bucket, path, onProgress, signal);
+    } catch (error) {
+      if (error.name === 'AbortError') throw error;
+      lastError = error;
+      if (attempt < UPLOAD_CONFIG.MAX_RETRIES - 1) {
+        const delay = UPLOAD_CONFIG.RETRY_DELAY * Math.pow(2, attempt);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        onProgress(0); // reset progress bar for retry
       }
     }
-
-    if (lastError && uploadedParts.length <= chunkIndex) {
-      throw new Error(`Chunk ${chunkIndex} failed after ${CHUNK_CONFIG.MAX_RETRIES} retries: ${lastError.message}`);
-    }
-
-    // Update progress
-    const progress = Math.round(((chunkIndex + 1) / totalChunks) * 90); // Leave 10% for finalization
-    onProgress(progress);
-
-    // Save state for resume
-    if (resumable) {
-      saveUploadState(fileId, {
-        path,
-        totalChunks,
-        completedChunks: chunkIndex + 1,
-        uploadedParts,
-      });
-    }
   }
 
-  // For Supabase, we need to concatenate chunks into final file
-  // Since Supabase doesn't support multipart uploads, we'll download and re-upload
-  // This is a workaround - in production, you might use a server-side solution
-  
-  onProgress(95);
-
-  // Clean up: delete chunk parts
-  // Note: In a real implementation, you'd combine chunks server-side
-  // For now, we'll just upload the final file directly (the chunks were for progress tracking)
-  
-  // Actually, let's use a simpler approach: upload the whole file but track progress
-  // This gives us the progress tracking benefit without the complexity
-  
-  // Clear upload state
-  clearUploadState(fileId);
-
-  // Upload the complete file
-  const { data, error } = await supabase.storage
-    .from(bucket)
-    .upload(path, file, {
-      cacheControl: '3600',
-      upsert: true,
-    });
-
-  if (error) {
-    throw new Error(`Final upload failed: ${error.message}`);
-  }
-
-  // Clean up chunk parts
-  for (const partPath of uploadedParts) {
-    try {
-      await supabase.storage.from(bucket).remove([partPath]);
-    } catch (e) {
-      // Ignore cleanup errors
-    }
-  }
-
-  onProgress(100);
-
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from(bucket)
-    .getPublicUrl(path);
-
-  return {
-    path: data.path,
-    url: urlData?.publicUrl || '',
-  };
+  throw lastError;
 }
 
 /**
- * Upload multiple files with overall progress tracking
+ * Upload multiple files with overall progress tracking.
+ *
  * @param {Array<{file: File, bucket: string, path: string}>} files - Files to upload
  * @param {Object} options - Upload options
- * @param {Function} options.onProgress - Progress callback (0-100)
- * @param {Function} options.onFileComplete - Callback when each file completes
+ * @param {Function} options.onProgress - Progress callback (0-100) for total
+ * @param {Function} options.onFileComplete - Called with (index, result) per file
  * @param {AbortSignal} options.signal - AbortSignal for cancellation
  * @returns {Promise<Array<{path: string, url: string}>>} Upload results
  */
@@ -290,7 +154,6 @@ export async function uploadFiles(files, options = {}) {
   for (let i = 0; i < files.length; i++) {
     const { file, bucket, path } = files[i];
 
-    // Check for abort
     if (signal?.aborted) {
       throw new DOMException('Upload aborted', 'AbortError');
     }
@@ -315,7 +178,8 @@ export async function uploadFiles(files, options = {}) {
 }
 
 /**
- * Compress an image before upload
+ * Compress an image before upload using canvas.
+ *
  * @param {File} imageFile - Image file to compress
  * @param {Object} options - Compression options
  * @param {number} options.maxWidth - Maximum width (default: 1920)
@@ -336,14 +200,13 @@ export async function compressImage(imageFile, options = {}) {
     const ctx = canvas.getContext('2d');
 
     img.onload = () => {
-      // Calculate new dimensions
       let { width, height } = img;
-      
+
       if (width > maxWidth) {
         height = (height * maxWidth) / width;
         width = maxWidth;
       }
-      
+
       if (height > maxHeight) {
         width = (width * maxHeight) / height;
         height = maxHeight;
@@ -352,7 +215,6 @@ export async function compressImage(imageFile, options = {}) {
       canvas.width = width;
       canvas.height = height;
 
-      // Draw and compress
       ctx.drawImage(img, 0, 0, width, height);
 
       canvas.toBlob(
@@ -377,4 +239,3 @@ export async function compressImage(imageFile, options = {}) {
     img.src = URL.createObjectURL(imageFile);
   });
 }
-

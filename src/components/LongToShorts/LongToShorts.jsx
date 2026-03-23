@@ -1,12 +1,11 @@
 /**
  * Long Video to Shorts — AI-powered feature
- * Takes a long video, uses Gemini AI to detect interesting segments,
- * then crops and trims each segment to vertical 9:16 shorts.
+ * Uploads a video to the backend API, which detects interesting segments
+ * and exports vertical 9:16 shorts with server-side FFmpeg processing.
  */
 
-import { useReducer, useCallback, useRef, useState } from 'react';
+import { useReducer, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { trackEvent, analyticsEvents } from '../../utils/analytics';
 import UploadStep from './UploadStep';
 import AnalysisStep from './AnalysisStep';
 import ReviewStep from './ReviewStep';
@@ -19,6 +18,7 @@ const STEPS = ['Upload', 'Analyze', 'Review', 'Export'];
 /* ========== STATE MACHINE ========== */
 const initialState = {
   step: 'UPLOAD',       // UPLOAD | ANALYZING | REVIEW | PROCESSING | DONE
+  jobId: null,          // Backend job ID (set after upload completes)
   videoFile: null,
   videoUrl: null,
   videoDuration: 0,
@@ -27,7 +27,7 @@ const initialState = {
   clipDuration: 30,     // Target clip duration: 15, 30, or 60 seconds
   captionsEnabled: true, // Burn captions into exported shorts
   segments: [],         // Array of { id, startSeconds, endSeconds, label, reason, words? }
-  results: [],          // Array of { id, label, blob, url }
+  results: [],          // Array of { id, label, downloadUrl, thumbnailUrl }
   error: null,
 };
 
@@ -44,6 +44,8 @@ function reducer(state, action) {
         videoHeight: action.height,
         error: null,
       };
+    case 'SET_JOB_ID':
+      return { ...state, jobId: action.jobId };
     case 'SET_CLIP_DURATION':
       return { ...state, clipDuration: action.clipDuration };
     case 'SET_CAPTIONS':
@@ -63,9 +65,8 @@ function reducer(state, action) {
     case 'PROCESSING_ERROR':
       return { ...state, step: 'REVIEW', error: action.error };
     case 'RESET':
-      // Revoke any object URLs
+      // Revoke the local video preview URL
       if (state.videoUrl) URL.revokeObjectURL(state.videoUrl);
-      state.results.forEach(r => { if (r.url) URL.revokeObjectURL(r.url); });
       return { ...initialState };
     default:
       return state;

@@ -261,8 +261,13 @@ const Player = ({
   onTimeUpdate, onDurationChange, onEnded, onSeek,
   onVideoError = null,
   clipProperties = null,
+  nextClipSrc = null, nextClipSeekTo = 0,
 }) => {
-  const videoRef = useRef(null);
+  // Dual video elements for seamless clip transitions
+  const videoRefA = useRef(null);
+  const videoRefB = useRef(null);
+  const activeElementRef = useRef('A'); // which element is currently visible
+  const videoRef = useRef(null); // always points to active element
   const containerRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
   const [dDur, setDDur] = useState(duration);
@@ -274,80 +279,151 @@ const Player = ({
   const [isPiP, setIsPiP] = useState(false);
   const [videoError, setVideoError] = useState(null);
 
-  // Refs for decoupling effects from render-triggered deps
+  // Keep videoRef pointing to the active element
+  useEffect(() => {
+    videoRef.current = activeElementRef.current === 'A' ? videoRefA.current : videoRefB.current;
+  });
+
+  // State machine for video element lifecycle
+  const videoStateRef = useRef('idle'); // 'idle' | 'loading' | 'ready' | 'playing' | 'paused'
   const isPlayingRef = useRef(isPlaying);
   isPlayingRef.current = isPlaying;
   const pendingSeekRef = useRef(null);
+  const suppressPauseSyncRef = useRef(false);
+  const prevVideoSrcRef = useRef(null);
 
-  // ---- Effect 1: Handle video source changes (load, error, initial seek) ----
+  const programmaticPause = useCallback((v) => {
+    if (!v) return;
+    suppressPauseSyncRef.current = true;
+    try {
+      v.pause();
+    } finally {
+      suppressPauseSyncRef.current = false;
+    }
+  }, []);
+
+  const userTogglePlayPause = useCallback(() => {
+    const v = videoRef.current;
+    if (!videoSrc) {
+      onPlayPause?.();
+      return;
+    }
+    if (isPlaying) {
+      programmaticPause(v);
+      onPlayPause?.();
+      return;
+    }
+    const playP = v?.play();
+    onPlayPause?.();
+    if (playP !== undefined) {
+      playP.catch((err) => {
+        if (err.name !== "AbortError" && onPlayPause) onPlayPause();
+      });
+    }
+  }, [videoSrc, isPlaying, onPlayPause, programmaticPause]);
+
+  // ---- Unified source + play/pause effect ----
+  // Handles both source changes and play/pause transitions in one place
+  // to prevent multiple effects from racing on the same video element.
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoSrc) {
       setVideoError(null);
+      videoStateRef.current = 'idle';
       return;
     }
 
-    setVideoError(null);
+    const sourceChanged = videoSrc !== prevVideoSrcRef.current;
+    prevVideoSrcRef.current = videoSrc;
 
-    const onReady = () => {
-      if (v && currentTime >= 0) {
-        v.currentTime = currentTime;
-        setDTime(currentTime);
-      }
-      if (isPlayingRef.current && v.paused) {
-        v.play().catch((err) => {
-          if (err.name !== 'AbortError') console.warn("Video play failed:", err);
-        });
-      } else if (!isPlayingRef.current && !v.paused) {
-        v.pause();
-      }
-    };
+    if (sourceChanged) {
+      // Source changed — need to load new video
+      setVideoError(null);
+      videoStateRef.current = 'loading';
 
-    const onError = (e) => {
-      console.error("Video error:", e);
-      const error = v.error;
-      if (error) {
-        let errorMsg = "Video failed to load";
-        let shouldConvert = false;
-        switch (error.code) {
-          case error.MEDIA_ERR_ABORTED:
-            errorMsg = "Video loading aborted"; break;
-          case error.MEDIA_ERR_NETWORK:
-            errorMsg = "Network error while loading video"; break;
-          case error.MEDIA_ERR_DECODE:
-            errorMsg = "Video decoding error"; shouldConvert = true; break;
-          case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-            errorMsg = "Video format not supported"; shouldConvert = true; break;
+      const onReady = () => {
+        videoStateRef.current = 'ready';
+        if (v && currentTime >= 0) {
+          v.currentTime = currentTime;
+          setDTime(currentTime);
         }
-        setVideoError(errorMsg);
-        if (shouldConvert && onVideoError && videoSrc) onVideoError(videoSrc);
+        if (isPlayingRef.current && v.paused) {
+          videoStateRef.current = 'playing';
+          v.play().catch((err) => {
+            if (err.name !== 'AbortError') console.warn("Video play failed:", err);
+          });
+        } else if (!isPlayingRef.current) {
+          videoStateRef.current = 'paused';
+          if (!v.paused) programmaticPause(v);
+        }
+      };
+
+      const onError = (e) => {
+        console.error("Video error:", e);
+        videoStateRef.current = 'idle';
+        const error = v.error;
+        if (error) {
+          let errorMsg = "Video failed to load";
+          let shouldConvert = false;
+          switch (error.code) {
+            case error.MEDIA_ERR_ABORTED:
+              errorMsg = "Video loading aborted"; break;
+            case error.MEDIA_ERR_NETWORK:
+              errorMsg = "Network error while loading video"; break;
+            case error.MEDIA_ERR_DECODE:
+              errorMsg = "Video decoding error"; shouldConvert = true; break;
+            case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+              errorMsg = "Video format not supported"; shouldConvert = true; break;
+          }
+          setVideoError(errorMsg);
+          if (shouldConvert && onVideoError && videoSrc) onVideoError(videoSrc);
+        }
+      };
+
+      v.addEventListener("loadedmetadata", onReady);
+      v.addEventListener("canplay", onReady);
+      v.addEventListener("error", onError);
+
+      if (v.readyState >= 2) onReady();
+
+      return () => {
+        if (v) {
+          v.removeEventListener("loadedmetadata", onReady);
+          v.removeEventListener("canplay", onReady);
+          v.removeEventListener("error", onError);
+        }
+      };
+    }
+
+    // Same source — just handle play/pause toggle
+    if (isPlaying) {
+      if (v.paused && videoStateRef.current !== 'loading') {
+        videoStateRef.current = 'playing';
+        const playPromise = v.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (err.name !== 'AbortError') {
+              console.warn("Video play failed:", err);
+              if (onPlayPause) onPlayPause();
+            }
+          });
+        }
       }
-    };
-
-    v.addEventListener("loadedmetadata", onReady);
-    v.addEventListener("canplay", onReady);
-    v.addEventListener("error", onError);
-
-    if (v.readyState >= 2) onReady();
-
-    return () => {
-      if (v) {
-        v.removeEventListener("loadedmetadata", onReady);
-        v.removeEventListener("canplay", onReady);
-        v.removeEventListener("error", onError);
+    } else {
+      if (!v.paused) {
+        videoStateRef.current = 'paused';
+        programmaticPause(v);
+      } else {
+        videoStateRef.current = 'paused';
       }
-    };
-    // Intentionally omit currentTime and isPlaying — source-change only.
-    // Uses isPlayingRef.current for play state reads.
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoSrc]);
+  }, [videoSrc, isPlaying, programmaticPause]);
 
-  // ---- Effect 2: Seek video when paused (scrub, timeline click) ----
+  // ---- Seek video when paused (scrub, timeline click) ----
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoSrc) return;
-
-    // During playback the video element drives its own time — don't micro-seek.
     if (isPlaying) return;
 
     v.currentTime = currentTime;
@@ -359,48 +435,13 @@ const Player = ({
     }, 100);
   }, [currentTime, isPlaying, videoSrc]);
 
-  // Handle play/pause state changes
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v || !videoSrc) return;
-    
-    // Use a flag to prevent rapid play/pause calls
-    let isHandling = false;
-    
-    if (isPlaying) {
-      // Only play if not already playing
-      if (v.paused) {
-        isHandling = true;
-        const playPromise = v.play();
-        if (playPromise !== undefined) {
-          playPromise.catch((err) => {
-            // Ignore AbortError - it's expected when pause() interrupts play()
-            if (err.name !== 'AbortError') {
-              console.warn("Video play failed:", err);
-            }
-            // If autoplay is blocked, sync state back to paused
-            if (onPlayPause && err.name !== 'AbortError') {
-              onPlayPause();
-            }
-          }).finally(() => {
-            isHandling = false;
-          });
-        }
-      }
-    } else {
-      // Only pause if currently playing
-      if (!v.paused && !isHandling) {
-        v.pause();
-      }
-    }
-  }, [isPlaying, videoSrc, onPlayPause]);
-  
-  // Sync state when browser pauses video externally (e.g., tab backgrounded)
+  // ---- Sync browser-initiated pauses (tab backgrounded, etc.) ----
   useEffect(() => {
     const v = videoRef.current;
     if (!v || !videoSrc) return;
 
     const handleBrowserPause = () => {
+      if (suppressPauseSyncRef.current) return;
       if (isPlayingRef.current && v.paused && onPlayPause) {
         onPlayPause();
       }
@@ -409,19 +450,71 @@ const Player = ({
     v.addEventListener("pause", handleBrowserPause);
     return () => v.removeEventListener("pause", handleBrowserPause);
   }, [videoSrc, onPlayPause]);
-  
+
+  // ---- Preload next clip into standby video element ----
+  useEffect(() => {
+    if (!nextClipSrc || !isPlaying) return;
+    const standby = activeElementRef.current === 'A' ? videoRefB.current : videoRefA.current;
+    if (!standby) return;
+    // Only set src if it changed
+    if (standby.src !== nextClipSrc && standby.getAttribute('data-preload-src') !== nextClipSrc) {
+      standby.setAttribute('data-preload-src', nextClipSrc);
+      standby.src = nextClipSrc;
+      standby.currentTime = nextClipSeekTo;
+      standby.preload = 'auto';
+    }
+  }, [nextClipSrc, nextClipSeekTo, isPlaying]);
+
+  // ---- Swap active/standby on source change (if standby is preloaded) ----
+  useEffect(() => {
+    if (!videoSrc) return;
+    const standby = activeElementRef.current === 'A' ? videoRefB.current : videoRefA.current;
+    if (standby && standby.getAttribute('data-preload-src') === videoSrc && standby.readyState >= 2) {
+      // Standby has this source preloaded — swap!
+      const prevActive = activeElementRef.current;
+      activeElementRef.current = prevActive === 'A' ? 'B' : 'A';
+      videoRef.current = activeElementRef.current === 'A' ? videoRefA.current : videoRefB.current;
+      // Mark old active for cleanup
+      const oldActive = prevActive === 'A' ? videoRefA.current : videoRefB.current;
+      if (oldActive) {
+        oldActive.pause();
+        oldActive.removeAttribute('data-preload-src');
+      }
+    }
+  }, [videoSrc]);
+
   useEffect(() => { if (videoRef.current) { videoRef.current.volume = volume; videoRef.current.muted = muted; } }, [volume, muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = speed; }, [speed]);
 
+  // ---- requestVideoFrameCallback for frame-accurate time sync ----
+  const hasRVFC = typeof HTMLVideoElement !== 'undefined' && 'requestVideoFrameCallback' in HTMLVideoElement.prototype;
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !isPlaying || !hasRVFC || !videoSrc) return;
+    let callbackId;
+    const onFrame = (_now, metadata) => {
+      setDTime(metadata.mediaTime);
+      if (pendingSeekRef.current === null) {
+        onTimeUpdate?.(metadata.mediaTime);
+      }
+      const b = v.buffered;
+      if (b.length > 0) setBuffered(b.end(b.length - 1));
+      callbackId = v.requestVideoFrameCallback(onFrame);
+    };
+    callbackId = v.requestVideoFrameCallback(onFrame);
+    return () => { if (callbackId) v.cancelVideoFrameCallback(callbackId); };
+  }, [isPlaying, hasRVFC, videoSrc, onTimeUpdate]);
+
+  // Fallback: onTimeUpdate for browsers without requestVideoFrameCallback (Firefox)
   const handleTimeUpdate = useCallback(() => {
+    if (hasRVFC && isPlayingRef.current) return; // RVFC handles this during playback
     const v = videoRef.current; if (!v) return;
     setDTime(v.currentTime);
-    // Skip propagation if a seek is pending — stale timeupdate would overwrite it
     if (pendingSeekRef.current !== null) return;
     onTimeUpdate?.(v.currentTime);
     const b = v.buffered;
     if (b.length > 0) setBuffered(b.end(b.length - 1));
-  }, [onTimeUpdate]);
+  }, [onTimeUpdate, hasRVFC]);
 
   const handleMeta = useCallback(() => {
     const v = videoRef.current; if (!v) return;
@@ -462,6 +555,18 @@ const Player = ({
     v.addEventListener("leavepictureinpicture", h);
     return () => v.removeEventListener("leavepictureinpicture", h);
   }, [videoSrc]);
+
+  // Detect whether any CSS-based effects are active on the current clip
+  const hasActiveEffects = useMemo(() => {
+    if (!clipProperties) return false;
+    return !!(
+      clipProperties.brightness || clipProperties.contrast ||
+      (clipProperties.saturation !== undefined && clipProperties.saturation !== 1.0) ||
+      clipProperties.filterName || clipProperties.rotation ||
+      (clipProperties.scale && clipProperties.scale !== 1.0) ||
+      (clipProperties.opacity !== undefined && clipProperties.opacity !== 1.0)
+    );
+  }, [clipProperties]);
 
   // ---- CSS live preview from clip properties ----
   const videoPreviewStyle = useMemo(() => {
@@ -548,7 +653,7 @@ const Player = ({
     const h = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       switch (e.key) {
-        case " ": e.preventDefault(); onPlayPause?.(); break;
+        case " ": e.preventDefault(); userTogglePlayPause(); break;
         case "ArrowLeft": e.preventDefault(); skip(e.shiftKey ? -10 : e.altKey ? -1 / 30 : -5); break;
         case "ArrowRight": e.preventDefault(); skip(e.shiftKey ? 10 : e.altKey ? 1 / 30 : 5); break;
         case "ArrowUp": e.preventDefault(); setVolume(v => Math.min(1, v + 0.1)); break;
@@ -565,7 +670,7 @@ const Player = ({
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [onPlayPause, skip, stepFrame, toggleFS, togglePiP, seekTo, dDur]);
+  }, [userTogglePlayPause, skip, stepFrame, toggleFS, togglePiP, seekTo, dDur]);
 
   return (
     <section ref={containerRef} className="player-root" style={{ flex: 1, display: "flex", flexDirection: "column", background: "#08090c", minWidth: 0 }} role="region" aria-label="Video player">
@@ -593,6 +698,14 @@ const Player = ({
               <span style={{ fontSize: "10px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "1.5px" }}>
                 Preview
               </span>
+              {hasActiveEffects && (
+                <span style={{
+                  fontSize: "8px", fontWeight: 700, color: "#75aadb",
+                  background: "rgba(117,170,219,0.1)", border: "1px solid rgba(117,170,219,0.2)",
+                  padding: "1px 6px", borderRadius: "3px", letterSpacing: "0.5px",
+                  textTransform: "uppercase",
+                }}>CSS Preview</span>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               {isPiP && (
@@ -610,7 +723,7 @@ const Player = ({
           </div>
 
           {/* Video canvas with premium framing */}
-          <div className="player-container" onClick={onPlayPause} style={{
+          <div className="player-container" onClick={userTogglePlayPause} style={{
             width: "100%", aspectRatio: "16/9", background: "#000",
             borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
             boxShadow: "0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)",
@@ -643,15 +756,36 @@ const Player = ({
                   </div>
                 ) : (
                   <>
+                    {/* Dual video elements for seamless clip transitions */}
                     <video
-                      ref={videoRef}
-                      src={videoSrc}
-                      preload="metadata"
+                      ref={videoRefA}
+                      src={activeElementRef.current === 'A' ? videoSrc : undefined}
+                      preload="auto"
                       playsInline
-                      onTimeUpdate={handleTimeUpdate}
-                      onLoadedMetadata={handleMeta}
-                      onEnded={handleEnded}
-                      style={{ width: "100%", height: "100%", objectFit: fitStyles[fitMode], ...videoPreviewStyle }}
+                      onTimeUpdate={activeElementRef.current === 'A' ? handleTimeUpdate : undefined}
+                      onLoadedMetadata={activeElementRef.current === 'A' ? handleMeta : undefined}
+                      onEnded={activeElementRef.current === 'A' ? handleEnded : undefined}
+                      style={{
+                        position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                        objectFit: fitStyles[fitMode],
+                        zIndex: activeElementRef.current === 'A' ? 1 : 0,
+                        ...(activeElementRef.current === 'A' ? videoPreviewStyle : {}),
+                      }}
+                    />
+                    <video
+                      ref={videoRefB}
+                      src={activeElementRef.current === 'B' ? videoSrc : undefined}
+                      preload="auto"
+                      playsInline
+                      onTimeUpdate={activeElementRef.current === 'B' ? handleTimeUpdate : undefined}
+                      onLoadedMetadata={activeElementRef.current === 'B' ? handleMeta : undefined}
+                      onEnded={activeElementRef.current === 'B' ? handleEnded : undefined}
+                      style={{
+                        position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                        objectFit: fitStyles[fitMode],
+                        zIndex: activeElementRef.current === 'B' ? 1 : 0,
+                        ...(activeElementRef.current === 'B' ? videoPreviewStyle : {}),
+                      }}
                     />
                     {/* Center play/pause overlay */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
@@ -659,7 +793,7 @@ const Player = ({
                       background: "radial-gradient(circle at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 70%)",
                       pointerEvents: isPlaying ? "none" : "auto",
                     }}>
-                      <button className="big-play" onClick={(e) => { e.stopPropagation(); onPlayPause?.(); }} style={{
+                      <button className="big-play" onClick={(e) => { e.stopPropagation(); userTogglePlayPause(); }} style={{
                         width: "64px", height: "64px", borderRadius: "50%",
                         background: "rgba(117,170,219,0.15)", border: "2px solid rgba(255,255,255,0.25)",
                         display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
@@ -747,7 +881,7 @@ const Player = ({
           <button onClick={() => skip(-5)} className="ctrl-btn" style={styles.ghost} title="Skip -5s (←)">
             <Icon i="skip_previous" s={20} c="#94a3b8" />
           </button>
-          <button onClick={onPlayPause} className="play-glow" style={{
+          <button onClick={userTogglePlayPause} className="play-glow" style={{
             ...styles.ghost, width: "40px", height: "40px", borderRadius: "50%",
             background: isPlaying ? "rgba(117,170,219,0.2)" : "rgba(117,170,219,0.12)",
             display: "flex", alignItems: "center", justifyContent: "center",

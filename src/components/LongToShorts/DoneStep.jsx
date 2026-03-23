@@ -1,16 +1,4 @@
 import { useCallback, useState } from 'react';
-import FaceDebugOverlay from '../FaceDebugOverlay';
-
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
 
 function sanitizeFilename(label) {
   return label
@@ -30,43 +18,54 @@ export default function DoneStep({ state, dispatch, navigate }) {
   const [downloading, setDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
 
-  const handleDownload = useCallback((result, index) => {
-    downloadBlob(result.blob, buildFilename(result, index));
-  }, []);
-
-  const handleDownloadAll = useCallback(() => {
-    const valid = state.results.filter(r => r.blob && r.blob.size > 0 && r.url);
+  const handleDownloadAll = useCallback(async () => {
+    const valid = state.results.filter(r => r.downloadUrl);
     setDownloading(true);
     setDownloadProgress(0);
 
-    valid.forEach((result, i) => {
-      setTimeout(() => {
-        downloadBlob(result.blob, buildFilename(result, i));
-        setDownloadProgress(i + 1);
-        if (i === valid.length - 1) {
-          setTimeout(() => setDownloading(false), 800);
-        }
-      }, i * 500);
-    });
+    for (let i = 0; i < valid.length; i++) {
+      try {
+        const res = await fetch(valid[i].downloadUrl);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = buildFilename(valid[i], i);
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error(`Failed to download clip ${i + 1}:`, err);
+      }
+      setDownloadProgress(i + 1);
+    }
+
+    setTimeout(() => setDownloading(false), 800);
   }, [state.results]);
 
-  const handleSendToEditor = useCallback((result, index) => {
-    const file = new File([result.blob], buildFilename(result, index), { type: 'video/mp4' });
-    navigate('/editor', { state: { filesToImport: [file] } });
+  const handleSendToEditor = useCallback(async (result, index) => {
+    try {
+      const res = await fetch(result.downloadUrl);
+      const blob = await res.blob();
+      const file = new File([blob], buildFilename(result, index), { type: 'video/mp4' });
+      navigate('/editor', { state: { filesToImport: [file] } });
+    } catch (err) {
+      console.error('Failed to fetch clip for editor:', err);
+    }
   }, [navigate]);
 
   const handleStartOver = useCallback(() => {
     dispatch({ type: 'RESET' });
   }, [dispatch]);
 
-  // Filter out any results that somehow have missing blobs or URLs
-  const validResults = state.results.filter(r => r.blob && r.blob.size > 0 && r.url);
+  const validResults = state.results.filter(r => r.downloadUrl);
 
   if (validResults.length === 0) {
     return (
       <div className="lts-done">
         <p className="lts-done-title">No valid clips were produced</p>
-        <p className="lts-done-sub">All exports failed validation. Try again with different segments or disable captions.</p>
+        <p className="lts-done-sub">Export failed on the server. Try again with different segments.</p>
         <div className="lts-done-actions">
           <button className="lts-btn-primary" onClick={handleStartOver}>
             <span className="mi" style={{ fontSize: 16 }}>refresh</span>
@@ -85,7 +84,7 @@ export default function DoneStep({ state, dispatch, navigate }) {
       <div className="lts-done-grid">
         {validResults.map((result, i) => (
           <div key={result.id} className="lts-done-card">
-            <video src={result.url} controls muted playsInline />
+            <video src={result.downloadUrl} controls muted playsInline crossOrigin="anonymous" />
             <div className="lts-done-card-body">
               <p className="lts-done-card-label">
                 {result.hookTitle || result.label}
@@ -99,21 +98,20 @@ export default function DoneStep({ state, dispatch, navigate }) {
                 </span>
               )}
               <div className="lts-done-card-btns">
-                <button className="lts-btn-secondary" onClick={() => handleDownload(result, i)}>
+                <a
+                  className="lts-btn-secondary"
+                  href={result.downloadUrl}
+                  download={buildFilename(result, i)}
+                  style={{ textDecoration: 'none' }}
+                >
                   <span className="mi" style={{ fontSize: 14 }}>download</span>
                   Download
-                </button>
+                </a>
                 <button className="lts-btn-secondary" onClick={() => handleSendToEditor(result, i)}>
                   <span className="mi" style={{ fontSize: 14 }}>movie_edit</span>
                   Edit
                 </button>
               </div>
-              {import.meta.env.DEV && result.faceDebug && (
-                <FaceDebugOverlay
-                  debugData={result.faceDebug}
-                  segLabel={result.hookTitle || result.label}
-                />
-              )}
             </div>
           </div>
         ))}
