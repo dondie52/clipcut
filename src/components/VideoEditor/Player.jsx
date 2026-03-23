@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { FILTER_PRESETS } from './constants';
+import { FILTER_PRESETS, TEXT_POSITION_PRESETS } from './constants';
 
 /* ========== CSS ========== */
 const PLAYER_CSS = `
@@ -253,6 +253,78 @@ const SpeedControl = memo(({ speed, onChange }) => {
   );
 });
 SpeedControl.displayName = "SpeedControl";
+
+/* ========== TEXT OVERLAY CANVAS ========== */
+const TEXT_POS_MAP = {
+  'top-left': { x: 0.05, y: 0.08, align: 'left', baseline: 'top' },
+  'top-center': { x: 0.5, y: 0.08, align: 'center', baseline: 'top' },
+  'top-right': { x: 0.95, y: 0.08, align: 'right', baseline: 'top' },
+  'center-left': { x: 0.05, y: 0.5, align: 'left', baseline: 'middle' },
+  'center': { x: 0.5, y: 0.5, align: 'center', baseline: 'middle' },
+  'center-right': { x: 0.95, y: 0.5, align: 'right', baseline: 'middle' },
+  'bottom-left': { x: 0.05, y: 0.92, align: 'left', baseline: 'bottom' },
+  'bottom-center': { x: 0.5, y: 0.92, align: 'center', baseline: 'bottom' },
+  'bottom-right': { x: 0.95, y: 0.92, align: 'right', baseline: 'bottom' },
+};
+
+const TextOverlayCanvas = memo(({ text, color, size, position, bgColor }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, w, h);
+
+    const pos = TEXT_POS_MAP[position] || TEXT_POS_MAP['bottom-center'];
+    const scaledSize = Math.max(12, Math.round(size * (h / 1080))); // Scale font relative to preview
+    ctx.font = `bold ${scaledSize}px 'Spline Sans', Arial, sans-serif`;
+    ctx.textAlign = pos.align;
+    ctx.textBaseline = pos.baseline;
+
+    const x = pos.x * w;
+    const y = pos.y * h;
+
+    // Draw background box if set
+    if (bgColor) {
+      const metrics = ctx.measureText(text);
+      const pad = scaledSize * 0.25;
+      const bx = pos.align === 'center' ? x - metrics.width / 2 - pad
+        : pos.align === 'right' ? x - metrics.width - pad : x - pad;
+      const by = pos.baseline === 'middle' ? y - scaledSize / 2 - pad
+        : pos.baseline === 'bottom' ? y - scaledSize - pad : y - pad;
+      ctx.fillStyle = bgColor;
+      ctx.globalAlpha = 0.7;
+      ctx.fillRect(bx, by, metrics.width + pad * 2, scaledSize + pad * 2);
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw text with shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+  }, [text, color, size, position, bgColor]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: 'absolute', inset: 0, width: '100%', height: '100%',
+        pointerEvents: 'none', zIndex: 5,
+      }}
+    />
+  );
+});
+TextOverlayCanvas.displayName = 'TextOverlayCanvas';
 
 /* ========== MAIN PLAYER COMPONENT ========== */
 const Player = ({
@@ -731,6 +803,16 @@ const Player = ({
                         ...videoPreviewStyle,
                       }}
                     />
+                    {/* Canvas text overlay preview */}
+                    {clipProperties?.text?.trim() && (
+                      <TextOverlayCanvas
+                        text={clipProperties.text}
+                        color={clipProperties.textColor || '#ffffff'}
+                        size={clipProperties.textSize || 48}
+                        position={clipProperties.textPosition || 'bottom-center'}
+                        bgColor={clipProperties.textBgColor || ''}
+                      />
+                    )}
                     {/* Center play/pause overlay */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
                       position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",

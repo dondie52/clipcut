@@ -152,15 +152,61 @@ const TIMELINE_CSS = `
 `;
 
 /* ========== WAVEFORM CANVAS ========== */
-const WaveformCanvas = memo(({ width, height, color = "#75aadb", opacity = 0.4 }) => {
-  const canvasRef = useRef(null);
+// Global cache for decoded waveform peaks (keyed by file identity)
+const waveformCache = new Map();
 
+const WaveformCanvas = memo(({ width, height, color = "#75aadb", opacity = 0.4, audioFile = null }) => {
+  const canvasRef = useRef(null);
+  const [peaks, setPeaks] = useState(null);
+
+  // Decode audio and extract peaks (runs once per file)
+  useEffect(() => {
+    if (!audioFile) return;
+    const cacheKey = `${audioFile.name}_${audioFile.size}`;
+    if (waveformCache.has(cacheKey)) {
+      setPeaks(waveformCache.get(cacheKey));
+      return;
+    }
+    let cancelled = false;
+    const decode = async () => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const buf = await audioFile.arrayBuffer();
+        const audio = await ctx.decodeAudioData(buf);
+        const raw = audio.getChannelData(0);
+        // Downsample to ~500 peak values
+        const numPeaks = 500;
+        const step = Math.max(1, Math.floor(raw.length / numPeaks));
+        const result = new Float32Array(numPeaks);
+        for (let i = 0; i < numPeaks; i++) {
+          let max = 0;
+          const start = i * step;
+          const end = Math.min(start + step, raw.length);
+          for (let j = start; j < end; j++) {
+            const abs = Math.abs(raw[j]);
+            if (abs > max) max = abs;
+          }
+          result[i] = max;
+        }
+        ctx.close();
+        if (!cancelled) {
+          waveformCache.set(cacheKey, result);
+          setPeaks(result);
+        }
+      } catch {
+        // Decode failed — fallback to procedural
+      }
+    };
+    decode();
+    return () => { cancelled = true; };
+  }, [audioFile]);
+
+  // Draw waveform
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
-
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     ctx.scale(dpr, dpr);
@@ -171,12 +217,23 @@ const WaveformCanvas = memo(({ width, height, color = "#75aadb", opacity = 0.4 }
     ctx.fillStyle = color;
     ctx.globalAlpha = opacity;
 
-    for (let i = 0; i < bars; i++) {
-      const amp = (Math.sin(i * 0.3) * 0.3 + Math.sin(i * 0.7) * 0.25 + Math.random() * 0.35) * mid;
-      const barH = Math.max(2, amp);
-      ctx.fillRect(i * 3, mid - barH, 2, barH * 2);
+    if (peaks && peaks.length > 0) {
+      // Real waveform from decoded audio
+      for (let i = 0; i < bars; i++) {
+        const peakIdx = Math.floor((i / bars) * peaks.length);
+        const amp = peaks[peakIdx] * mid;
+        const barH = Math.max(2, amp);
+        ctx.fillRect(i * 3, mid - barH, 2, barH * 2);
+      }
+    } else {
+      // Fallback: procedural waveform
+      for (let i = 0; i < bars; i++) {
+        const amp = (Math.sin(i * 0.3) * 0.3 + Math.sin(i * 0.7) * 0.25 + Math.random() * 0.35) * mid;
+        const barH = Math.max(2, amp);
+        ctx.fillRect(i * 3, mid - barH, 2, barH * 2);
+      }
     }
-  }, [width, height, color, opacity]);
+  }, [width, height, color, opacity, peaks]);
 
   return (
     <canvas
@@ -294,7 +351,7 @@ const TimelineClip = memo(({
       {/* Filmstrip or waveform background */}
       {isAudio ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 4px" }}>
-          <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} />
+          <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} audioFile={clip.file} />
         </div>
       ) : (
         <FilmstripThumbnails width={width} height={60} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
@@ -528,10 +585,19 @@ const Timeline = ({
   pxPerSecRef.current = pxPerSec;
 
   const tlWidth = useMemo(() => Math.max(totalDuration * pxPerSec + 200, 900), [totalDuration, pxPerSec]);
-  const videoClips = useMemo(() => clips.filter((c) => c.type !== "audio" && (c.track || 0) === 0), [clips]);
-  const videoClips2 = useMemo(() => clips.filter((c) => c.type !== "audio" && c.track === 1), [clips]);
-  const audioClips = useMemo(() => clips.filter((c) => c.type === "audio" && (c.track || 0) === 0), [clips]);
-  const audioClips2 = useMemo(() => clips.filter((c) => c.type === "audio" && c.track === 1), [clips]);
+  // Viewport-based clip virtualization — only render clips overlapping visible area
+  const isVisible = useCallback((c) => {
+    const clipEnd = c.startTime + c.duration;
+    return clipEnd >= viewport.start && c.startTime <= viewport.end;
+  }, [viewport.start, viewport.end]);
+
+  const videoClips = useMemo(() => clips.filter((c) => c.type !== "audio" && (c.track || 0) === 0 && isVisible(c)), [clips, isVisible]);
+  const videoClips2 = useMemo(() => clips.filter((c) => c.type !== "audio" && c.track === 1 && isVisible(c)), [clips, isVisible]);
+  const audioClips = useMemo(() => clips.filter((c) => c.type === "audio" && (c.track || 0) === 0 && isVisible(c)), [clips, isVisible]);
+  const audioClips2 = useMemo(() => clips.filter((c) => c.type === "audio" && c.track === 1 && isVisible(c)), [clips, isVisible]);
+  // Unfiltered counts for V2/A2 track visibility (show track even if clips are off-screen)
+  const hasV2Clips = useMemo(() => clips.some((c) => c.type !== "audio" && c.track === 1), [clips]);
+  const hasA2Clips = useMemo(() => clips.some((c) => c.type === "audio" && c.track === 1), [clips]);
   const timeMarkers = useMemo(() => generateMarkers(totalDuration, pxPerSec), [totalDuration, pxPerSec]);
 
   // ── Sync playhead from currentTime prop ──────────────────────
@@ -1165,7 +1231,7 @@ const Timeline = ({
             onToggleMute={() => setTrackMutes((p) => ({ ...p, video: !p.video }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, video: !p.video }))}
           />
-          {videoClips2.length > 0 && (
+          {hasV2Clips && (
             <TrackLabel icon="visibility" lockIcon="lock_open" label="V2" trackType="video" height={76}
               isMuted={trackMutes.video2} isLocked={trackLocks.video2}
               onToggleMute={() => setTrackMutes((p) => ({ ...p, video2: !p.video2 }))}
@@ -1177,7 +1243,7 @@ const Timeline = ({
             onToggleMute={() => setTrackMutes((p) => ({ ...p, audio: !p.audio }))}
             onToggleLock={() => setTrackLocks((p) => ({ ...p, audio: !p.audio }))}
           />
-          {audioClips2.length > 0 && (
+          {hasA2Clips && (
             <TrackLabel icon="volume_up" lockIcon="lock_open" label="A2" trackType="audio" height={68}
               isMuted={trackMutes.audio2} isLocked={trackLocks.audio2}
               onToggleMute={() => setTrackMutes((p) => ({ ...p, audio2: !p.audio2 }))}
@@ -1309,7 +1375,7 @@ const Timeline = ({
             </div>
 
             {/* V2 track — shown when clips exist on track 1 */}
-            {videoClips2.length > 0 && (
+            {hasV2Clips && (
               <div style={{
                 height: "68px", position: "relative", marginLeft: "12px", marginBottom: "6px",
                 borderRadius: "6px",
@@ -1361,7 +1427,7 @@ const Timeline = ({
             </div>
 
             {/* A2 track — shown when clips exist on track 1 */}
-            {audioClips2.length > 0 && (
+            {hasA2Clips && (
               <div style={{
                 height: "60px", position: "relative", marginLeft: "12px", marginTop: "6px",
                 borderRadius: "6px",

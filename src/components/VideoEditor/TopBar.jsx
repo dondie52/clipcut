@@ -632,6 +632,19 @@ const TopBar = ({
   const [showMenu, setShowMenu] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const menuAnchorRef = useRef(null);
+
+  // ? key opens keyboard shortcuts
+  useEffect(() => {
+    const h = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+      if (e.key === '?' || (e.shiftKey && e.key === '/')) {
+        e.preventDefault();
+        setShowShortcuts(v => !v);
+      }
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
   
   const handleExportClick = useCallback(() => {
     if (isExporting) {

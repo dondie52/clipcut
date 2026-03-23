@@ -467,6 +467,7 @@ const VideoEditor = () => {
   // Processing
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportQueue, setExportQueue] = useState([]); // [{resolution, id}]
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
   const [loadSub, setLoadSub] = useState("");
@@ -856,6 +857,7 @@ const VideoEditor = () => {
   }, [ffmpeg, applyClipEffects, bgMusic]);
 
   // ---- Export (tries server first, falls back to WASM) ----
+  // Supports queue: if already exporting, queue the resolution for later
   const handleExport = useCallback(async (res) => {
     if (clips.length === 0) {
       notify("warning", "No clips to export. Add media to the timeline first.");
@@ -868,12 +870,26 @@ const VideoEditor = () => {
       return;
     }
 
+    // Queue if already exporting
+    if (isExporting) {
+      setExportQueue(q => [...q, res]);
+      notify("info", `Queued export at ${res} (${exportQueue.length + 1} in queue)`);
+      return;
+    }
+
     if (pb.isPlaying) pb.setIsPlaying(false);
 
     setIsExporting(true);
     setLoadMsg("Preparing export...");
 
     try {
+      // Check memory and warn/clear if near limit
+      const memInfo = ffmpeg.getMemoryInfo();
+      if (memInfo.limitExceeded) {
+        setLoadMsg("Clearing memory...");
+        await ffmpeg.clearMemory();
+      }
+
       // Check if server-side export is available (fast path)
       const serverAvailable = await isServerExportAvailable();
 
@@ -961,8 +977,19 @@ const VideoEditor = () => {
       setLoadMsg("");
       setLoadSub("");
       ffmpeg.resetProgress();
+      // Auto-clear FFmpeg virtual FS to free memory after export
+      try { await ffmpeg.clearMemory(); } catch { /* ignore */ }
     }
-  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic, wasmExport, downloadBlob]);
+  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic, wasmExport, downloadBlob, isExporting, exportQueue]);
+
+  // ---- Process export queue ----
+  useEffect(() => {
+    if (!isExporting && exportQueue.length > 0) {
+      const [next, ...rest] = exportQueue;
+      setExportQueue(rest);
+      handleExport(next);
+    }
+  }, [isExporting, exportQueue, handleExport]);
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
