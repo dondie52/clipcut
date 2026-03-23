@@ -292,15 +292,8 @@ export async function deleteProject(projectId, userId) {
 
   checkRateLimit(apiRateLimiter, 'delete');
 
-  // First get the project to find associated files
-  const { data: project, error: fetchError } = await supabase
-    .from("projects")
-    .select("*")
-    .eq("id", projectId)
-    .eq("user_id", userId)
-    .single();
-
-  if (fetchError) throw fetchError;
+  // Do not use .single() before delete — 0 rows → PGRST116 / HTTP 406 (already deleted, stale UI, or RLS).
+  // Storage paths only need userId + projectId; DB delete is idempotent when no row matches.
 
   // Delete associated storage files
   try {

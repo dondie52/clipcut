@@ -1,232 +1,100 @@
 import { useEffect, useRef, useState } from 'react';
-import { cropToVertical } from '../../services/videoOperations';
-import { loadFFmpeg, terminateFFmpeg } from '../../services/ffmpeg';
-import { detectFaceKeyframes, buildCropFilter, getLastDebugData } from '../../services/faceDetection';
-import { buildCaptionFilterFromWords, loadCaptionFont, resetCaptionFontState, isCaptionFontReady } from '../../services/captionService';
+import { exportClips, getDownloadUrl, getThumbnailUrl, resolveApiUrl } from '../../services/apiService';
 
+/**
+ * ProcessingStep — calls the backend /api/export endpoint.
+ * The server handles FFmpeg cutting, cropping, and audio preservation.
+ */
 export default function ProcessingStep({ state, dispatch }) {
-  const [progress, setProgress] = useState({}); // { [segId]: 0-100 }
-  const [currentIdx, setCurrentIdx] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const startedRef = useRef(false);
+  const timerRef = useRef(null);
 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
 
+    const t0 = Date.now();
+    timerRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - t0) / 1000));
+    }, 1000);
+
     (async () => {
-      // Terminate any existing FFmpeg instance and start fresh.
-      // The analysis phase (audio extraction) may have left the WASM
-      // runtime in a corrupted state (Aborted / memory access out of bounds).
-      await terminateFFmpeg();
-      resetCaptionFontState(); // font was in the old FS — must reload
-      await loadFFmpeg();
+      try {
+        console.log('[Processing] Calling backend export API', {
+          jobId: state.jobId,
+          segments: state.segments.length,
+        });
 
-      // Pre-load caption font into FFmpeg's virtual FS if captions are enabled.
-      // Track availability locally — if font fails, disable captions for the
-      // entire run instead of failing/retrying every segment.
-      let captionsAvailable = false;
-      if (state.captionsEnabled) {
-        try {
-          await loadCaptionFont();
-          captionsAvailable = await isCaptionFontReady();
-          if (!captionsAvailable) {
-            console.warn('[LongToShorts] Caption font written but not readable in FS — disabling captions');
-          } else {
-            console.log('[LongToShorts] Caption font ready');
-          }
-        } catch (fontErr) {
-          console.warn('[LongToShorts] Caption font load failed, captions disabled for this run:', fontErr.message);
-        }
-      }
+        // Always export as vertical (9:16) — that's the whole point of Long to Shorts
+        const result = await exportClips(state.jobId, state.segments, true);
 
-      const isLandscape = state.videoWidth > state.videoHeight;
+        // Debug: log raw clips to verify downloadUrl values
+        console.log('[Processing] Raw clips from server:', result.clips);
 
-      const results = [];
-
-      for (let i = 0; i < state.segments.length; i++) {
-        const seg = state.segments[i];
-        setCurrentIdx(i);
-
-        try {
-          const duration = seg.endSeconds - seg.startSeconds;
-
-          // Face-aware crop: detect faces in this segment's time range
-          // Pass transcript words so the crop can follow the active speaker.
-          let cropFilter = null;
-          let keyframes = [];
-          if (isLandscape) {
-            const faceResult = await detectFaceKeyframes(
-              state.videoFile, seg.startSeconds, duration, seg.words
-            );
-            keyframes = faceResult.keyframes;
-            cropFilter = buildCropFilter(
-              keyframes, state.videoWidth, state.videoHeight, faceResult.effectiveIntervals
-            );
-          }
-
-          // Capture debug data for this segment (dev only)
-          const faceDebug = import.meta.env.DEV ? getLastDebugData() : null;
-
-          // Captions: build drawtext filter from word timings
-          // Only attempt if font is confirmed available in the current FFmpeg FS
-          let captionFilter = null;
-          if (captionsAvailable && seg.words?.length > 0) {
-            try {
-              captionFilter = buildCaptionFilterFromWords(seg.words, seg.startSeconds);
-            } catch (captionErr) {
-              console.warn(`[LongToShorts] Caption filter build failed for "${seg.label}", exporting without captions:`, captionErr);
-              captionFilter = null;
-            }
-          }
-
-          // Diagnostic: log full filter pipeline result
-          if (isLandscape) {
-            console.log(`[LongToShorts] "${seg.label}" face detection result:`);
-            console.log(`  keyframes count: ${keyframes.length}`);
-            if (keyframes.length > 0) {
-              const xs = keyframes.map(k => Math.round(k.centerX));
-              console.log(`  keyframe centerX values: [${xs.join(', ')}]`);
-              console.log(`  keyframe time range: ${keyframes[0].time.toFixed(1)}s – ${keyframes[keyframes.length - 1].time.toFixed(1)}s`);
-            }
-            console.log(`  cropFilter: ${cropFilter ? cropFilter.substring(0, 200) : 'null (will use default center crop)'}`);
-            console.log(`  cropFilter type: ${cropFilter === null ? 'NULL_FALLBACK' : (cropFilter.includes('if(lt(t') ? 'DYNAMIC' : 'STATIC')}`);
-          }
-
-          // Merge crop + caption filters into one -vf string
-          // When captions exist but no face-crop, prepend the default crop/scale
-          // so cropToVertical still reframes correctly (vfOverride replaces its default).
-          let combinedFilter = cropFilter;
-          if (captionFilter) {
-            if (combinedFilter) {
-              combinedFilter = `${combinedFilter},${captionFilter}`;
-            } else {
-              // No face-crop — build default crop base so captions don't skip reframing
-              const defaultCrop = isLandscape
-                ? `crop=ih*(9/16):ih:(iw-ih*(9/16))/2:0,scale=1080:1920`
-                : `scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2`;
-              combinedFilter = `${defaultCrop},${captionFilter}`;
-            }
-          }
-
-          const progressCb = (p) => {
-            // FFmpeg progress callback sends { progress: 0-100 } or a number 0-100
-            const raw = typeof p === 'object' ? p.progress : (typeof p === 'number' ? p : 0);
-            const pct = Math.min(Math.max(raw, 0), 100);
-            setProgress(prev => ({ ...prev, [seg.id]: Math.round(pct) }));
+        const results = (result.clips || []).map((clip) => {
+          // Backend returns clip.id (not clip.segmentId)
+          const clipId = clip.id || clip.segmentId;
+          const seg = state.segments.find(s => s.id === clipId) || {};
+          const downloadUrl = resolveApiUrl(clip.downloadUrl) || getDownloadUrl(state.jobId, clipId);
+          const thumbnailUrl = resolveApiUrl(clip.thumbnailUrl) || getThumbnailUrl(state.jobId, clipId);
+          console.log(`[Processing] clip ${clipId}: downloadUrl=${downloadUrl}`);
+          return {
+            id: clipId,
+            label: seg.label || 'Clip',
+            hookTitle: seg.hookTitle,
+            score: seg.score,
+            downloadUrl,
+            thumbnailUrl,
           };
+        });
 
-          let blob;
-          try {
-            console.log(`[LongToShorts] Export started: "${seg.label}" (captions: ${!!captionFilter}, fontReady: ${captionsAvailable})`);
-            console.log(`[LongToShorts] Final vfOverride for FFmpeg: ${combinedFilter ? combinedFilter.substring(0, 300) : 'null (cropToVertical will use built-in default)'}`);
-
-            blob = await cropToVertical(
-              state.videoFile,
-              seg.startSeconds,
-              duration,
-              progressCb,
-              combinedFilter
-            );
-          } catch (err) {
-            // If captions were included and export failed, retry without captions
-            // in a fully isolated FFmpeg state (terminate + reload).
-            if (captionFilter) {
-              console.warn(`[LongToShorts] Export with captions failed for "${seg.label}", terminating FFmpeg for clean retry:`, err.message);
-              // Disable captions for remaining segments — font is gone with the old FS
-              captionsAvailable = false;
-              // Terminate the corrupted WASM instance so the retry gets a fresh one
-              await terminateFFmpeg();
-              resetCaptionFontState();
-              // Re-load a clean FFmpeg instance
-              await loadFFmpeg();
-              // Try to reload font for subsequent segments
-              try {
-                await loadCaptionFont();
-                captionsAvailable = await isCaptionFontReady();
-                console.log(`[LongToShorts] Font reloaded after retry: available=${captionsAvailable}`);
-              } catch (reloadErr) {
-                console.warn('[LongToShorts] Font reload after retry failed, captions stay disabled:', reloadErr.message);
-              }
-              console.log(`[LongToShorts] Retrying "${seg.label}" without captions (clean FFmpeg instance)`);
-              blob = await cropToVertical(
-                state.videoFile,
-                seg.startSeconds,
-                duration,
-                progressCb,
-                cropFilter // null or face-crop only — no caption drawtext
-              );
-            } else {
-              throw err; // no captions were involved, genuine failure
-            }
-          }
-
-          // Validate the exported blob before accepting it
-          const MIN_BLOB_SIZE = 1024; // 1 KB minimum for a valid MP4
-          if (!blob || blob.size < MIN_BLOB_SIZE) {
-            console.error(`[LongToShorts] Export rejected: "${seg.label}" — blob ${blob ? blob.size : 0} bytes (min ${MIN_BLOB_SIZE})`);
-            // Skip this clip instead of showing a broken card
-            setProgress(prev => ({ ...prev, [seg.id]: 100 }));
-            continue;
-          }
-
-          const url = URL.createObjectURL(blob);
-          console.log(`[LongToShorts] Export accepted: "${seg.label}" — blob=${blob.size} bytes, objectURL=${url}`);
-          results.push({ id: seg.id, label: seg.label, hookTitle: seg.hookTitle, score: seg.score, blob, url, faceDebug });
-          setProgress(prev => ({ ...prev, [seg.id]: 100 }));
-        } catch (err) {
-          console.error(`[LongToShorts] Failed to process segment ${seg.label}:`, err);
-          dispatch({
-            type: 'PROCESSING_ERROR',
-            error: `Failed to process "${seg.label}": ${err.message}`,
-          });
-          return;
-        }
+        console.log(`[Processing] Backend returned ${results.length} clips`);
+        dispatch({ type: 'PROCESSING_DONE', results });
+      } catch (err) {
+        console.error('[Processing] Backend error:', err.message);
+        dispatch({ type: 'PROCESSING_ERROR', error: err.message });
+      } finally {
+        clearInterval(timerRef.current);
       }
-
-      dispatch({ type: 'PROCESSING_DONE', results });
     })();
+
+    return () => clearInterval(timerRef.current);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Overall progress: completed clips + current clip partial progress
-  const completedCount = state.segments.filter(s => (progress[s.id] || 0) >= 100).length;
-  const currentPct = progress[state.segments[currentIdx]?.id] || 0;
-  const overallPct = state.segments.length > 0
-    ? Math.round(((completedCount + currentPct / 100) / state.segments.length) * 100)
-    : 0;
+  const formatElapsed = (s) => {
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s / 60)}m ${s % 60}s`;
+  };
 
   return (
     <div className="lts-processing">
       <p className="lts-processing-title">
-        Creating your shorts ({currentIdx + 1}/{state.segments.length})
+        Creating your shorts ({state.segments.length} clip{state.segments.length !== 1 ? 's' : ''})
       </p>
 
-      {/* Overall progress bar */}
+      {/* Indeterminate progress bar */}
       <div className="lts-analysis-progress" style={{ marginBottom: 20 }}>
-        <div className="lts-analysis-bar" style={{ width: `${overallPct}%` }} />
+        <div
+          className="lts-analysis-bar"
+          style={{
+            width: `${Math.min(15 + (elapsed * 3), 90)}%`,
+            transition: 'width 1s ease',
+          }}
+        />
       </div>
 
-      {state.segments.map((seg, i) => {
-        const pct = progress[seg.id] || 0;
-        const done = pct >= 100;
-        const active = i === currentIdx && !done;
+      <p style={{ textAlign: 'center', fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>
+        Server is cutting, cropping to 9:16, and preserving audio ({formatElapsed(elapsed)})
+      </p>
 
-        return (
-          <div key={seg.id} className="lts-processing-item">
-            {done ? (
-              <span className="mi lts-processing-check" style={{ fontSize: 20 }}>check_circle</span>
-            ) : active ? (
-              <div className="lts-analysis-spinner" style={{ width: 20, height: 20, margin: 0, borderWidth: 2 }} />
-            ) : (
-              <span className="mi" style={{ fontSize: 20, color: 'rgba(255,255,255,0.2)' }}>radio_button_unchecked</span>
-            )}
-            <span className="label">{seg.hookTitle || seg.label}</span>
-            <div className="lts-processing-bar">
-              <div className="lts-processing-bar-fill" style={{ width: `${pct}%` }} />
-            </div>
-            <span className="lts-processing-pct">{pct}%</span>
-          </div>
-        );
-      })}
+      {/* Segment list — static display while server processes */}
+      {state.segments.map((seg) => (
+        <div key={seg.id} className="lts-processing-item">
+          <div className="lts-analysis-spinner" style={{ width: 20, height: 20, margin: 0, borderWidth: 2 }} />
+          <span className="label">{seg.hookTitle || seg.label}</span>
+        </div>
+      ))}
     </div>
   );
 }

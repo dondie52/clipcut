@@ -188,50 +188,56 @@ export async function loadFFmpeg(onProgress = null) {
     return ffmpeg;
   }
   
-  // Update loading state
-  loadingState = { isLoading: true, loadProgress: 0, error: null };
+  // Start >0 so UI shows a bar; WASM compile inside load() is usually the slow phase
+  loadingState = { isLoading: true, loadProgress: 4, error: null };
   notifyStateChange();
-  
+  if (onProgress) onProgress(4);
+
   // Start loading
   loadingPromise = (async () => {
+    let loadRampTimer = null;
     try {
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-      
-      // Track loading progress for each file
-      let coreLoaded = false;
-      let wasmLoaded = false;
-      
-      const updateProgress = () => {
-        const progress = (coreLoaded ? 50 : 0) + (wasmLoaded ? 50 : 0);
-        loadingState.loadProgress = progress;
+
+      const bump = (pct) => {
+        loadingState.loadProgress = pct;
         notifyStateChange();
-        if (onProgress) {
-          onProgress(progress);
-        }
+        if (onProgress) onProgress(pct);
       };
-      
-      // Load core JS (using dynamically imported toBlobURL)
-      const coreURL = await ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-      coreLoaded = true;
-      updateProgress();
-      
-      // Load WASM
-      const wasmURL = await ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-      wasmLoaded = true;
-      updateProgress();
-      
+
+      bump(12);
+
+      const [coreURL, wasmURL] = await Promise.all([
+        ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      ]);
+
+      bump(42);
+
+      let ramp = 42;
+      loadRampTimer = setInterval(() => {
+        ramp = Math.min(ramp + 1.1, 96);
+        bump(Math.floor(ramp));
+      }, 140);
+
       await ffmpeg.load({
         coreURL,
         wasmURL,
       });
-      
-      // Update state
+
+      if (loadRampTimer) {
+        clearInterval(loadRampTimer);
+        loadRampTimer = null;
+      }
+
       loadingState = { isLoading: false, loadProgress: 100, error: null };
       notifyStateChange();
-      
+      if (onProgress) onProgress(100);
+
       console.log('[FFmpeg] Loaded successfully');
       return ffmpeg;
     } catch (error) {
+      if (loadRampTimer) clearInterval(loadRampTimer);
       console.error('[FFmpeg] Failed to load:', error);
       loadingState = { isLoading: false, loadProgress: 0, error: error.message };
       notifyStateChange();

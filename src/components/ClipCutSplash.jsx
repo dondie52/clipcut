@@ -372,8 +372,7 @@ const ClipCutSplash = () => {
           letterSpacing: "2px",
           textTransform: "uppercase",
         }}>
-          © 2026 ClipCut • bokas techologies <pty />
-          <ltd></ltd>
+          © 2026 ClipCut • Bokas Technologies (Pty) Ltd
         </span>
       </div>
 

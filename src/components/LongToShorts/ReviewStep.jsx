@@ -87,7 +87,7 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
 
   const previewSegment = useCallback((seg) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || !state.videoUrl) return;
 
     // Clean up any previous listeners
     if (seekListenerRef.current) {
@@ -132,12 +132,29 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
     <div className="lts-review">
       {/* Left: video player */}
       <div className="lts-review-player">
-        <video
-          ref={videoRef}
-          src={state.videoUrl}
-          controls
-          style={{ marginBottom: 12 }}
-        />
+        {state.videoUrl ? (
+          <video
+            ref={videoRef}
+            src={state.videoUrl}
+            controls
+            playsInline
+            preload="metadata"
+            style={{ marginBottom: 12 }}
+          />
+        ) : (
+          <div
+            style={{
+              width: '100%', aspectRatio: '16/9', background: '#111',
+              borderRadius: 10, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', flexDirection: 'column', gap: 8,
+              marginBottom: 12, border: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            <span className="mi" style={{ fontSize: 36, color: 'rgba(255,255,255,0.15)' }}>videocam_off</span>
+            <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.3)' }}>Preview not available</span>
+            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.2)' }}>Video is stored on the server</span>
+          </div>
+        )}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button
             className="lts-btn-primary"

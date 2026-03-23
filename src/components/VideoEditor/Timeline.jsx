@@ -893,7 +893,8 @@ const Timeline = ({
     if (trackLocks[trackType]) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+    const scrollLeft = timelineRef.current?.scrollLeft || 0;
+    const x = e.clientX - rect.left + scrollLeft;
     let newStart = Math.max(0, xToTime(x, pxPerSec));
 
     // Snap

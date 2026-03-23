@@ -8,6 +8,7 @@ import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject } from '../../services/projectService';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
+import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage } from '../../utils/errorHandling';
 import ErrorBoundary from '../ErrorBoundary';
@@ -184,6 +185,25 @@ const LoadingOverlay = memo(({ message, progress, subMessage, operationLabel, on
 ));
 LoadingOverlay.displayName = "LoadingOverlay";
 
+/* ========== NON-BLOCKING FFMPEG INIT BAR ========== */
+const FFmpegInitBar = memo(({ progress }) => {
+  if (progress >= 100) return null;
+  return (
+    <div style={{
+      position: "absolute", top: 0, left: 0, right: 0, height: "3px",
+      background: "rgba(0,0,0,0.3)", zIndex: 100, overflow: "hidden",
+    }}>
+      <div style={{
+        height: "100%", width: `${Math.max(progress, 2)}%`,
+        background: "linear-gradient(90deg, #5a8cbf, #75aadb)",
+        transition: "width 0.3s ease", borderRadius: "0 2px 2px 0",
+        boxShadow: "0 0 8px rgba(117,170,219,0.4)",
+      }} />
+    </div>
+  );
+});
+FFmpegInitBar.displayName = "FFmpegInitBar";
+
 /* ========== TOAST SYSTEM ========== */
 const Toast = memo(({ type = "error", message, onClose, autoClose = false }) => {
   const [exiting, setExiting] = useState(false);
@@ -293,18 +313,29 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 };
 
 /* ========== PLAYBACK ENGINE ========== */
+// During playback the <video> element is the single time authority.
+// A lightweight RAF poll only checks for clip-boundary crossings.
+// React state is updated at a throttled rate (~60 ms) so the timeline
+// playhead moves smoothly without causing per-frame re-renders / seeks.
+const UI_THROTTLE_MS = 60;
+
 const usePlaybackEngine = (clips, totalDuration) => {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const rafRef = useRef(null);
-  const lastTickRef = useRef(0);
   const speedRef = useRef(1);
 
+  // Hot-path ref — updated every timeupdate, no React re-render
+  const currentTimeRef = useRef(0);
+  const lastUiFlushRef = useRef(0);
+  const clipsRef = useRef(clips);
+  clipsRef.current = clips;
+
   const getClipAtTime = useCallback((t) => {
-    const vClips = clips.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
+    const vClips = clipsRef.current.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
     for (const c of vClips) { if (t >= c.startTime && t < c.startTime + c.duration) return c; }
     return vClips.find(c => c.startTime > t) || vClips[vClips.length - 1] || null;
-  }, [clips]);
+  }, []);
 
   const currentClip = useMemo(() => getClipAtTime(currentTime), [getClipAtTime, currentTime]);
   // clipOffset includes trimStart so the Player seeks to the correct position in the source file
@@ -314,30 +345,70 @@ const usePlaybackEngine = (clips, totalDuration) => {
     return relativeOffset + (currentClip.trimStart || 0);
   }, [currentClip, currentTime]);
 
-  // RAF playback loop
+  // Compute the next clip for preloading during playback
+  const nextClip = useMemo(() => {
+    if (!currentClip) return null;
+    const sorted = clips.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
+    const idx = sorted.findIndex(c => c.id === currentClip.id);
+    return idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null;
+  }, [currentClip, clips]);
+
+  // Flush currentTimeRef to React state at a throttled rate
+  const flushTimeToState = useCallback(() => {
+    const now = performance.now();
+    if (now - lastUiFlushRef.current >= UI_THROTTLE_MS) {
+      lastUiFlushRef.current = now;
+      setCurrentTime(currentTimeRef.current);
+    }
+  }, []);
+
+  // Called by the Player's onTimeUpdate — video element is the clock during playback
+  const onVideoTime = useCallback((timelineTime) => {
+    if (timelineTime >= totalDuration) {
+      currentTimeRef.current = totalDuration;
+      setCurrentTime(totalDuration);
+      setIsPlaying(false);
+      return;
+    }
+    currentTimeRef.current = timelineTime;
+    flushTimeToState();
+  }, [totalDuration, flushTimeToState]);
+
+  // RAF poll: only checks clip boundaries during playback (no time incrementing)
   useEffect(() => {
-    if (!isPlaying) { if (rafRef.current) cancelAnimationFrame(rafRef.current); return; }
-    lastTickRef.current = performance.now();
-    const tick = (now) => {
-      const dt = (now - lastTickRef.current) / 1000 * speedRef.current;
-      lastTickRef.current = now;
-      setCurrentTime(prev => {
-        const next = prev + dt;
-        if (next >= totalDuration) { setIsPlaying(false); return totalDuration; }
-        return next;
-      });
-      rafRef.current = requestAnimationFrame(tick);
+    if (!isPlaying) {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      // Flush final time when playback stops
+      setCurrentTime(currentTimeRef.current);
+      return;
+    }
+    const poll = () => {
+      // Check if we've crossed the end of the timeline
+      if (currentTimeRef.current >= totalDuration) {
+        setIsPlaying(false);
+        setCurrentTime(totalDuration);
+        return;
+      }
+      rafRef.current = requestAnimationFrame(poll);
     };
-    rafRef.current = requestAnimationFrame(tick);
+    rafRef.current = requestAnimationFrame(poll);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
   }, [isPlaying, totalDuration]);
 
-  const seek = useCallback((t) => setCurrentTime(Math.max(0, Math.min(totalDuration, t))), [totalDuration]);
+  const seek = useCallback((t) => {
+    const clamped = Math.max(0, Math.min(totalDuration, t));
+    currentTimeRef.current = clamped;
+    setCurrentTime(clamped);
+  }, [totalDuration]);
   const togglePlay = useCallback(() => setIsPlaying(p => !p), []);
-  const stop = useCallback(() => { setIsPlaying(false); setCurrentTime(0); }, []);
+  const stop = useCallback(() => { setIsPlaying(false); currentTimeRef.current = 0; setCurrentTime(0); }, []);
   const setSpeed = useCallback((s) => { speedRef.current = s; }, []);
 
-  return { currentTime, currentClip, clipOffset, isPlaying, seek, togglePlay, stop, setIsPlaying, setSpeed, setCurrentTime };
+  return {
+    currentTime, currentClip, clipOffset, nextClip,
+    isPlaying, seek, togglePlay, stop, setIsPlaying, setSpeed, setCurrentTime,
+    currentTimeRef, speedRef, onVideoTime,
+  };
 };
 
 /* ========== MAIN VIDEO EDITOR ========== */
@@ -450,7 +521,7 @@ const VideoEditor = () => {
   const importMedia = useCallback(async (files) => {
     setIsImporting(true);
     try {
-      if (!ffmpeg.isReady) { setLoadMsg("Initializing FFmpeg..."); await ffmpeg.initialize(); }
+      // No FFmpeg init needed — browser-native APIs handle import
       let n = 0;
       for (const file of files) {
         setLoadMsg(`Importing ${file.name}...`);
@@ -458,28 +529,49 @@ const VideoEditor = () => {
         const id = genId();
         const blobUrl = URL.createObjectURL(file);
         const isAudio = file.type.startsWith("audio/");
-        setMediaItems(p => [...p, { id, name: file.name, file, blobUrl, thumbnail: null, duration: 0, width: 0, height: 0, type: isAudio ? "audio" : "video", isProcessing: true }]);
+
+        setMediaItems(p => [...p, {
+          id, name: file.name, file, blobUrl,
+          thumbnail: null, duration: 0, width: 0, height: 0,
+          type: isAudio ? "audio" : "video",
+          isProcessing: true,
+        }]);
+
         try {
-          const info = await ffmpeg.getVideoInfo(file);
-          setMediaItems(p => p.map(m => m.id === id ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false } : m));
+          // FAST: Browser-native metadata extraction (~10ms vs ~3s)
+          const info = await getVideoInfoFast(file);
+          setMediaItems(p => p.map(m =>
+            m.id === id
+              ? { ...m, duration: info.duration, width: info.width, height: info.height, isProcessing: false }
+              : m
+          ));
+
+          // FAST: Browser-native thumbnail generation (~100ms vs ~3s)
           if (!isAudio) {
-            const videoId = `${file.name}_${file.size}_${file.lastModified}`;
-            getCachedThumbnail(videoId, 0).then(async (cached) => {
-              const blob = cached || await ffmpeg.generateThumbnail(file, 0);
+            try {
+              const videoId = `${file.name}_${file.size}_${file.lastModified}`;
+              const cached = await getCachedThumbnail(videoId, 0);
+              const blob = cached || await generateThumbnailFast(file, 0);
               if (!cached) cacheThumbnail(videoId, 0, blob).catch(() => {});
-              const u = URL.createObjectURL(blob);
-              setMediaItems(p => p.map(m => m.id === id ? { ...m, thumbnail: u } : m));
-            }).catch(() => {});
+              const thumbUrl = URL.createObjectURL(blob);
+              setMediaItems(p => p.map(m =>
+                m.id === id ? { ...m, thumbnail: thumbUrl } : m
+              ));
+            } catch (e) {
+              console.warn("Thumbnail generation failed:", e);
+            }
           }
         } catch (e) {
           console.error("Error processing:", e);
-          setMediaItems(p => p.map(m => m.id === id ? { ...m, isProcessing: false } : m));
+          setMediaItems(p => p.map(m =>
+            m.id === id ? { ...m, isProcessing: false } : m
+          ));
         }
       }
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
-    } catch (e) { notify("error", getUserFriendlyMessage(e, 'ffmpeg')); }
+    } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [ffmpeg, notify]);
+  }, [notify]);
 
   // ---- Remove media ----
   const removeMedia = useCallback((id) => {
@@ -693,19 +785,18 @@ const VideoEditor = () => {
 
   // ---- Player callbacks ----
   const onSeek = useCallback((t) => {
-    pb.currentClip && t < pb.currentClip.duration ? pb.seek(pb.currentClip.startTime + t) : pb.seek(t);
+    pb.seek(t);
   }, [pb]);
 
   const onTimeUpdate = useCallback((t) => {
     if (pb.currentClip) {
       const trimStart = pb.currentClip.trimStart || 0;
-      const expectedPbTime = pb.currentClip.startTime + (t - trimStart);
+      const timelineTime = pb.currentClip.startTime + (t - trimStart);
       if (pb.isPlaying) {
-        // During playback, only correct significant drift to avoid micro-seeking
-        const drift = Math.abs(pb.currentTime - expectedPbTime);
-        if (drift > 0.3) pb.setCurrentTime(expectedPbTime);
+        // Video element is authoritative during playback — always accept its time
+        pb.onVideoTime(timelineTime);
       } else {
-        pb.setCurrentTime(expectedPbTime);
+        pb.setCurrentTime(timelineTime);
       }
     } else if (!pb.isPlaying) {
       pb.setCurrentTime(t);
@@ -830,11 +921,9 @@ const VideoEditor = () => {
     }
   }, []); // eslint-disable-line
 
-  // ---- Preload FFmpeg in background so it's ready when user imports ----
+  // ---- Preload WASM files to browser cache (full init deferred to first export/trim) ----
   useEffect(() => {
-    if (!ffmpeg.isReady) {
-      ffmpeg.initialize().catch(() => {});
-    }
+    void ffmpeg.preload();
   }, []); // eslint-disable-line
 
   // ---- Global shortcuts ----
@@ -842,7 +931,6 @@ const VideoEditor = () => {
     const h = (e) => {
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       const mod = e.ctrlKey || e.metaKey;
-      if (e.key === " ") { e.preventDefault(); pb.togglePlay(); }
       if (mod && e.key === "s") { e.preventDefault(); }
       if (mod && e.key === "e") { e.preventDefault(); clips.length > 0 && handleExport("1080p"); }
       if (mod && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -901,6 +989,8 @@ const VideoEditor = () => {
               onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
               onVideoError={handleVideoFormatError}
               clipProperties={pb.currentClip || selectedClip}
+              nextClipSrc={pb.nextClip?.blobUrl || null}
+              nextClipSeekTo={pb.nextClip?.trimStart || 0}
             />
           </Suspense>
         </ErrorBoundary>
@@ -929,7 +1019,10 @@ const VideoEditor = () => {
         </Suspense>
       </ErrorBoundary>
 
-      {(ffmpeg.isLoading || loadMsg) && <LoadingOverlay message={loadMsg || "Loading FFmpeg..."} progress={ffmpeg.progress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} onCancel={ffmpeg.currentOperation ? ffmpeg.cancelOperation : undefined} />}
+      {/* Non-blocking thin bar during initial FFmpeg WASM load */}
+      {ffmpeg.isLoading && !ffmpeg.currentOperation && !loadMsg && <FFmpegInitBar progress={ffmpeg.loadProgress} />}
+      {/* Full-screen overlay only during active operations (import, export, trim, etc.) */}
+      {(loadMsg || ffmpeg.currentOperation) && <LoadingOverlay message={loadMsg || "Processing..."} progress={ffmpeg.currentOperation != null ? ffmpeg.progress : ffmpeg.loadProgress} operationLabel={ffmpeg.currentOperation ? `${ffmpeg.currentOperation}...` : ''} subMessage={loadSub} onCancel={ffmpeg.currentOperation ? ffmpeg.cancelOperation : undefined} />}
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} autoClose={toast.type !== "error"} />}
     </div>
   );
