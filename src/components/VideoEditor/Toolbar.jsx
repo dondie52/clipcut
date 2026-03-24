@@ -2,6 +2,7 @@ import { useState, memo, useCallback } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { TOOLBAR_ITEMS } from './constants';
+import { useMobile } from '../../hooks/useMobile';
 
 /* ========== CSS ANIMATIONS ========== */
 const TOOLBAR_CSS = `
@@ -96,11 +97,12 @@ const TOOLBAR_CSS = `
 `;
 
 /* ========== TOOLBAR BUTTON WITH TOOLTIP ========== */
-const ToolbarButton = memo(({ 
-  item, 
-  isActive, 
+const ToolbarButton = memo(({
+  item,
+  isActive,
   onClick,
-  shortcut
+  shortcut,
+  compact
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   
@@ -124,7 +126,8 @@ const ToolbarButton = memo(({
         flexDirection: "column",
         alignItems: "center",
         gap: "2px",
-        padding: "6px 14px",
+        padding: compact ? "6px 10px" : "6px 14px",
+        flexShrink: 0,
         color: isActive ? "#75aadb" : isHovered ? "#94a3b8" : "#4a5568",
       }}
       role="tab"
@@ -173,6 +176,8 @@ const TOOLBAR_SHORTCUTS = {
 
 /* ========== TOOLBAR COMPONENT ========== */
 const Toolbar = ({ activeToolbar, onToolbarChange }) => {
+  const isMobile = useMobile();
+
   // Keyboard navigation
   const handleKeyDown = useCallback((e) => {
     const currentIndex = TOOLBAR_ITEMS.findIndex(t => t.id === activeToolbar);
@@ -195,8 +200,11 @@ const Toolbar = ({ activeToolbar, onToolbarChange }) => {
   }, [activeToolbar, onToolbarChange]);
   
   return (
-    <nav 
-      style={styles.toolbar}
+    <nav
+      style={{
+        ...styles.toolbar,
+        ...(isMobile ? { overflowX: 'auto', WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none' } : {})
+      }}
       role="tablist"
       aria-label="Editor tools"
       onKeyDown={handleKeyDown}
@@ -210,6 +218,7 @@ const Toolbar = ({ activeToolbar, onToolbarChange }) => {
           isActive={activeToolbar === t.id}
           onClick={onToolbarChange}
           shortcut={TOOLBAR_SHORTCUTS[t.id]}
+          compact={isMobile}
         />
       ))}
     </nav>

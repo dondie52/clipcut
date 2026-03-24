@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
+import { useMobile } from "../hooks/useMobile";
 import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject } from "../services/projectService";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
@@ -356,6 +357,73 @@ const DASH_CSS = `
     display: flex; z-index: 50;
   }
   .bw-stripe div { flex: 1; }
+
+  /* ---- Mobile sidebar overlay ---- */
+  .sidebar-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 499; opacity: 0; pointer-events: none;
+    transition: opacity 0.3s ease;
+  }
+  .sidebar-overlay.visible { opacity: 1; pointer-events: auto; }
+
+  /* ---- Mobile bottom nav ---- */
+  .mobile-bottom-nav {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 56px; background: #0e1218;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: none; align-items: center; justify-content: space-around;
+    z-index: 400; padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  .mobile-bottom-nav button {
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+    background: none; border: none; color: rgba(255,255,255,0.45);
+    font-size: 10px; font-family: inherit; font-weight: 500;
+    cursor: pointer; padding: 8px 16px; min-height: 44px; min-width: 44px;
+    transition: color 0.15s ease;
+  }
+  .mobile-bottom-nav button.active { color: #75AADB; }
+  .mobile-bottom-nav button .material-symbols-outlined { font-size: 22px; }
+
+  /* ---- Mobile hamburger ---- */
+  .hamburger-btn {
+    width: 38px; height: 38px; border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(26,35,50,0.3); display: none;
+    align-items: center; justify-content: center;
+    cursor: pointer; color: rgba(255,255,255,0.6);
+    margin-right: 12px; flex-shrink: 0;
+  }
+
+  @media (max-width: 767px) {
+    .dash-root { height: 100dvh; height: 100vh; }
+    .sidebar {
+      position: fixed; left: -260px; top: 0; bottom: 0; z-index: 500;
+      width: 240px; min-width: 240px;
+      transition: left 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .sidebar.sidebar-open { left: 0; }
+    .sidebar-close-btn {
+      position: absolute; top: 16px; right: 12px;
+      width: 30px; height: 30px; border-radius: 6px;
+      border: none; background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.5); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .hamburger-btn { display: flex; }
+    .mobile-bottom-nav { display: flex; }
+    .dash-layout { grid-template-columns: 1fr; gap: 16px; }
+    .advisor-panel { display: none; }
+    .stats-row { grid-template-columns: 1fr; }
+    .quick-actions { grid-template-columns: 1fr; }
+    .top-bar { padding: 14px 16px 0; }
+    .top-bar h1 { font-size: 16px; }
+    .dash-body { padding: 16px 16px 80px; }
+    .projects-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .projects-header { flex-direction: column; align-items: stretch; gap: 8px; }
+    .proj-search { width: 100%; }
+    .empty-state { padding: 32px 16px; }
+    .bw-stripe { bottom: 56px; }
+  }
 `;
 
 /* ========== ICON HELPER ========== */
@@ -404,14 +472,19 @@ function formatJoinDate(dateStr) {
 }
 
 /* ========== SIDEBAR ========== */
-const Sidebar = memo(({ user, activeNav, onNav, onNavigate }) => {
+const Sidebar = memo(({ user, activeNav, onNav, onNavigate, isOpen, onClose }) => {
   const displayName = user?.user_metadata?.full_name
     || user?.email?.split("@")[0]
     || "Creator";
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isOpen ? 'sidebar-open' : ''}`}>
+      {onClose && (
+        <button className="sidebar-close-btn" onClick={onClose} aria-label="Close menu">
+          <I i="close" s={18} />
+        </button>
+      )}
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon">
           <I i="content_cut" s={16} c="white" />
@@ -462,8 +535,10 @@ Sidebar.displayName = "Sidebar";
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isMobile = useMobile();
   const fileInputRef = useRef(null);
   const [activeNav, setActiveNav] = useState("home");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [projects, setProjects] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -604,19 +679,36 @@ const Dashboard = () => {
         onChange={handleFileSelect}
       />
 
+      {/* Mobile sidebar overlay */}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
       <Sidebar
         user={user}
         activeNav={activeNav}
-        onNav={setActiveNav}
+        onNav={(id) => { setActiveNav(id); if (isMobile) setSidebarOpen(false); }}
         onNavigate={navigate}
+        isOpen={sidebarOpen}
+        onClose={isMobile ? () => setSidebarOpen(false) : undefined}
       />
 
       <div className="dash-content">
         {/* ===== TOP BAR ===== */}
         <header className="top-bar">
-          <div>
-            <h1>{getGreeting()}, {displayName}</h1>
-            <p className="top-bar-sub">Workspace overview</p>
+          <div style={{ display: 'flex', alignItems: 'center' }}>
+            <button
+              className="hamburger-btn"
+              onClick={() => setSidebarOpen(v => !v)}
+              aria-label="Open menu"
+            >
+              <I i="menu" s={20} />
+            </button>
+            <div>
+              <h1>{getGreeting()}, {displayName}</h1>
+              <p className="top-bar-sub">Workspace overview</p>
+            </div>
           </div>
           <div className="top-bar-actions">
             <button
@@ -832,7 +924,7 @@ const Dashboard = () => {
             </div>
 
             {/* ===== RIGHT: ADVISOR PANEL ===== */}
-            <aside className="advisor-panel">
+            {!isMobile && <aside className="advisor-panel">
               <div className="advisor-label">
                 <I i="assistant" s={14} c="rgba(255,255,255,0.25)" />
                 Advisor
@@ -908,11 +1000,33 @@ const Dashboard = () => {
                   Try it
                 </button>
               </div>
-            </aside>
+            </aside>}
 
           </div>
         </div>
       </div>
+
+      {/* Mobile bottom nav */}
+      {isMobile && (
+        <nav className="mobile-bottom-nav">
+          <button className={activeNav === 'home' ? 'active' : ''} onClick={() => setActiveNav('home')}>
+            <I i="home" s={22} fill={activeNav === 'home'} />
+            <span>Home</span>
+          </button>
+          <button onClick={handleNewProject}>
+            <I i="add_circle" s={22} c="#75AADB" />
+            <span>New</span>
+          </button>
+          <button className={activeNav === 'shorts' ? 'active' : ''} onClick={() => navigate('/long-to-shorts')}>
+            <I i="content_cut" s={22} />
+            <span>Shorts</span>
+          </button>
+          <button className={activeNav === 'settings' ? 'active' : ''} onClick={() => navigate('/settings')}>
+            <I i="settings" s={22} />
+            <span>Settings</span>
+          </button>
+        </nav>
+      )}
 
       {/* Botswana flag stripe */}
       <div className="bw-stripe" role="presentation">

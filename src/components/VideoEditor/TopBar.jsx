@@ -4,6 +4,7 @@ import GhostBtn from './GhostBtn';
 import { styles } from './styles';
 import { sanitizeTextInput } from '../../utils/validation';
 import { KEYBOARD_SHORTCUTS } from './constants';
+import { useMobile } from '../../hooks/useMobile';
 
 /* ========== CSS ANIMATIONS ========== */
 const TOP_BAR_CSS = `
@@ -635,8 +636,11 @@ const TopBar = ({
   onSave,
   onSettings,
   editorLayout = 'default',
-  onLayoutChange
+  onLayoutChange,
+  forceOpenExport = false,
+  onExportModalClosed,
 }) => {
+  const isMobile = useMobile();
   const [showExportModal, setShowExportModal] = useState(false);
   const [isTitleFocused, setIsTitleFocused] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -656,6 +660,14 @@ const TopBar = ({
     return () => window.removeEventListener('keydown', h);
   }, []);
   
+  // Allow parent to trigger export modal (for mobile tab bar)
+  useEffect(() => {
+    if (forceOpenExport && hasMediaToExport && !isExporting) {
+      setShowExportModal(true);
+      onExportModalClosed?.();
+    }
+  }, [forceOpenExport, hasMediaToExport, isExporting, onExportModalClosed]);
+
   const handleExportClick = useCallback(() => {
     if (isExporting) {
       // Don't allow opening export modal while export is in progress
@@ -724,8 +736,8 @@ const TopBar = ({
     <>
       <style>{TOP_BAR_CSS}</style>
       
-      <header 
-        style={styles.topBar}
+      <header
+        style={{ ...styles.topBar, ...(isMobile ? { height: '38px', padding: '0 8px' } : {}) }}
         role="banner"
         aria-label="ClipCut editor header"
       >
@@ -753,14 +765,14 @@ const TopBar = ({
             }}>
               <Icon i="movie_edit" s={18} c="#75aadb" />
             </div>
-            <span style={{
+            {!isMobile && <span style={{
               fontWeight: 700,
               fontSize: "15px",
               letterSpacing: "-0.3px",
               color: "white"
             }}>
               ClipCut
-            </span>
+            </span>}
           </div>
           
           <div style={{
@@ -785,7 +797,7 @@ const TopBar = ({
                 aria-expanded={showMenu}
                 aria-label="Open menu"
               >
-                Menu <Icon i="arrow_drop_down" s={16} />
+                {isMobile ? <Icon i="menu" s={18} /> : <>Menu <Icon i="arrow_drop_down" s={16} /></>}
               </button>
               <MenuDropdown
                 isOpen={showMenu}
@@ -831,8 +843,8 @@ const TopBar = ({
               </button>
             </div>
             {/* Auto-save indicator */}
-            {lastSaved && (
-              <span 
+            {!isMobile && lastSaved && (
+              <span
                 style={{ color: "#475569", display: 'flex', alignItems: 'center', gap: '4px' }}
                 aria-label={`Last saved at ${lastSaved.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}`}
                 title={`Last saved: ${lastSaved.toLocaleString()}`}
@@ -841,8 +853,8 @@ const TopBar = ({
                 Saved {lastSaved.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
               </span>
             )}
-            {!lastSaved && (
-              <span 
+            {!isMobile && !lastSaved && (
+              <span
                 style={{ color: "#475569", display: 'flex', alignItems: 'center', gap: '4px' }}
                 aria-label="Auto save at current time"
               >
@@ -873,7 +885,7 @@ const TopBar = ({
               left: 'auto',
               transform: 'none',
               border: '1px solid transparent',
-              width: '220px'
+              width: isMobile ? '120px' : '220px'
             }}
             aria-label="Project name"
             title="Click to edit project name"
@@ -881,28 +893,33 @@ const TopBar = ({
         </div>
         
         {/* Right section - Actions */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <GhostBtn
-            i="keyboard"
-            title="Keyboard shortcuts"
-            aria-label="Show keyboard shortcuts"
-            onClick={() => setShowShortcuts(true)}
-          />
-          <GhostBtn
-            i={editorLayout === 'default' ? 'grid_view' : editorLayout === 'wide-timeline' ? 'view_agenda' : 'view_compact'}
-            title={`Layout: ${editorLayout}`}
-            aria-label="Cycle layout"
-            onClick={() => {
-              const layouts = ['default', 'wide-timeline', 'compact'];
-              const idx = layouts.indexOf(editorLayout);
-              onLayoutChange?.(layouts[(idx + 1) % layouts.length]);
-            }}
-          />
-          <button 
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "4px" : "8px" }}>
+          {!isMobile && (
+            <GhostBtn
+              i="keyboard"
+              title="Keyboard shortcuts"
+              aria-label="Show keyboard shortcuts"
+              onClick={() => setShowShortcuts(true)}
+            />
+          )}
+          {!isMobile && (
+            <GhostBtn
+              i={editorLayout === 'default' ? 'grid_view' : editorLayout === 'wide-timeline' ? 'view_agenda' : 'view_compact'}
+              title={`Layout: ${editorLayout}`}
+              aria-label="Cycle layout"
+              onClick={() => {
+                const layouts = ['default', 'wide-timeline', 'compact'];
+                const idx = layouts.indexOf(editorLayout);
+                onLayoutChange?.(layouts[(idx + 1) % layouts.length]);
+              }}
+            />
+          )}
+          <button
             onClick={handleExportClick}
             className="export-btn"
             style={{
               ...styles.exportBtn,
+              ...(isMobile ? { padding: '5px 10px', fontSize: '11px' } : {}),
               opacity: (hasMediaToExport && !isExporting) ? 1 : 0.5,
               cursor: (hasMediaToExport && !isExporting) ? 'pointer' : 'not-allowed'
             }}
@@ -911,7 +928,7 @@ const TopBar = ({
             title={isExporting ? 'Export in progress...' : (hasMediaToExport ? 'Export video (Ctrl+E)' : 'Add media to timeline first')}
           >
             <Icon i="download" s={14} c="#0a0a0a" />
-            {isExporting ? 'Exporting...' : 'Export'}
+            {!isMobile && (isExporting ? 'Exporting...' : 'Export')}
           </button>
         </div>
       </header>

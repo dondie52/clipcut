@@ -5,6 +5,7 @@ import Toolbar from './Toolbar';
 import { styles, RESPONSIVE_CSS } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
+import { useMobile } from '../../hooks/useMobile';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject, getProjectMediaUrl } from '../../services/projectService';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
@@ -509,15 +510,11 @@ const VideoEditor = () => {
   const [rightSubTab, setRightSubTab] = useState("basic");
   const [mediaTab, setMediaTab] = useState("local");
   const [editorLayout, setEditorLayout] = useState("default");
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth <= 768);
+  const isMobile = useMobile();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileActiveTab, setMobileActiveTab] = useState(null);
+  const [forceExport, setForceExport] = useState(0);
   const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('clipcut_onboarded'));
-
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
 
   // Media library
   const [mediaItems, setMediaItems] = useState([]);
@@ -1369,7 +1366,7 @@ const VideoEditor = () => {
   }, []);
 
   return (
-    <div style={styles.root} role="application" aria-label="ClipCut Video Editor">
+    <div style={{ ...styles.root, ...(isMobile ? { height: '100dvh', paddingBottom: '56px' } : {}) }} role="application" aria-label="ClipCut Video Editor">
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       <style>{VIDEO_EDITOR_CSS}</style>
 
@@ -1389,6 +1386,7 @@ const VideoEditor = () => {
         onCancelExport={ffmpeg.cancelOperation}
         onNewProject={handleNewProject} onSave={handleSave} onSettings={handleSettings}
         editorLayout={editorLayout} onLayoutChange={setEditorLayout}
+        forceOpenExport={forceExport > 0} onExportModalClosed={() => setForceExport(0)}
       />
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
@@ -1431,39 +1429,76 @@ const VideoEditor = () => {
         )}
       </main>
 
-      {/* Mobile inspector drawer */}
+      {/* Mobile bottom sheet + tab bar */}
       {isMobile && (
         <>
-          <button
-            onClick={() => setMobileDrawerOpen(v => !v)}
-            aria-label={mobileDrawerOpen ? "Close inspector" : "Open inspector"}
-            style={{
-              position: "fixed", bottom: "16px", right: "16px", zIndex: 3050,
-              width: "48px", height: "48px", borderRadius: "50%",
-              background: "linear-gradient(135deg, #75aadb, #5a8cbf)", border: "none",
-              color: "#0a0a0a", fontSize: "20px", cursor: "pointer",
-              boxShadow: "0 4px 16px rgba(117,170,219,0.4)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-            }}
-          >
-            <span className="material-symbols-outlined" style={{ fontSize: "22px" }}>
-              {mobileDrawerOpen ? "close" : "tune"}
-            </span>
-          </button>
-          <div className={`inspector-mobile-drawer ${mobileDrawerOpen ? "open" : ""}`}>
-            <div className="drawer-handle" />
-            <ErrorBoundary name="inspector-mobile" inline message="Inspector error">
+          {mobileDrawerOpen && (
+            <div className="mobile-sheet-backdrop" onClick={() => setMobileDrawerOpen(false)} />
+          )}
+          <div className={`mobile-bottom-sheet ${mobileDrawerOpen ? 'open' : ''}`}>
+            <div className="sheet-handle" />
+            <ErrorBoundary name="mobile-panel" inline message="Panel error">
               <Suspense fallback={<PanelLoadingFallback width="100%" height="200px" />}>
-                <InspectorPanel
-                  rightTab={rightTab} onRightTabChange={setRightTab}
-                  rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-                  selectedClip={selectedClip} onClipUpdate={updateClip}
-                  bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                  onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                />
+                {mobileActiveTab === 'media' && (
+                  <MediaPanel
+                    mediaTab={mediaTab} onMediaTabChange={setMediaTab}
+                    mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
+                    onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
+                    isImporting={isImporting}
+                  />
+                )}
+                {mobileActiveTab === 'edit' && (
+                  <InspectorPanel
+                    rightTab={rightTab} onRightTabChange={setRightTab}
+                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
+                {mobileActiveTab === 'effects' && (
+                  <InspectorPanel
+                    rightTab="effects" onRightTabChange={setRightTab}
+                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
               </Suspense>
             </ErrorBoundary>
           </div>
+          <nav className="mobile-tab-bar" aria-label="Editor tools">
+            {[
+              { id: 'media', icon: 'perm_media', label: 'Media' },
+              { id: 'edit', icon: 'tune', label: 'Edit' },
+              { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
+              { id: 'export', icon: 'download', label: 'Export' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                className={mobileActiveTab === tab.id ? 'active' : ''}
+                onClick={() => {
+                  if (tab.id === 'export') {
+                    setMobileDrawerOpen(false);
+                    setForceExport(v => v + 1);
+                    return;
+                  }
+                  if (mobileActiveTab === tab.id) {
+                    setMobileDrawerOpen(v => !v);
+                  } else {
+                    setMobileActiveTab(tab.id);
+                    setMobileDrawerOpen(true);
+                  }
+                }}
+              >
+                <span className="material-symbols-outlined" style={{ fontSize: 22, color: mobileActiveTab === tab.id ? '#75AADB' : undefined }}>
+                  {tab.icon}
+                </span>
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </nav>
         </>
       )}
 

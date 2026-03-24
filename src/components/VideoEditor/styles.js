@@ -345,6 +345,56 @@ export const RESPONSIVE_CSS = `
       border-radius: 2px;
       margin: 8px auto;
     }
+
+    /* Mobile tab bar (editor bottom) */
+    .mobile-tab-bar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      height: 56px; background: #0e1218;
+      border-top: 1px solid rgba(117,170,219,0.1);
+      display: flex; align-items: center; justify-content: space-around;
+      z-index: 3000;
+      padding-bottom: env(safe-area-inset-bottom, 0);
+    }
+    .mobile-tab-bar button {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      background: none; border: none; color: rgba(255,255,255,0.4);
+      font-size: 9px; font-weight: 600; font-family: 'Spline Sans', sans-serif;
+      cursor: pointer; padding: 6px 14px; min-height: 44px; min-width: 44px;
+      transition: color 0.15s ease;
+    }
+    .mobile-tab-bar button.active { color: #75AADB; }
+    .mobile-tab-bar button .material-symbols-outlined { font-size: 22px; }
+
+    /* Mobile bottom sheet (slides up above tab bar) */
+    .mobile-bottom-sheet {
+      position: fixed; bottom: 56px; left: 0; right: 0;
+      max-height: 55vh; z-index: 2900;
+      background: #0e1218;
+      border-top: 2px solid rgba(117,170,219,0.15);
+      border-radius: 12px 12px 0 0;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      transform: translateY(100%);
+      transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+    }
+    .mobile-bottom-sheet.open { transform: translateY(0); }
+    .mobile-bottom-sheet .sheet-handle {
+      width: 36px; height: 4px;
+      background: rgba(255,255,255,0.2);
+      border-radius: 2px; margin: 8px auto;
+    }
+
+    /* Backdrop behind bottom sheet */
+    .mobile-sheet-backdrop {
+      position: fixed; inset: 0; bottom: 56px;
+      background: rgba(0,0,0,0.4); z-index: 2800;
+    }
+
+    /* Toolbar scrollable on mobile */
+    nav[role="tablist"]::-webkit-scrollbar { display: none; }
+
+    /* Timeline touch support */
+    .timeline-track-area { touch-action: pan-x pan-y; }
   }
 
   /* Tablet: narrower panels */

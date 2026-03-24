@@ -14,3 +14,6 @@ export { usePerformance, useRoutePerformance } from './usePerformance';
 
 // Session timeout warning hook
 export { useSessionTimeout, default as useSessionTimeoutDefault } from './useSessionTimeout';
+
+// Mobile viewport detection hook
+export { useMobile } from './useMobile';

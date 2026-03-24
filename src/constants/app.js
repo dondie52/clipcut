@@ -24,6 +24,11 @@ export const SPLASH_DURATION = 3000;
 export const MOBILE_BREAKPOINT = 640;
 
 /**
+ * Tablet/mobile layout breakpoint (used by useMobile hook)
+ */
+export const TABLET_BREAKPOINT = 768;
+
+/**
  * Thumbnail generation timeout in milliseconds
  */
 export const THUMBNAIL_TIMEOUT = 10000;

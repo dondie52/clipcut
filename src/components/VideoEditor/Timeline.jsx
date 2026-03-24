@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect, mem
 import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
+import { useMobile } from '../../hooks/useMobile';
 import {
   zoomToPxPerSec, timeToX, xToTime,
   collectSnapTargets, snapToNearest, snapClipEdges,
@@ -527,6 +528,8 @@ const Timeline = ({
   canUndo = false, canRedo = false, onUndo, onRedo,
   mediaItems = [], onAddToTimeline,
 }) => {
+  const isMobile = useMobile();
+
   // ── State ────────────────────────────────────────────────────
   const [zoom, setZoom] = useState(50);
   const [playheadPos, setPlayheadPos] = useState(currentTime);
@@ -1109,7 +1112,7 @@ const Timeline = ({
   //  RENDER
   // ────────────────────────────────────────────────────────────
   return (
-    <footer id={id} style={styles.timeline} role="region" aria-label="Timeline editor">
+    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '30%', minHeight: '140px' } : {}) }} role="region" aria-label="Timeline editor">
       <style>{TIMELINE_CSS}</style>
 
       {/* ── Toolbar ─────────────────────────────────────── */}
@@ -1266,7 +1269,7 @@ const Timeline = ({
             background: "linear-gradient(180deg, rgba(8,10,14,0.8) 0%, rgba(6,8,12,0.9) 100%)",
             outline: "none",
           }}
-          className="cs"
+          className="cs timeline-track-area"
         >
           {/* Time ruler — taller, more readable */}
           <div style={{

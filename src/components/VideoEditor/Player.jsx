@@ -2,6 +2,7 @@ import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { FILTER_PRESETS, TEXT_POSITION_PRESETS } from './constants';
+import { useMobile } from '../../hooks/useMobile';
 
 /* ========== CSS ========== */
 const PLAYER_CSS = `
@@ -126,6 +127,20 @@ const PLAYER_CSS = `
     font-size: 10px;
     font-weight: 600;
     animation: fadeIn 0.2s ease;
+  }
+
+  @media (max-width: 767px) {
+    .seekbar-thumb {
+      width: 20px; height: 20px;
+      transform: translate(-50%, -50%) scale(1);
+    }
+    .seekbar-track { height: 6px; }
+    .seekbar:hover .seekbar-thumb, .seekbar.dragging .seekbar-thumb {
+      transform: translate(-50%, -50%) scale(1);
+    }
+    .seekbar.dragging .seekbar-thumb {
+      transform: translate(-50%, -50%) scale(1.1);
+    }
   }
 `;
 
@@ -334,6 +349,7 @@ const Player = ({
   onVideoError = null,
   clipProperties = null,
 }) => {
+  const isMobile = useMobile();
   const videoRef = useRef(null);
   const containerRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
@@ -885,13 +901,21 @@ const Player = ({
       )}
 
       {/* Controls bar — professional transport controls */}
-      <div style={{ ...styles.controls, height: "48px", gap: "8px" }} className="player-controls">
+      <div style={{
+        ...styles.controls,
+        height: isMobile ? "auto" : "48px",
+        gap: isMobile ? "4px" : "8px",
+        flexDirection: isMobile ? "column" : "row",
+        padding: isMobile ? "4px 12px 8px" : styles.controls.padding,
+      }} className="player-controls">
         {/* Timecode display */}
         <div style={{
-          fontFamily: "'JetBrains Mono', 'Fira Code', monospace", fontSize: "12px", letterSpacing: "1px",
-          display: "flex", gap: "2px", minWidth: "160px",
-          background: "rgba(0,0,0,0.3)", padding: "4px 10px", borderRadius: "4px",
+          fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+          fontSize: isMobile ? "10px" : "12px", letterSpacing: "1px",
+          display: "flex", gap: "2px", minWidth: isMobile ? "auto" : "160px",
+          background: "rgba(0,0,0,0.3)", padding: isMobile ? "3px 8px" : "4px 10px", borderRadius: "4px",
           border: "1px solid rgba(117,170,219,0.06)",
+          ...(isMobile ? { alignSelf: "center" } : {}),
         }}>
           <span style={{ color: "#75aadb", fontWeight: 600 }}>{fmtTC(dTime).slice(0, 8)}</span>
           <span style={{ color: "rgba(117,170,219,0.4)" }}>:{fmtTC(dTime).slice(9)}</span>
@@ -900,7 +924,12 @@ const Player = ({
         </div>
 
         {/* Center transport */}
-        <div style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: "6px" }}>
+        <div style={{
+          ...(isMobile
+            ? { display: "flex", alignItems: "center", gap: "8px", justifyContent: "center" }
+            : { position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: "6px" }
+          )
+        }}>
           <button onClick={() => stepFrame(false)} className="ctrl-btn" style={styles.ghost} title="Prev frame (,)">
             <Icon i="first_page" s={16} c="#475569" />
           </button>
@@ -908,7 +937,8 @@ const Player = ({
             <Icon i="skip_previous" s={20} c="#94a3b8" />
           </button>
           <button onClick={userTogglePlayPause} className="play-glow" style={{
-            ...styles.ghost, width: "40px", height: "40px", borderRadius: "50%",
+            ...styles.ghost,
+            width: isMobile ? "48px" : "40px", height: isMobile ? "48px" : "40px", borderRadius: "50%",
             background: isPlaying ? "rgba(117,170,219,0.2)" : "rgba(117,170,219,0.12)",
             display: "flex", alignItems: "center", justifyContent: "center",
             border: "1px solid rgba(117,170,219,0.15)",
@@ -925,16 +955,20 @@ const Player = ({
         </div>
 
         {/* Right controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", ...(isMobile ? { justifyContent: "center" } : {}) }}>
           <VolumeControl volume={volume} onChange={setVolume} muted={muted} onToggleMute={() => setMuted(m => !m)} />
           <SpeedControl speed={speed} onChange={setSpeed} />
-          <button onClick={cycleFit} className="chip-btn" title="Fit mode">{fitLabels[fitMode]}</button>
-          <button onClick={togglePiP} className="ctrl-btn" style={styles.ghost} title="Picture-in-Picture (P)">
-            <Icon i="picture_in_picture_alt" s={16} c="#475569" />
-          </button>
-          <button onClick={toggleFS} className="ctrl-btn" style={styles.ghost} title="Fullscreen (F)">
-            <Icon i="fullscreen" s={17} c="#94a3b8" />
-          </button>
+          {!isMobile && <button onClick={cycleFit} className="chip-btn" title="Fit mode">{fitLabels[fitMode]}</button>}
+          {!isMobile && (
+            <button onClick={togglePiP} className="ctrl-btn" style={styles.ghost} title="Picture-in-Picture (P)">
+              <Icon i="picture_in_picture_alt" s={16} c="#475569" />
+            </button>
+          )}
+          {!isMobile && (
+            <button onClick={toggleFS} className="ctrl-btn" style={styles.ghost} title="Fullscreen (F)">
+              <Icon i="fullscreen" s={17} c="#94a3b8" />
+            </button>
+          )}
         </div>
       </div>
     </section>
