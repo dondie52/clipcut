@@ -7,6 +7,7 @@ import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { captureError, addBreadcrumb } from "../utils/errorTracking";
 import { getUserFriendlyMessage, isNetworkError } from "../utils/errorHandling";
 import BotswanaStripe from "./shared/BotswanaStripe";
+import { MOBILE_BREAKPOINT } from "../constants";
 
 // Rate limiter: 5 attempts per minute for login
 const loginRateLimiter = createRateLimiter(5, 60000);
@@ -25,6 +26,13 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
   const [resetSuccess, setResetSuccess] = useState(false);
   const formRef = useRef(null);
   const emailInputRef = useRef(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= MOBILE_BREAKPOINT);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Use WebP with JPEG fallback for background images
   const backgroundImages = [
@@ -159,100 +167,133 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
   return (
     <main style={{
       width: "100vw", height: "100vh", display: "flex",
-      fontFamily: "'Spline Sans', sans-serif", overflow: "hidden", position: "relative",
+      flexDirection: isMobile ? "column" : "row",
+      fontFamily: "'Spline Sans', sans-serif", overflow: isMobile ? "auto" : "hidden", position: "relative",
+      background: "#0a0a0a",
     }}>
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
 
-      {/* LEFT HALF */}
-      <div style={{
-        flex: 1, position: "relative", display: "flex", flexDirection: "column",
-        justifyContent: "center", padding: "60px", overflow: "hidden", background: "#0a0a0a",
-      }}>
-        {/* Background slideshow with lazy loading and WebP support */}
-        <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
-          {backgroundImages.map((image, index) => (
-            <div
-              key={index}
-              style={{
-                position: "absolute",
-                inset: 0,
-                backgroundImage: `url('${getImageSrc(image)}')`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: currentImageIndex === index ? 0.6 : 0,
-                transition: "opacity 1.5s ease-in-out",
-              }}
-            />
-          ))}
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "linear-gradient(135deg, rgba(10,10,10,0.85) 0%, rgba(10,10,10,0.7) 50%, rgba(10,10,10,0.9) 100%)",
-          }} />
-        </div>
+      {/* LEFT HALF — hidden on mobile */}
+      {!isMobile && (
+        <div style={{
+          flex: 1, position: "relative", display: "flex", flexDirection: "column",
+          justifyContent: "center", padding: "60px", overflow: "hidden", background: "#0a0a0a",
+        }}>
+          {/* Background slideshow with lazy loading and WebP support */}
+          <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
+            {backgroundImages.map((image, index) => (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  backgroundImage: `url('${getImageSrc(image)}')`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  opacity: currentImageIndex === index ? 0.6 : 0,
+                  transition: "opacity 1.5s ease-in-out",
+                }}
+              />
+            ))}
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(135deg, rgba(10,10,10,0.85) 0%, rgba(10,10,10,0.7) 50%, rgba(10,10,10,0.9) 100%)",
+            }} />
+          </div>
 
-        <div style={{ position: "relative", zIndex: 10, maxWidth: "480px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
-            <div style={{ position: "relative", width: "44px", height: "44px" }}>
+          <div style={{ position: "relative", zIndex: 10, maxWidth: "480px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
+              <div style={{ position: "relative", width: "44px", height: "44px" }}>
+                <div style={{
+                  width: "44px", height: "44px", borderRadius: "10px",
+                  background: "rgba(117,170,219,0.2)", border: "2px solid rgba(117,170,219,0.3)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "24px", color: "#75AADB", fontVariationSettings: "'FILL' 1" }}>movie</span>
+                </div>
+                <div style={{
+                  position: "absolute", bottom: "-3px", right: "-3px", width: "18px", height: "18px",
+                  borderRadius: "50%", background: "#75AADB", display: "flex", alignItems: "center",
+                  justifyContent: "center", border: "2px solid #0a0a0a",
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "10px", color: "#0a0a0a" }}>content_cut</span>
+                </div>
+              </div>
+              <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
+            </div>
+
+            <h1 style={{ fontSize: "44px", fontWeight: 800, color: "white", lineHeight: 1.15, margin: "0 0 20px 0", letterSpacing: "-1px" }}>
+              Tools for the Next Generation of{" "}<span style={{ color: "#75AADB" }}>Botswana Creators</span>
+            </h1>
+
+            <p style={{ fontSize: "17px", color: "rgba(255,255,255,0.6)", lineHeight: 1.6, margin: 0, maxWidth: "380px" }}>
+              Professional video editing tools with cloud collaboration, available across web, desktop, and mobile platforms.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* RIGHT HALF — full width on mobile */}
+      <div style={{
+        flex: 1, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: isMobile ? "32px 20px" : "40px", overflow: "hidden", background: "#0a0a0a",
+      }}>
+        {/* Background slideshow — hidden on mobile for performance */}
+        {!isMobile && (
+          <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
+            {backgroundImages.map((image, index) => (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  backgroundImage: `url('${getImageSrc(image)}')`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  opacity: currentImageIndex === index ? 0.6 : 0,
+                  transition: "opacity 1.5s ease-in-out",
+                }}
+              />
+            ))}
+            <div style={{
+              position: "absolute", inset: 0,
+              background: "linear-gradient(135deg, rgba(10,10,10,0.85) 0%, rgba(10,10,10,0.7) 50%, rgba(10,10,10,0.9) 100%)",
+            }} />
+          </div>
+        )}
+
+        {/* Compact branding for mobile */}
+        {isMobile && (
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "24px", width: "100%", maxWidth: "420px" }}>
+            <div style={{ position: "relative", width: "36px", height: "36px" }}>
               <div style={{
-                width: "44px", height: "44px", borderRadius: "10px",
+                width: "36px", height: "36px", borderRadius: "8px",
                 background: "rgba(117,170,219,0.2)", border: "2px solid rgba(117,170,219,0.3)",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <span className="material-symbols-outlined" style={{ fontSize: "24px", color: "#75AADB", fontVariationSettings: "'FILL' 1" }}>movie</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "20px", color: "#75AADB", fontVariationSettings: "'FILL' 1" }}>movie</span>
               </div>
               <div style={{
-                position: "absolute", bottom: "-3px", right: "-3px", width: "18px", height: "18px",
+                position: "absolute", bottom: "-2px", right: "-2px", width: "14px", height: "14px",
                 borderRadius: "50%", background: "#75AADB", display: "flex", alignItems: "center",
                 justifyContent: "center", border: "2px solid #0a0a0a",
               }}>
-                <span className="material-symbols-outlined" style={{ fontSize: "10px", color: "#0a0a0a" }}>content_cut</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "8px", color: "#0a0a0a" }}>content_cut</span>
               </div>
             </div>
-            <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
+            <span style={{ fontSize: "18px", fontWeight: 700, color: "white" }}>ClipCut</span>
           </div>
-
-          <h1 style={{ fontSize: "44px", fontWeight: 800, color: "white", lineHeight: 1.15, margin: "0 0 20px 0", letterSpacing: "-1px" }}>
-            Tools for the Next Generation of{" "}<span style={{ color: "#75AADB" }}>Botswana Creators</span>
-          </h1>
-
-          <p style={{ fontSize: "17px", color: "rgba(255,255,255,0.6)", lineHeight: 1.6, margin: 0, maxWidth: "380px" }}>
-            Professional video editing tools with cloud collaboration, available across web, desktop, and mobile platforms.
-          </p>
-        </div>
-      </div>
-
-      {/* RIGHT HALF */}
-      <div style={{
-        flex: 1, position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "40px", overflow: "hidden", background: "#0a0a0a",
-      }}>
-        {/* Background slideshow with lazy loading and WebP support */}
-        <div style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden" }}>
-          {backgroundImages.map((image, index) => (
-            <div
-              key={index}
-              style={{
-                position: "absolute",
-                inset: 0,
-                backgroundImage: `url('${getImageSrc(image)}')`,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-                opacity: currentImageIndex === index ? 0.6 : 0,
-                transition: "opacity 1.5s ease-in-out",
-              }}
-            />
-          ))}
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "linear-gradient(135deg, rgba(10,10,10,0.85) 0%, rgba(10,10,10,0.7) 50%, rgba(10,10,10,0.9) 100%)",
-          }} />
-        </div>
+        )}
 
         <div style={{
-          width: "100%", maxWidth: "420px", background: "rgba(26,35,50,0.6)",
-          borderRadius: "16px", padding: "40px", border: "1px solid rgba(117,170,219,0.1)",
-          backdropFilter: "blur(10px)", position: "relative", zIndex: 10,
+          width: "100%", maxWidth: "420px",
+          background: isMobile ? "transparent" : "rgba(26,35,50,0.6)",
+          borderRadius: isMobile ? "0" : "16px",
+          padding: isMobile ? "0" : "40px",
+          border: isMobile ? "none" : "1px solid rgba(117,170,219,0.1)",
+          backdropFilter: isMobile ? "none" : "blur(10px)",
+          position: "relative", zIndex: 10,
         }}>
           <h2 style={{ fontSize: "28px", fontWeight: 700, color: "white", margin: "0 0 6px 0" }}>
             Welcome back

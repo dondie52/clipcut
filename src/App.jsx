@@ -224,7 +224,7 @@ const AppContent = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setShowSplash(false)
-      if (window.location.pathname === '/') {
+      if (location.pathname === '/') {
         navigate('/login')
       }
     }, SPLASH_DURATION)

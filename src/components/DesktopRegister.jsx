@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { signUp, signInWithGoogle } from "../supabase/authService";
 import { getUserFriendlyMessage } from "../utils/errorHandling";
@@ -12,6 +12,7 @@ import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { captureError, addBreadcrumb } from "../utils/errorTracking";
 import BotswanaStripe from "./shared/BotswanaStripe";
 import PasswordStrengthBar, { getStrength } from "./shared/PasswordStrengthBar";
+import { MOBILE_BREAKPOINT } from "../constants";
 
 // Rate limiter: 3 registration attempts per 2 minutes
 const registerRateLimiter = createRateLimiter(3, 120000);
@@ -30,6 +31,13 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   const [googleLoading, setGoogleLoading] = useState(false);
   const formRef = useRef(null);
   const usernameInputRef = useRef(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= MOBILE_BREAKPOINT);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const strength = getStrength(password);
 
@@ -126,69 +134,101 @@ const DesktopRegister = ({ onNavigateToLogin }) => {
   return (
     <main style={{
       width: "100vw", height: "100vh", display: "flex",
-      fontFamily: "'Spline Sans', sans-serif", overflow: "hidden", position: "relative",
+      flexDirection: isMobile ? "column" : "row",
+      fontFamily: "'Spline Sans', sans-serif", overflow: isMobile ? "auto" : "hidden", position: "relative",
+      background: "#0a0a0a",
     }}>
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
       <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet" />
 
-      {/* LEFT HALF */}
+      {/* LEFT HALF — hidden on mobile */}
+      {!isMobile && (
+        <div style={{
+          flex: 1, position: "relative", display: "flex", flexDirection: "column",
+          justifyContent: "center", padding: "60px", overflow: "hidden",
+          background: "linear-gradient(160deg, #0a0e15 0%, #0d1520 50%, #0a0e15 100%)",
+        }}>
+          <div style={{ maxWidth: "480px" }}>
+            {/* Logo row */}
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
+              <div style={{ position: "relative", width: "44px", height: "44px" }}>
+                <div style={{
+                  width: "44px", height: "44px", borderRadius: "10px",
+                  background: "rgba(117,170,219,0.2)", border: "2px solid rgba(117,170,219,0.3)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}>
+                  <span className="material-symbols-outlined" style={{
+                    fontSize: "24px", color: "#75AADB", fontVariationSettings: "'FILL' 1",
+                  }}>movie</span>
+                </div>
+                <div style={{
+                  position: "absolute", bottom: "-3px", right: "-3px", width: "18px", height: "18px",
+                  borderRadius: "50%", background: "#75AADB", display: "flex", alignItems: "center",
+                  justifyContent: "center", border: "2px solid #0a0e15",
+                }}>
+                  <span className="material-symbols-outlined" style={{ fontSize: "10px", color: "#0a0e15" }}>content_cut</span>
+                </div>
+              </div>
+              <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
+            </div>
+
+            {/* Heading */}
+            <h1 style={{
+              fontSize: "44px", fontWeight: 800, color: "white",
+              lineHeight: 1.15, margin: "0 0 20px 0", letterSpacing: "-1px",
+            }}>
+              The next generation of{" "}
+              <span style={{ color: "#75AADB" }}>video editing</span>
+            </h1>
+
+            {/* Subtitle */}
+            <p style={{
+              fontSize: "17px", color: "rgba(255,255,255,0.6)",
+              lineHeight: 1.6, margin: 0, maxWidth: "380px",
+            }}>
+              Professional tools, cloud collaboration, and AI-powered workflows in a single browser tab.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* RIGHT HALF — full width on mobile */}
       <div style={{
-        flex: 1, position: "relative", display: "flex", flexDirection: "column",
-        justifyContent: "center", padding: "60px", overflow: "hidden",
-        background: "linear-gradient(160deg, #0a0e15 0%, #0d1520 50%, #0a0e15 100%)",
+        flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: isMobile ? "flex-start" : "center",
+        padding: isMobile ? "32px 20px" : "40px",
+        background: isMobile ? "#0a0a0a" : "linear-gradient(180deg, #0e1520 0%, #0a0f18 100%)",
       }}>
-        <div style={{ maxWidth: "480px" }}>
-          {/* Logo row */}
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "32px" }}>
-            <div style={{ position: "relative", width: "44px", height: "44px" }}>
+        {/* Compact branding for mobile */}
+        {isMobile && (
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "24px", width: "100%", maxWidth: "420px" }}>
+            <div style={{ position: "relative", width: "36px", height: "36px" }}>
               <div style={{
-                width: "44px", height: "44px", borderRadius: "10px",
+                width: "36px", height: "36px", borderRadius: "8px",
                 background: "rgba(117,170,219,0.2)", border: "2px solid rgba(117,170,219,0.3)",
                 display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                <span className="material-symbols-outlined" style={{
-                  fontSize: "24px", color: "#75AADB", fontVariationSettings: "'FILL' 1",
-                }}>movie</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "20px", color: "#75AADB", fontVariationSettings: "'FILL' 1" }}>movie</span>
               </div>
               <div style={{
-                position: "absolute", bottom: "-3px", right: "-3px", width: "18px", height: "18px",
+                position: "absolute", bottom: "-2px", right: "-2px", width: "14px", height: "14px",
                 borderRadius: "50%", background: "#75AADB", display: "flex", alignItems: "center",
-                justifyContent: "center", border: "2px solid #0a0e15",
+                justifyContent: "center", border: "2px solid #0a0a0a",
               }}>
-                <span className="material-symbols-outlined" style={{ fontSize: "10px", color: "#0a0e15" }}>content_cut</span>
+                <span className="material-symbols-outlined" style={{ fontSize: "8px", color: "#0a0a0a" }}>content_cut</span>
               </div>
             </div>
-            <span style={{ fontSize: "20px", fontWeight: 700, color: "white" }}>ClipCut</span>
+            <span style={{ fontSize: "18px", fontWeight: 700, color: "white" }}>ClipCut</span>
           </div>
+        )}
 
-          {/* Heading */}
-          <h1 style={{
-            fontSize: "44px", fontWeight: 800, color: "white",
-            lineHeight: 1.15, margin: "0 0 20px 0", letterSpacing: "-1px",
-          }}>
-            The next generation of{" "}
-            <span style={{ color: "#75AADB" }}>video editing</span>
-          </h1>
-
-          {/* Subtitle */}
-          <p style={{
-            fontSize: "17px", color: "rgba(255,255,255,0.6)",
-            lineHeight: 1.6, margin: 0, maxWidth: "380px",
-          }}>
-            Professional tools, cloud collaboration, and AI-powered workflows in a single browser tab.
-          </p>
-        </div>
-      </div>
-
-      {/* RIGHT HALF */}
-      <div style={{
-        flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "40px", background: "linear-gradient(180deg, #0e1520 0%, #0a0f18 100%)",
-      }}>
         {/* Form card */}
         <div style={{
-          width: "100%", maxWidth: "420px", background: "rgba(26,35,50,0.6)",
-          borderRadius: "16px", padding: "40px", border: "1px solid rgba(117,170,219,0.1)",
+          width: "100%", maxWidth: "420px",
+          background: isMobile ? "transparent" : "rgba(26,35,50,0.6)",
+          borderRadius: isMobile ? "0" : "16px",
+          padding: isMobile ? "0" : "40px",
+          border: isMobile ? "none" : "1px solid rgba(117,170,219,0.1)",
         }}>
           <h2 style={{ fontSize: "28px", fontWeight: 700, color: "white", margin: "0 0 6px 0" }}>
             Create your account
