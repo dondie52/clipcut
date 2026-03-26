@@ -45,7 +45,7 @@ ClipCut is a Final Year Project at the **University of Botswana**, Department of
 ```bash
 # Clone the repository
 git clone https://github.com/dondie52/clipcut.git
-cd clipcut
+cd clipcut/frontend
 
 # Install dependencies
 npm install
@@ -81,21 +81,17 @@ For detailed installation instructions, see [docs/INSTALLATION.md](docs/INSTALLA
 
 ```
 clipcut-main/
-├── src/
-│   ├── components/          # React components
-│   │   ├── VideoEditor/     # Editor (14 files: timeline, player, inspector, etc.)
-│   │   ├── Dashboard.jsx    # Project dashboard
-│   │   ├── Settings.jsx     # User settings + GDPR compliance
-│   │   └── ...              # Auth, onboarding, splash screen
-│   ├── hooks/               # Custom React hooks (useFFmpeg, useSessionTimeout, etc.)
-│   ├── services/            # Business logic (FFmpeg, video/audio ops, effects, GDPR)
-│   ├── supabase/            # Auth, client config, context, route guards
-│   ├── utils/               # Validation, analytics, error tracking, file upload
-│   └── constants/           # Theme, editor, app constants
-├── supabase/migrations/     # 7 database migrations
-├── tests/e2e/               # Playwright E2E tests
-├── docs/                    # Project documentation
-└── public/                  # Static assets
+├── frontend/
+│   ├── src/                 # React application source
+│   ├── public/              # Static assets
+│   ├── tests/e2e/           # Playwright E2E tests
+│   ├── scripts/             # Frontend build/perf scripts
+│   └── package.json         # Frontend scripts and dependencies
+├── backend/
+│   ├── api/                 # Backend API router(s)
+│   ├── supabase/            # Supabase config, migrations, seed, tests
+│   └── workers/             # Worker services (ai-proxy)
+└── docs/                    # Project documentation
 ```
 
 For full architecture details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

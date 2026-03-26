@@ -1,3 +1,12 @@
+/**
+ * ClipCut - Free, Open-Source Video Editor
+ * Copyright (c) 2026 ClipCut Contributors / Bokas Technologies (Pty) Ltd
+ * Licensed under the MIT License
+ *
+ * @module components/Dashboard
+ * @description Main dashboard — project management, quick actions, advisor panel
+ */
+
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
@@ -11,14 +20,53 @@ import { getUserFriendlyMessage } from "../utils/errorHandling";
 /* ========== CSS ========== */
 const DASH_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
-  @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
+  :root {
+    --cc-bg: #0a0a0a;
+    --cc-bg-alt: #0d1117;
+    --cc-surface: #1a2332;
+    --cc-surface-raised: rgba(26,35,50,0.35);
+    --cc-border: rgba(255,255,255,0.06);
+    --cc-border-hover: rgba(255,255,255,0.1);
+    --cc-accent: #75AADB;
+    --cc-accent-hover: #8bbae3;
+    --cc-accent-soft: rgba(117,170,219,0.1);
+    --cc-accent-glow: rgba(117,170,219,0.06);
+    --cc-text: #ffffff;
+    --cc-text-secondary: rgba(255,255,255,0.6);
+    --cc-text-muted: rgba(255,255,255,0.35);
+    --cc-text-dim: rgba(255,255,255,0.2);
+    --cc-font: 'Spline Sans', sans-serif;
+  }
 
-  * { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; }
 
   .dash-root {
-    width: 100vw; height: 100vh; background: #0a0a0a;
-    font-family: 'Spline Sans', sans-serif; display: flex;
-    overflow: hidden; color: white;
+    width: 100vw; height: 100vh; background: var(--cc-bg);
+    font-family: var(--cc-font); display: flex;
+    overflow: hidden; color: var(--cc-text);
+    position: relative;
+  }
+
+  /* Film grain overlay */
+  .dash-root::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.02;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 128px 128px;
+  }
+
+  /* Entrance animation for main content */
+  .dash-content {
+    animation: dashFadeIn 0.5s ease forwards;
+  }
+
+  @keyframes dashFadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   /* ---- Sidebar ---- */

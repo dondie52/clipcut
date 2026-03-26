@@ -76,7 +76,6 @@ function reducer(state, action) {
 /* ========== CSS ========== */
 const CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
-  @import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap');
 
   * { box-sizing: border-box; }
 

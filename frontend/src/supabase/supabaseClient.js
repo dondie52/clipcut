@@ -83,13 +83,22 @@ if (validationErrors.length > 0) {
   }
 }
 
+const FALLBACK_SUPABASE_URL = 'http://127.0.0.1:54321';
+const FALLBACK_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlzcyI6InN1cGFiYXNlIiwiaWF0IjowfQ.invalid';
+
+const resolvedSupabaseUrl =
+  validationErrors.length === 0 ? supabaseUrl : FALLBACK_SUPABASE_URL;
+const resolvedSupabaseAnonKey =
+  validationErrors.length === 0 ? supabaseAnonKey : FALLBACK_SUPABASE_ANON_KEY;
+
 /**
  * Supabase client instance
  * @type {import('@supabase/supabase-js').SupabaseClient}
  */
 export const supabase = createClient(
-  supabaseUrl || "",
-  supabaseAnonKey || "",
+  resolvedSupabaseUrl,
+  resolvedSupabaseAnonKey,
   {
     auth: {
       autoRefreshToken: true,
