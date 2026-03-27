@@ -731,47 +731,8 @@ const Player = ({
         padding: "12px 20px 8px",
         background: "radial-gradient(ellipse at center, rgba(117,170,219,0.02) 0%, transparent 70%)",
       }}>
-        <div style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: "960px", gap: "0" }}>
-          {/* Preview label bar */}
-          <div style={{
-            display: "flex", alignItems: "center", justifyContent: "space-between",
-            padding: "0 2px 6px",
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <div style={{
-                width: "6px", height: "6px", borderRadius: "50%",
-                background: videoSrc ? (isPlaying ? "#22c55e" : "#75aadb") : "#334155",
-                boxShadow: videoSrc && isPlaying ? "0 0 6px rgba(34,197,94,0.5)" : "none",
-                transition: "all 0.3s ease",
-              }} />
-              <span style={{ fontSize: "10px", fontWeight: 600, color: "#64748b", textTransform: "uppercase", letterSpacing: "1.5px" }}>
-                Preview
-              </span>
-              {hasActiveEffects && (
-                <span style={{
-                  fontSize: "8px", fontWeight: 700, color: "#75aadb",
-                  background: "rgba(117,170,219,0.1)", border: "1px solid rgba(117,170,219,0.2)",
-                  padding: "1px 6px", borderRadius: "3px", letterSpacing: "0.5px",
-                  textTransform: "uppercase",
-                }}>CSS Preview</span>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              {isPiP && (
-                <div className="pip-indicator">
-                  <Icon i="picture_in_picture_alt" s={11} c="white" />
-                  <span style={{ marginLeft: "3px" }}>PiP</span>
-                </div>
-              )}
-              {videoSrc && (
-                <span style={{ fontSize: "9px", color: "#475569", fontFamily: "monospace" }}>
-                  {fitLabels[fitMode]}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* Video canvas with premium framing */}
+        <div style={{ position: "relative", width: "100%", maxWidth: "960px" }}>
+          {/* Video canvas */}
           <div className="player-container" onClick={userTogglePlayPause} style={{
             width: "100%", aspectRatio: "16/9", background: "#000",
             borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
@@ -850,6 +811,37 @@ const Player = ({
                     <div style={{ position: "absolute", top: "8px", right: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
                     <div style={{ position: "absolute", bottom: "8px", left: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
                     <div style={{ position: "absolute", bottom: "8px", right: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
+                    {/* Preview label — top-left */}
+                    <div style={{
+                      position: "absolute", top: "10px", left: "10px", pointerEvents: "none",
+                      display: "flex", alignItems: "center", gap: "5px", opacity: 0.4,
+                    }}>
+                      <div style={{
+                        width: "5px", height: "5px", borderRadius: "50%",
+                        background: isPlaying ? "#22c55e" : "#75aadb",
+                        boxShadow: isPlaying ? "0 0 6px rgba(34,197,94,0.5)" : "none",
+                        transition: "all 0.3s ease",
+                      }} />
+                      <span style={{ fontSize: "9px", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "1.2px" }}>
+                        Preview
+                      </span>
+                      {hasActiveEffects && (
+                        <span style={{
+                          fontSize: "7px", fontWeight: 700, color: "#75aadb",
+                          background: "rgba(117,170,219,0.15)", padding: "1px 4px", borderRadius: "2px",
+                          letterSpacing: "0.3px", textTransform: "uppercase",
+                        }}>FX</span>
+                      )}
+                    </div>
+                    {/* Fit mode label — top-right */}
+                    <div style={{
+                      position: "absolute", top: "10px", right: "10px", pointerEvents: "none",
+                      opacity: 0.35,
+                    }}>
+                      <span style={{ fontSize: "9px", color: "#94a3b8", fontFamily: "monospace", letterSpacing: "0.5px" }}>
+                        {fitLabels[fitMode]}
+                      </span>
+                    </div>
                   </>
                 )}
               </>
