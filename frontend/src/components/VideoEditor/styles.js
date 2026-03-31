@@ -210,11 +210,14 @@ export const styles = {
   },
   leftPanel: {
     width: "280px",
+    minWidth: 0,
+    maxWidth: "100%",
     borderRight: "1px solid rgba(117, 170, 219, 0.08)",
     display: "flex",
     flexDirection: "column",
     background: "linear-gradient(180deg, #0f1620 0%, #0e1218 100%)",
-    flexShrink: 0
+    flexShrink: 0,
+    overflow: "hidden"
   },
   importBtn: {
     width: "100%",
@@ -234,11 +237,14 @@ export const styles = {
   },
   rightPanel: {
     width: "300px",
+    minWidth: 0,
+    maxWidth: "100%",
     borderLeft: "1px solid rgba(117, 170, 219, 0.08)",
     display: "flex",
     flexDirection: "column",
     background: "linear-gradient(180deg, #0f1620 0%, #0e1218 100%)",
-    flexShrink: 0
+    flexShrink: 0,
+    overflow: "hidden"
   },
   controls: {
     height: "52px",
@@ -257,6 +263,8 @@ export const styles = {
     display: "flex",
     flexDirection: "column",
     flexShrink: 0,
+    minHeight: 0,
+    overflow: "hidden",
     position: "relative"
   },
   tlToolbar: {

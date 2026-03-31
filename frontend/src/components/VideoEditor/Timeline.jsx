@@ -527,6 +527,7 @@ const Timeline = ({
   currentTime = 0, onSeek, totalDuration = 30, isProcessing = false,
   canUndo = false, canRedo = false, onUndo, onRedo,
   mediaItems = [], onAddToTimeline,
+  timelineHeight,
 }) => {
   const isMobile = useMobile();
 
@@ -1112,7 +1113,7 @@ const Timeline = ({
   //  RENDER
   // ────────────────────────────────────────────────────────────
   return (
-    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '30%', minHeight: '140px' } : {}) }} role="region" aria-label="Timeline editor">
+    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '30%', minHeight: '140px' } : timelineHeight ? { height: `${timelineHeight}px` } : {}) }} role="region" aria-label="Timeline editor">
       <style>{TIMELINE_CSS}</style>
 
       {/* ── Toolbar ─────────────────────────────────────── */}

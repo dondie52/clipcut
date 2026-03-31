@@ -512,7 +512,8 @@ const MediaPanel = ({
   onAddToTimeline,
   selectedMediaId,
   onSelectMedia,
-  isImporting = false
+  isImporting = false,
+  style: styleProp
 }) => {
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -578,7 +579,8 @@ const MediaPanel = ({
   
   return (
     <aside
-      style={styles.leftPanel}
+      className="editor-left-panel"
+      style={{ ...styles.leftPanel, ...styleProp }}
       role="complementary"
       aria-label="Media panel"
     >

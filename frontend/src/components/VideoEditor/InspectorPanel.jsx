@@ -106,6 +106,7 @@ const InspectorPanel = ({
   onImportBgMusic,
   onUpdateBgMusicVolume,
   onRemoveBgMusic,
+  style: styleProp,
 }) => {
   const bgMusicFileRef = useRef(null);
   // Helper to update a clip property
@@ -180,7 +181,8 @@ const InspectorPanel = ({
 
   return (
     <aside
-      style={styles.rightPanel}
+      className="editor-right-panel"
+      style={{ ...styles.rightPanel, ...styleProp }}
       role="complementary"
       aria-label="Inspector panel"
     >

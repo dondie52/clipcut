@@ -49,9 +49,86 @@ const VIDEO_EDITOR_CSS = `
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
   }
+  .resize-handle {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
+    user-select: none;
+    z-index: 10;
+  }
+  .resize-handle:hover, .resize-handle.dragging {
+    background: rgba(117,170,219,0.12);
+  }
+  .resize-handle-h {
+    height: 6px;
+    cursor: row-resize;
+  }
+  .resize-handle-v {
+    width: 6px;
+    cursor: col-resize;
+  }
+  .resize-handle-dot {
+    width: 24px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(117,170,219,0.2);
+    transition: background 0.15s ease;
+  }
+  .resize-handle:hover .resize-handle-dot, .resize-handle.dragging .resize-handle-dot {
+    background: rgba(117,170,219,0.5);
+  }
+  .resize-handle-dot-v {
+    width: 3px;
+    height: 24px;
+  }
   ${SCROLLBAR_CSS}
   ${RESPONSIVE_CSS}
 `;
+
+/* ========== RESIZE HANDLE ========== */
+function useResizeDrag(axis, onResize, onEnd) {
+  const dragging = useRef(false);
+  const startPos = useRef(0);
+  const startSize = useRef(0);
+
+  const onMouseDown = useCallback((e, currentSize) => {
+    e.preventDefault();
+    dragging.current = true;
+    startPos.current = axis === 'y' ? e.clientY : e.clientX;
+    startSize.current = currentSize;
+    const handle = e.currentTarget;
+    handle.classList.add('dragging');
+
+    const onMouseMove = (ev) => {
+      if (!dragging.current) return;
+      const delta = axis === 'y'
+        ? startPos.current - ev.clientY  // dragging up = bigger timeline
+        : ev.clientX - startPos.current;
+      onResize(startSize.current + delta);
+    };
+    const onMouseUp = () => {
+      dragging.current = false;
+      handle.classList.remove('dragging');
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      onEnd?.();
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    document.body.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, [axis, onResize, onEnd]);
+
+  return onMouseDown;
+}
+
+const DEFAULT_TIMELINE_H = 280;
+const DEFAULT_MEDIA_W = 280;
+const DEFAULT_INSPECTOR_W = 300;
 
 /* ========== LAZY LOADING FALLBACKS ========== */
 const PanelLoadingFallback = memo(({ width, height = "100%" }) => (
@@ -512,6 +589,19 @@ const VideoEditor = () => {
   const [editorLayout, setEditorLayout] = useState("default");
   const isMobile = useMobile();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+
+  // Resizable panel sizes
+  const [timelineHeight, setTimelineHeight] = useState(null); // null = use default
+  const [mediaPanelWidth, setMediaPanelWidth] = useState(null);
+  const [inspectorWidth, setInspectorWidth] = useState(null);
+
+  const clampTlH = useCallback((h) => setTimelineHeight(Math.max(120, Math.min(h, window.innerHeight * 0.6))), []);
+  const clampMpW = useCallback((w) => setMediaPanelWidth(Math.max(200, Math.min(w, 400))), []);
+  const clampIpW = useCallback((w) => setInspectorWidth(Math.max(220, Math.min(w, 450))), []);
+
+  const onTimelineDrag = useResizeDrag('y', clampTlH);
+  const onMediaDrag = useResizeDrag('x', clampMpW);
+  const onInspectorDrag = useResizeDrag('x', clampIpW);
   const [mobileActiveTab, setMobileActiveTab] = useState(null);
   const [forceExport, setForceExport] = useState(0);
   const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('clipcut_onboarded'));
@@ -1390,18 +1480,24 @@ const VideoEditor = () => {
       />
       <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
 
-      <main aria-label="Editor workspace" style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", overflow: "hidden" }}>
+      <main aria-label="Editor workspace" style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         {editorLayout !== 'compact' && !isMobile && (
-          <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
-            <Suspense fallback={<PanelLoadingFallback width="280px" />}>
-              <MediaPanel
-                mediaTab={mediaTab} onMediaTabChange={setMediaTab}
-                mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
-                onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
-                isImporting={isImporting}
-              />
-            </Suspense>
-          </ErrorBoundary>
+          <>
+            <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
+              <Suspense fallback={<PanelLoadingFallback width={`${mediaPanelWidth || DEFAULT_MEDIA_W}px`} />}>
+                <MediaPanel
+                  mediaTab={mediaTab} onMediaTabChange={setMediaTab}
+                  mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
+                  onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
+                  isImporting={isImporting}
+                  style={{ width: `${mediaPanelWidth || DEFAULT_MEDIA_W}px` }}
+                />
+              </Suspense>
+            </ErrorBoundary>
+            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onMediaDrag(e, mediaPanelWidth || DEFAULT_MEDIA_W)} onDoubleClick={() => setMediaPanelWidth(null)}>
+              <div className="resize-handle-dot resize-handle-dot-v" />
+            </div>
+          </>
         )}
         <ErrorBoundary name="player" inline message="Video player encountered an error">
           <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
@@ -1415,17 +1511,23 @@ const VideoEditor = () => {
           </Suspense>
         </ErrorBoundary>
         {editorLayout !== 'compact' && !isMobile && (
-          <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
-            <Suspense fallback={<PanelLoadingFallback width="300px" />}>
-              <InspectorPanel
-                rightTab={rightTab} onRightTabChange={setRightTab}
-                rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-                selectedClip={selectedClip} onClipUpdate={updateClip}
-                bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-              />
-            </Suspense>
-          </ErrorBoundary>
+          <>
+            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, inspectorWidth || DEFAULT_INSPECTOR_W)} onDoubleClick={() => setInspectorWidth(null)}>
+              <div className="resize-handle-dot resize-handle-dot-v" />
+            </div>
+            <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
+              <Suspense fallback={<PanelLoadingFallback width={`${inspectorWidth || DEFAULT_INSPECTOR_W}px`} />}>
+                <InspectorPanel
+                  rightTab={rightTab} onRightTabChange={setRightTab}
+                  rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                  selectedClip={selectedClip} onClipUpdate={updateClip}
+                  bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                  onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  style={{ width: `${inspectorWidth || DEFAULT_INSPECTOR_W}px` }}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </>
         )}
       </main>
 
@@ -1502,6 +1604,11 @@ const VideoEditor = () => {
         </>
       )}
 
+      {!isMobile && (
+        <div className="resize-handle resize-handle-h" onMouseDown={(e) => onTimelineDrag(e, timelineHeight || DEFAULT_TIMELINE_H)} onDoubleClick={() => setTimelineHeight(null)}>
+          <div className="resize-handle-dot" />
+        </div>
+      )}
       <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
         <Suspense fallback={<TimelineLoadingFallback />}>
           <Timeline id="editor-timeline"
@@ -1511,6 +1618,7 @@ const VideoEditor = () => {
             currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
             isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
             mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+            timelineHeight={timelineHeight}
           />
         </Suspense>
       </ErrorBoundary>
