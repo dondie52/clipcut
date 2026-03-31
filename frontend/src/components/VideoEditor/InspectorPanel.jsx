@@ -36,10 +36,11 @@ const INSPECTOR_CSS = `
 
   .inspector-subtab {
     transition: all 0.15s ease;
+    border-radius: 10px;
   }
 
   .inspector-subtab:hover:not(.active) {
-    background: rgba(255, 255, 255, 0.05) !important;
+    background: rgba(255, 255, 255, 0.06) !important;
   }
 
   .add-effect-btn {
@@ -248,7 +249,8 @@ const InspectorPanel = ({
       <nav
         style={{
           display: "flex",
-          height: "30px",
+          gap: "4px",
+          padding: "4px 8px",
           background: "rgba(8,10,14,0.5)",
           flexShrink: 0,
           borderBottom: "1px solid rgba(255,255,255,0.03)",
@@ -264,14 +266,14 @@ const InspectorPanel = ({
             className={`inspector-subtab ${rightSubTab === t.toLowerCase() ? 'active' : ''}`}
             style={{
               ...styles.ghost,
-              flex: 1,
-              fontSize: "9px",
+              fontSize: "8px",
               fontWeight: 600,
               textTransform: "uppercase",
               letterSpacing: "0.5px",
-              color: rightSubTab === t.toLowerCase() ? "#cbd5e1" : "#4a5568",
-              background: rightSubTab === t.toLowerCase() ? "rgba(117,170,219,0.08)" : "transparent",
-              borderBottom: rightSubTab === t.toLowerCase() ? "1px solid rgba(117,170,219,0.3)" : "1px solid transparent",
+              padding: "3px 10px",
+              borderRadius: "10px",
+              color: rightSubTab === t.toLowerCase() ? "#e2e8f0" : "#4a5568",
+              background: rightSubTab === t.toLowerCase() ? "rgba(117,170,219,0.15)" : "transparent",
             }}
             role="tab"
             aria-selected={rightSubTab === t.toLowerCase()}
@@ -287,10 +289,10 @@ const InspectorPanel = ({
         style={{
           flex: 1,
           overflowY: "auto",
-          padding: "14px",
+          padding: "10px",
           display: "flex",
           flexDirection: "column",
-          gap: "16px"
+          gap: "8px"
         }}
         className="cs"
         id={`panel-${rightTab}`}
@@ -471,7 +473,7 @@ const InspectorPanel = ({
                 <Hr />
 
                 {/* Position & Size Section */}
-                <Section t="Position & Size">
+                <Section t="Position & Size" defaultExpanded>
                   <Slider
                     l="Zoom"
                     value={Math.round(cp(selectedClip, 'scale') * 100)}
@@ -480,7 +482,7 @@ const InspectorPanel = ({
                     min={10}
                     max={300}
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "4px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "4px" }}>
                     <SmallInput
                       l="Position X"
                       v={String(cp(selectedClip, 'positionX'))}
@@ -521,7 +523,7 @@ const InspectorPanel = ({
                     onChange={(val) => update('text', val)}
                     placeholder="Enter text..."
                   />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "4px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "4px" }}>
                     <SmallInput
                       l="Font Size"
                       v={String(cp(selectedClip, 'textSize'))}
@@ -561,7 +563,7 @@ const InspectorPanel = ({
                       ))}
                     </div>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginTop: "8px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "6px" }}>
                     <div>
                       <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px', fontWeight: 500 }}>Bg Color</div>
                       <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
@@ -643,7 +645,7 @@ const InspectorPanel = ({
             {/* Audio Tab Content */}
             {rightTab === 'audio' && (
               <>
-                <Section t="Volume">
+                <Section t="Volume" defaultExpanded>
                   <Slider
                     l="Volume"
                     value={Math.round(cp(selectedClip, 'volume') * 100)}
@@ -745,7 +747,7 @@ const InspectorPanel = ({
             {/* Speed Tab Content */}
             {rightTab === 'speed' && (
               <>
-                <Section t="Playback Speed">
+                <Section t="Playback Speed" defaultExpanded>
                   <Slider
                     l="Speed"
                     value={clipSpeed}
@@ -815,7 +817,7 @@ const InspectorPanel = ({
 
                 <Hr />
 
-                <Section t="Presets">
+                <Section t="Presets" defaultExpanded>
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: '1fr 1fr',
@@ -886,7 +888,7 @@ const InspectorPanel = ({
             {/* Adjust Tab Content */}
             {rightTab === 'adjust' && (
               <>
-                <Section t="Color Correction">
+                <Section t="Color Correction" defaultExpanded>
                   <Slider
                     l="Brightness"
                     value={Math.round(cp(selectedClip, 'brightness') * 50 + 50)}
@@ -963,7 +965,7 @@ const InspectorPanel = ({
 
         {/* === CANVAS SUB-TAB === */}
         {hasClip && rightSubTab === 'canvas' && (
-          <Section t="Canvas Settings">
+          <Section t="Canvas Settings" defaultExpanded>
             <Row l="Resolution" v="1920 x 1080" />
             <Row l="Frame Rate" v="30 fps" />
             <Row l="Aspect Ratio" v="16:9" />

@@ -117,6 +117,34 @@ const TOP_BAR_CSS = `
 `;
 
 /* ========== EXPORT MODAL COMPONENT ========== */
+const QUALITY_PRESETS = [
+  { key: 'low', label: 'Low', crf: 28 },
+  { key: 'medium', label: 'Medium', crf: 23 },
+  { key: 'high', label: 'High', crf: 18 },
+  { key: 'ultra', label: 'Ultra', crf: 15 },
+];
+
+const FORMAT_OPTIONS = [
+  { key: 'mp4', label: 'MP4' },
+  { key: 'webm', label: 'WebM' },
+];
+
+const FPS_OPTIONS = [24, 30, 60];
+
+const PillGroup = memo(({ items, selected, onSelect, style: groupStyle }) => (
+  <div style={{ display: 'flex', gap: '4px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '3px', ...groupStyle }}>
+    {items.map(item => (
+      <button key={item.key || item} onClick={() => onSelect(item.key || item)} style={{
+        flex: 1, padding: '6px 8px', border: 'none', borderRadius: '6px', cursor: 'pointer',
+        fontSize: '10px', fontWeight: 600, fontFamily: "'Spline Sans', sans-serif",
+        background: (item.key || item) === selected ? 'rgba(117,170,219,0.15)' : 'transparent',
+        color: (item.key || item) === selected ? '#75aadb' : '#64748b',
+      }}>{item.label || item}</button>
+    ))}
+  </div>
+));
+PillGroup.displayName = 'PillGroup';
+
 const ExportModal = memo(({
   isOpen,
   onClose,
@@ -126,319 +154,253 @@ const ExportModal = memo(({
   operationLabel = 'Processing',
   resolutions,
   exportPresets = {},
-  onCancel
+  onCancel,
+  projectName = 'Untitled',
+  exportResult,
+  onDownload,
+  onExportAnother,
 }) => {
   const [selectedResolution, setSelectedResolution] = useState('1080p');
   const [exportTab, setExportTab] = useState('resolution'); // 'resolution' | 'platform'
   const [selectedPreset, setSelectedPreset] = useState('youtube-1080p');
-  
+  const [exportFormat, setExportFormat] = useState('mp4');
+  const [exportQuality, setExportQuality] = useState('high');
+  const [exportFps, setExportFps] = useState(30);
+  const [exportFilename, setExportFilename] = useState('');
+
+  // Sync filename with project name
+  useEffect(() => {
+    if (isOpen && !exportFilename) {
+      setExportFilename(projectName.replace(/[^a-z0-9_\- ]/gi, '_'));
+    }
+  }, [isOpen, projectName]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handle escape key to close modal
   useEffect(() => {
     if (!isOpen) return;
-    
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && !isExporting) {
-        onClose();
-      }
-    };
-    
+    const handleKeyDown = (e) => { if (e.key === 'Escape' && !isExporting) onClose(); };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isExporting, onClose]);
-  
+
   // Trap focus within modal
   useEffect(() => {
     if (!isOpen) return;
-    
     const modal = document.getElementById('export-modal');
-    const focusableElements = modal?.querySelectorAll(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-    );
-    
-    if (focusableElements?.length) {
-      focusableElements[0].focus();
-    }
+    const focusable = modal?.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+    if (focusable?.length) focusable[0].focus();
   }, [isOpen]);
-  
+
   if (!isOpen) return null;
-  
-  const handleBackdropClick = (e) => {
-    if (e.target === e.currentTarget && !isExporting) {
-      onClose();
-    }
+
+  const handleBackdropClick = (e) => { if (e.target === e.currentTarget && !isExporting && !exportResult) onClose(); };
+
+  const res = resolutions?.[selectedResolution];
+  const qualityPreset = QUALITY_PRESETS.find(q => q.key === exportQuality);
+  const summaryParts = [exportFormat.toUpperCase(), selectedResolution, `${exportFps}fps`];
+  const summaryLine = exportTab === 'platform'
+    ? exportPresets[selectedPreset]?.label
+    : summaryParts.join(' · ');
+
+  const handleExport = () => {
+    const settings = exportTab === 'platform'
+      ? `preset:${selectedPreset}`
+      : selectedResolution;
+    onExport(settings, { format: exportFormat, quality: qualityPreset?.crf, fps: exportFps, filename: exportFilename || projectName });
   };
-  
+
+  // Settings form
+  const renderSettings = () => (
+    <>
+      {/* Format */}
+      <div style={{ marginBottom: '14px' }}>
+        <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Format</label>
+        <PillGroup items={FORMAT_OPTIONS} selected={exportFormat} onSelect={setExportFormat} />
+      </div>
+
+      {/* Tab switcher: Resolution vs Platform */}
+      <div style={{ marginBottom: '14px' }}>
+        <PillGroup items={[{ key: 'resolution', label: 'Resolution' }, { key: 'platform', label: 'Platform' }]} selected={exportTab} onSelect={setExportTab} />
+      </div>
+
+      {exportTab === 'resolution' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }} role="radiogroup">
+          {Object.entries(resolutions).map(([key, { label, width, height }]) => (
+            <button key={key} onClick={() => setSelectedResolution(key)} className="resolution-option" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+              background: selectedResolution === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+              border: selectedResolution === key ? '1.5px solid #75aadb' : '1px solid rgba(255,255,255,0.06)',
+            }} role="radio" aria-checked={selectedResolution === key}>
+              <div>
+                <span style={{ fontSize: '12px', color: selectedResolution === key ? '#75aadb' : 'white', fontWeight: selectedResolution === key ? 600 : 400 }}>{label}</span>
+                <span style={{ fontSize: '10px', color: '#4a5568', marginLeft: '6px' }}>{width}&times;{height}</span>
+              </div>
+              {selectedResolution === key && <Icon i="check_circle" s={16} c="#75aadb" />}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }} role="radiogroup">
+          {Object.entries(exportPresets).map(([key, p]) => (
+            <button key={key} onClick={() => setSelectedPreset(key)} style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              padding: '10px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+              background: selectedPreset === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+              border: selectedPreset === key ? '1.5px solid #75aadb' : '1px solid rgba(255,255,255,0.06)',
+            }} role="radio" aria-checked={selectedPreset === key}>
+              <div>
+                <div style={{ fontSize: '12px', color: selectedPreset === key ? '#75aadb' : 'white', fontWeight: selectedPreset === key ? 600 : 400 }}>{p.label}</div>
+                <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '1px' }}>{p.description} · {p.width}&times;{p.height}</div>
+              </div>
+              {selectedPreset === key && <Icon i="check_circle" s={16} c="#75aadb" />}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Quality + FPS row */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Quality</label>
+          <PillGroup items={QUALITY_PRESETS} selected={exportQuality} onSelect={setExportQuality} />
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Frame Rate</label>
+          <PillGroup items={FPS_OPTIONS.map(f => ({ key: f, label: `${f}fps` }))} selected={exportFps} onSelect={setExportFps} />
+        </div>
+      </div>
+
+      {/* Filename */}
+      <div style={{ marginBottom: '14px' }}>
+        <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Filename</label>
+        <input
+          type="text"
+          value={exportFilename}
+          onChange={(e) => setExportFilename(e.target.value)}
+          style={{
+            width: '100%', background: 'rgba(26,35,50,0.6)', border: '1px solid rgba(117,170,219,0.08)',
+            borderRadius: '6px', padding: '8px 10px', color: 'white', fontSize: '12px',
+            outline: 'none', fontFamily: "'Spline Sans', sans-serif", boxSizing: 'border-box',
+          }}
+          aria-label="Export filename"
+        />
+      </div>
+
+      {/* Summary */}
+      <div style={{
+        padding: '10px 14px', background: 'rgba(117,170,219,0.06)', borderRadius: '6px',
+        marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px',
+        border: '1px solid rgba(117,170,219,0.1)',
+      }}>
+        <Icon i="info" s={14} c="#5a8cbf" />
+        <span style={{ fontSize: '11px', color: '#75aadb', fontWeight: 500 }}>{summaryLine}</span>
+      </div>
+
+      {/* Export + Cancel buttons */}
+      <div style={{ display: 'flex', gap: '8px' }}>
+        <button onClick={onClose} style={{
+          flex: '0 0 auto', padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+        }}>Cancel</button>
+        <button onClick={handleExport} className="export-btn" style={{
+          flex: 1, padding: '10px', background: '#75aadb', border: 'none', borderRadius: '8px',
+          color: '#0a0a0a', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontFamily: "'Spline Sans', sans-serif",
+        }}>
+          <Icon i="download" s={16} c="#0a0a0a" />
+          Export
+        </button>
+      </div>
+    </>
+  );
+
+  // Progress view
+  const renderProgress = () => (
+    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+      <div style={{ width: '70px', height: '70px', margin: '0 auto 20px', borderRadius: '50%', background: 'rgba(117,170,219,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        <Icon i="movie_edit" s={32} c="#75aadb" />
+        <div style={{ position: 'absolute', inset: 0, border: '3px solid transparent', borderTopColor: '#75aadb', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+      </div>
+      <p style={{ color: 'white', fontSize: '16px', fontWeight: 500, margin: '0 0 6px' }}>{operationLabel}</p>
+      <p style={{ color: '#64748b', fontSize: '12px', margin: '0 0 24px' }}>Please wait while your video is being processed</p>
+      <div style={{ height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden', marginBottom: '12px' }}>
+        <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg, #75aadb, #5a8cbf)', borderRadius: '4px', transition: 'width 0.3s ease' }} />
+      </div>
+      <p style={{ color: '#75aadb', fontSize: '18px', fontWeight: 700, margin: '0 0 20px', fontFamily: 'monospace' }}>{Math.round(progress)}%</p>
+      {onCancel && (
+        <button onClick={onCancel} style={{
+          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px',
+          padding: '9px 28px', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: "'Spline Sans', sans-serif",
+        }}>Cancel Export</button>
+      )}
+    </div>
+  );
+
+  // Completion view
+  const renderComplete = () => (
+    <div style={{ textAlign: 'center', padding: '20px 0' }}>
+      <div style={{ width: '70px', height: '70px', margin: '0 auto 20px', borderRadius: '50%', background: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <Icon i="check_circle" s={40} c="#22c55e" />
+      </div>
+      <p style={{ color: 'white', fontSize: '16px', fontWeight: 600, margin: '0 0 6px' }}>Export Complete</p>
+      {exportResult?.size && (
+        <p style={{ color: '#64748b', fontSize: '12px', margin: '0 0 20px' }}>
+          File size: {(exportResult.size / (1024 * 1024)).toFixed(1)} MB
+        </p>
+      )}
+      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+        <button onClick={onClose} style={{
+          padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+        }}>Close</button>
+        {onExportAnother && (
+          <button onClick={onExportAnother} style={{
+            padding: '10px 20px', background: 'rgba(117,170,219,0.1)', border: '1px solid rgba(117,170,219,0.2)',
+            borderRadius: '8px', color: '#75aadb', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
+          }}>Export Another</button>
+        )}
+        {onDownload && (
+          <button onClick={onDownload} className="export-btn" style={{
+            padding: '10px 24px', background: '#75aadb', border: 'none', borderRadius: '8px',
+            color: '#0a0a0a', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: '6px', fontFamily: "'Spline Sans', sans-serif",
+          }}>
+            <Icon i="download" s={16} c="#0a0a0a" />
+            Download
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
-      <div 
-        className="export-modal-backdrop"
-        style={{
-          position: 'fixed',
-          inset: 0,
-          background: 'rgba(0,0,0,0.85)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 3500,
-          backdropFilter: 'blur(4px)'
-        }}
+    <div
+      className="export-modal-backdrop"
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3500, backdropFilter: 'blur(4px)' }}
       onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="export-modal-title"
+      role="dialog" aria-modal="true" aria-labelledby="export-modal-title"
     >
       <style>{TOP_BAR_CSS}</style>
-      
-      <div 
-        id="export-modal"
-        className="export-modal-content"
-        style={{
-          background: '#1a2332',
-          borderRadius: '12px',
-          padding: '24px',
-          width: '420px',
-          maxWidth: '90vw',
-          border: '1px solid rgba(255,255,255,0.1)',
-          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.5)'
-        }}
-      >
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '20px'
-        }}>
-          <h2 
-            id="export-modal-title"
-            style={{
-              margin: 0,
-              fontSize: '18px',
-              fontWeight: 600,
-              color: 'white',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '10px'
-            }}
-          >
-            <Icon i="download" s={22} c="#75aadb" />
+      <div id="export-modal" className="export-modal-content" style={{
+        background: '#1a2332', borderRadius: '12px', padding: '24px', width: '440px', maxWidth: '90vw',
+        maxHeight: '85vh', overflowY: 'auto',
+        border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+      }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
+          <h2 id="export-modal-title" style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Icon i="download" s={20} c="#75aadb" />
             Export Video
           </h2>
-          {!isExporting && (
-            <button
-              onClick={onClose}
-              style={{
-                ...styles.ghost,
-                padding: '6px',
-                borderRadius: '6px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-              aria-label="Close export dialog"
-              title="Close (Escape)"
-            >
-              <Icon i="close" s={20} c="#94a3b8" />
+          {!isExporting && !exportResult && (
+            <button onClick={onClose} style={{ ...styles.ghost, padding: '6px', borderRadius: '6px', display: 'flex' }} aria-label="Close export dialog" title="Close (Escape)">
+              <Icon i="close" s={18} c="#94a3b8" />
             </button>
           )}
         </div>
-        
-        {!isExporting ? (
-          <>
-            <div style={{ marginBottom: '20px' }}>
-              {/* Tab switcher: Resolution vs Platform presets */}
-              <div style={{ display: 'flex', gap: '4px', marginBottom: '14px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '3px' }}>
-                {[['resolution', 'Resolution'], ['platform', 'Platform']].map(([id, lbl]) => (
-                  <button key={id} onClick={() => setExportTab(id)} style={{
-                    flex: 1, padding: '8px', border: 'none', borderRadius: '6px', cursor: 'pointer',
-                    fontSize: '11px', fontWeight: 600, fontFamily: "'Spline Sans', sans-serif",
-                    background: exportTab === id ? 'rgba(117,170,219,0.15)' : 'transparent',
-                    color: exportTab === id ? '#75aadb' : '#94a3b8',
-                  }}>{lbl}</button>
-                ))}
-              </div>
 
-              {exportTab === 'resolution' ? (
-                <>
-                  <label id="resolution-label" style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>
-                    Select Resolution
-                  </label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="radiogroup" aria-labelledby="resolution-label">
-                    {Object.entries(resolutions).map(([key, { label }]) => (
-                      <button key={key} onClick={() => setSelectedResolution(key)} className="resolution-option" style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '14px 16px',
-                        background: selectedResolution === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
-                        border: selectedResolution === key ? '2px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: '8px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif"
-                      }} role="radio" aria-checked={selectedResolution === key} tabIndex={selectedResolution === key ? 0 : -1}>
-                        <span style={{ fontSize: '14px', color: selectedResolution === key ? '#75aadb' : 'white', fontWeight: selectedResolution === key ? 600 : 400 }}>
-                          {label}
-                        </span>
-                        {selectedResolution === key && <Icon i="check_circle" s={20} c="#75aadb" />}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <label style={{ display: 'block', fontSize: '11px', color: '#94a3b8', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>
-                    Platform Presets
-                  </label>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="radiogroup">
-                    {Object.entries(exportPresets).map(([key, p]) => (
-                      <button key={key} onClick={() => setSelectedPreset(key)} style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                        padding: '12px 16px', borderRadius: '8px', cursor: 'pointer',
-                        fontFamily: "'Spline Sans', sans-serif",
-                        background: selectedPreset === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
-                        border: selectedPreset === key ? '2px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
-                      }} role="radio" aria-checked={selectedPreset === key}>
-                        <div>
-                          <div style={{ fontSize: '13px', color: selectedPreset === key ? '#75aadb' : 'white', fontWeight: selectedPreset === key ? 600 : 400 }}>{p.label}</div>
-                          <div style={{ fontSize: '10px', color: '#64748b', marginTop: '2px' }}>{p.description} &middot; {p.width}&times;{p.height}</div>
-                        </div>
-                        {selectedPreset === key && <Icon i="check_circle" s={20} c="#75aadb" />}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            
-            <div style={{
-              padding: '14px',
-              background: 'rgba(117,170,219,0.08)',
-              borderRadius: '8px',
-              marginBottom: '20px',
-              border: '1px solid rgba(117, 170, 219, 0.2)'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: '10px',
-                color: '#75aadb',
-                fontSize: '12px',
-                lineHeight: 1.5
-              }}>
-                <Icon i="info" s={16} c="#75aadb" style={{ marginTop: '2px', flexShrink: 0 }} />
-                <span>
-                  Export uses H.264 codec for maximum compatibility. 
-                  Higher resolutions may take longer to process.
-                </span>
-              </div>
-            </div>
-            
-            <button
-              onClick={() => onExport(exportTab === 'platform' ? `preset:${selectedPreset}` : selectedResolution)}
-              className="export-btn"
-              style={{
-                width: '100%',
-                padding: '14px',
-                background: '#75aadb',
-                border: 'none',
-                borderRadius: '8px',
-                color: '#0a0a0a',
-                fontSize: '14px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-                fontFamily: "'Spline Sans', sans-serif"
-              }}
-              aria-label={`Export video${exportTab === 'platform' ? ` for ${exportPresets[selectedPreset]?.label}` : ` at ${selectedResolution}`}`}
-            >
-              <Icon i="download" s={18} c="#0a0a0a" />
-              {exportTab === 'platform' ? `Export for ${exportPresets[selectedPreset]?.label}` : `Export at ${selectedResolution}`}
-            </button>
-          </>
-        ) : (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div style={{
-              width: '70px',
-              height: '70px',
-              margin: '0 auto 20px',
-              borderRadius: '50%',
-              background: 'rgba(117,170,219,0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              position: 'relative'
-            }}>
-              <Icon i="movie_edit" s={32} c="#75aadb" />
-              {/* Animated ring */}
-              <div style={{
-                position: 'absolute',
-                inset: 0,
-                border: '3px solid transparent',
-                borderTopColor: '#75aadb',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }} />
-            </div>
-            
-            <p style={{
-              color: 'white',
-              fontSize: '16px',
-              fontWeight: 500,
-              margin: '0 0 6px 0'
-            }}>
-              {operationLabel}
-            </p>
-            <p style={{
-              color: '#64748b',
-              fontSize: '12px',
-              margin: '0 0 24px 0'
-            }}>
-              Please wait while your video is being processed
-            </p>
-            
-            <div style={{
-              height: '8px',
-              background: 'rgba(255,255,255,0.1)',
-              borderRadius: '4px',
-              overflow: 'hidden',
-              marginBottom: '12px'
-            }}>
-              <div style={{
-                height: '100%',
-                width: `${progress}%`,
-                background: 'linear-gradient(90deg, #75aadb, #5a8cbf)',
-                borderRadius: '4px',
-                transition: 'width 0.3s ease'
-              }} />
-            </div>
-            
-            <p style={{
-              color: '#75aadb',
-              fontSize: '18px',
-              fontWeight: 700,
-              margin: '0 0 20px',
-              fontFamily: 'monospace'
-            }}>
-              {Math.round(progress)}%
-            </p>
-            {onCancel && (
-              <button
-                onClick={onCancel}
-                style={{
-                  background: 'rgba(239,68,68,0.12)',
-                  border: '1px solid rgba(239,68,68,0.3)',
-                  borderRadius: '8px',
-                  padding: '9px 28px',
-                  color: '#ef4444',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  fontFamily: "'Spline Sans', sans-serif",
-                }}
-                aria-label="Cancel export"
-              >
-                Cancel Export
-              </button>
-            )}
-          </div>
-        )}
+        {exportResult ? renderComplete() : isExporting ? renderProgress() : renderSettings()}
       </div>
     </div>
   );
@@ -684,13 +646,14 @@ const TopBar = ({
     }
   }, [hasMediaToExport, isExporting]);
   
-  const handleExport = useCallback((resolution) => {
-    onExport?.(resolution);
+  const handleExport = useCallback((resolution, settings) => {
+    onExport?.(resolution, settings);
   }, [onExport]);
   
   const handleCloseModal = useCallback(() => {
     if (!isExporting) {
       setShowExportModal(false);
+      setExportResult(null);
     }
   }, [isExporting]);
   
@@ -708,13 +671,16 @@ const TopBar = ({
     }
   }, []);
   
-  // Close modal when export completes
+  // Track export completion for the modal's completion view
+  const [exportResult, setExportResult] = useState(null);
   useEffect(() => {
-    if (!isExporting && exportProgress === 100 && showExportModal) {
-      const timer = setTimeout(() => setShowExportModal(false), 1000);
-      return () => clearTimeout(timer);
+    if (!isExporting && exportProgress >= 100 && showExportModal && !exportResult) {
+      setExportResult({ size: null }); // size populated by parent if available
     }
-  }, [isExporting, exportProgress, showExportModal]);
+    if (!showExportModal) {
+      setExportResult(null);
+    }
+  }, [isExporting, exportProgress, showExportModal, exportResult]);
   
   // Get current time for auto-save display
   const [currentTime, setCurrentTime] = useState('');
@@ -943,6 +909,10 @@ const TopBar = ({
         resolutions={resolutions}
         exportPresets={exportPresets}
         onCancel={isExporting ? onCancelExport : undefined}
+        projectName={projectName}
+        exportResult={exportResult}
+        onDownload={exportResult ? handleCloseModal : undefined}
+        onExportAnother={exportResult ? () => setExportResult(null) : undefined}
       />
 
       <KeyboardShortcutsModal

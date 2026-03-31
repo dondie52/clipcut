@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, memo } from 'react';
+import { useRef, useState, useCallback, useMemo, useEffect, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
@@ -136,12 +136,13 @@ const MEDIA_PANEL_CSS = `
 `;
 
 /* ========== MEDIA ITEM COMPONENT ========== */
-const MediaItem = memo(({ 
-  item, 
-  isSelected, 
-  onSelect, 
+const MediaItem = memo(({
+  item,
+  isSelected,
+  onSelect,
   onAddToTimeline,
   onRemove,
+  onContextMenu,
   index
 }) => {
   const [isHovered, setIsHovered] = useState(false);
@@ -214,6 +215,7 @@ const MediaItem = memo(({
     <div 
       onClick={() => onSelect(item.id)}
       onDoubleClick={() => onAddToTimeline(item)}
+      onContextMenu={(e) => { e.preventDefault(); onContextMenu?.(e, item); }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onKeyDown={handleKeyDown}
@@ -502,6 +504,48 @@ const EmptyState = memo(() => (
 
 EmptyState.displayName = 'EmptyState';
 
+/* ========== CONTEXT MENU ========== */
+const ContextMenu = memo(({ x, y, item, onClose, onAddToTimeline, onRemove }) => {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    const handle = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
+    const handleKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', handle);
+    document.addEventListener('keydown', handleKey);
+    return () => { document.removeEventListener('mousedown', handle); document.removeEventListener('keydown', handleKey); };
+  }, [onClose]);
+
+  const menuItems = [
+    { label: 'Add to timeline', icon: 'add', action: () => { onAddToTimeline(item); onClose(); } },
+    { label: 'Delete from project', icon: 'delete', action: () => { onRemove(item.id); onClose(); }, color: '#ef4444' },
+  ];
+
+  return (
+    <div ref={ref} style={{
+      position: 'fixed', left: x, top: y, zIndex: 9999,
+      background: '#1a2332', border: '1px solid rgba(117,170,219,0.15)',
+      borderRadius: '8px', padding: '4px 0', minWidth: '160px',
+      boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+    }}>
+      {menuItems.map(m => (
+        <button key={m.label} onClick={m.action} style={{
+          ...styles.ghost, width: '100%', display: 'flex', alignItems: 'center', gap: '8px',
+          padding: '6px 12px', fontSize: '11px', fontWeight: 500,
+          color: m.color || '#cbd5e1', textAlign: 'left',
+        }}
+          onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(117,170,219,0.1)'}
+          onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+        >
+          <Icon i={m.icon} s={14} c={m.color || '#64748b'} />
+          {m.label}
+        </button>
+      ))}
+    </div>
+  );
+});
+ContextMenu.displayName = 'ContextMenu';
+
 /* ========== MEDIA PANEL COMPONENT (LEFT SIDEBAR) ========== */
 const MediaPanel = ({ 
   mediaTab, 
@@ -518,6 +562,28 @@ const MediaPanel = ({
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'video' | 'audio'
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, item }
+
+  // Filter media items by search and type
+  const filteredItems = useMemo(() => {
+    let items = mediaItems;
+    if (typeFilter !== 'all') {
+      items = items.filter(i => i.type === typeFilter);
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      items = items.filter(i => i.name?.toLowerCase().includes(q));
+    }
+    return items;
+  }, [mediaItems, typeFilter, searchQuery]);
+
+  const typeCounts = useMemo(() => ({
+    all: mediaItems.length,
+    video: mediaItems.filter(i => i.type === 'video').length,
+    audio: mediaItems.filter(i => i.type === 'audio').length,
+  }), [mediaItems]);
   
   const handleImportClick = useCallback(() => {
     fileInputRef.current?.click();
@@ -576,7 +642,13 @@ const MediaPanel = ({
       handleImportClick();
     }
   }, [handleImportClick]);
-  
+
+  const handleContextMenu = useCallback((e, item) => {
+    setContextMenu({ x: e.clientX, y: e.clientY, item });
+  }, []);
+
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
   return (
     <aside
       className="editor-left-panel"
@@ -662,6 +734,45 @@ const MediaPanel = ({
           )}
         </div>
 
+        {/* Search + type filters */}
+        {mediaTab === 'local' && mediaItems.length > 0 && (
+          <>
+            <div style={{ position: 'relative' }}>
+              <Icon i="search" s={14} c="#4a5568" style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
+              <input
+                type="text"
+                placeholder="Search media..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  width: '100%', background: 'rgba(26,35,50,0.4)', border: '1px solid rgba(255,255,255,0.06)',
+                  borderRadius: '6px', padding: '5px 8px 5px 28px', color: 'white', fontSize: '11px',
+                  outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
+                }}
+                aria-label="Search imported media"
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              {[{ key: 'all', label: 'All' }, { key: 'video', label: 'Video' }, { key: 'audio', label: 'Audio' }].map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => setTypeFilter(f.key)}
+                  style={{
+                    ...styles.ghost,
+                    fontSize: '9px', fontWeight: 600, padding: '2px 8px', borderRadius: '10px',
+                    color: typeFilter === f.key ? '#e2e8f0' : '#4a5568',
+                    background: typeFilter === f.key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+                    border: typeFilter === f.key ? '1px solid rgba(117,170,219,0.25)' : '1px solid transparent',
+                  }}
+                  aria-pressed={typeFilter === f.key}
+                >
+                  {f.label} ({typeCounts[f.key]})
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         {mediaTab === 'local' && (
           <>
             <input
@@ -746,6 +857,11 @@ const MediaPanel = ({
         >
           {mediaItems.length === 0 ? (
             <EmptyState />
+          ) : filteredItems.length === 0 ? (
+            <div style={{ padding: '24px 16px', textAlign: 'center' }}>
+              <Icon i="search_off" s={28} c="#3d4a5c" />
+              <p style={{ fontSize: '11px', color: '#4a5568', margin: '8px 0 0' }}>No matching media</p>
+            </div>
           ) : (
             <div
               style={{
@@ -757,7 +873,7 @@ const MediaPanel = ({
               role="list"
               aria-label="Imported media items"
             >
-              {mediaItems.map((item, index) => (
+              {filteredItems.map((item, index) => (
                 <MediaItem
                   key={item.id}
                   item={item}
@@ -765,6 +881,7 @@ const MediaPanel = ({
                   onSelect={onSelectMedia}
                   onAddToTimeline={onAddToTimeline}
                   onRemove={onRemoveMedia}
+                  onContextMenu={handleContextMenu}
                   index={index}
                 />
               ))}
@@ -805,6 +922,15 @@ const MediaPanel = ({
             Coming Soon
           </span>
         </div>
+      )}
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x} y={contextMenu.y} item={contextMenu.item}
+          onClose={closeContextMenu}
+          onAddToTimeline={onAddToTimeline}
+          onRemove={onRemoveMedia}
+        />
       )}
     </aside>
   );

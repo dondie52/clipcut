@@ -236,7 +236,7 @@ export const styles = {
     transition: "all 0.15s ease"
   },
   rightPanel: {
-    width: "300px",
+    width: "320px",
     minWidth: 0,
     maxWidth: "100%",
     borderLeft: "1px solid rgba(117, 170, 219, 0.08)",

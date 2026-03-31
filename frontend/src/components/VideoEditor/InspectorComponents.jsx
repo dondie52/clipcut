@@ -41,7 +41,7 @@ const INSPECTOR_CSS = `
   .section-content.expanded {
     max-height: 500px;
     opacity: 1;
-    margin-top: 12px;
+    margin-top: 8px;
   }
   
   .inspector-slider {
@@ -113,7 +113,7 @@ const INSPECTOR_CSS = `
 `;
 
 /* ========== COLLAPSIBLE SECTION COMPONENT ========== */
-export const Section = memo(({ t, children, defaultExpanded = true, onToggle }) => {
+export const Section = memo(({ t, children, defaultExpanded = false, onToggle }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   
   const handleToggle = useCallback(() => {
@@ -174,7 +174,7 @@ export const Section = memo(({ t, children, defaultExpanded = true, onToggle }) 
         style={{
           display: "flex",
           flexDirection: "column",
-          gap: "12px"
+          gap: "8px"
         }}
       >
         {children}
@@ -314,7 +314,7 @@ export const Slider = memo(({
         alignItems: "center",
         fontSize: "10px",
         color: "#4a5568",
-        marginBottom: "5px"
+        marginBottom: "3px"
       }}>
         <span style={{ fontWeight: 500 }}>{l}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -416,7 +416,7 @@ export const SmallInput = memo(({
           fontWeight: 500,
           color: isFocused ? "#75aadb" : "#4a5568",
           display: "block",
-          marginBottom: "4px",
+          marginBottom: "2px",
           transition: 'color 0.15s ease',
           letterSpacing: "0.3px",
         }}
@@ -470,7 +470,7 @@ export const EffectCard = memo(({
       style={{
         background: "rgba(26,35,50,0.4)",
         borderRadius: "6px",
-        padding: "8px 10px",
+        padding: "6px 8px",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -563,7 +563,7 @@ export const ColorPicker = memo(({
         fontSize: "10px",
         color: "#64748b",
         display: "block",
-        marginBottom: "6px"
+        marginBottom: "3px"
       }}>
         {label}
       </span>
@@ -642,7 +642,7 @@ export const Hr = memo(() => (
     style={{
       height: "1px",
       background: "linear-gradient(90deg, transparent 0%, rgba(117,170,219,0.08) 50%, transparent 100%)",
-      margin: "2px 0"
+      margin: "1px 0"
     }}
     role="separator"
   />
