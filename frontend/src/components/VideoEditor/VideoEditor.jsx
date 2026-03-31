@@ -57,38 +57,39 @@ const VIDEO_EDITOR_CSS = `
     transition: background 0.15s ease;
     user-select: none;
     z-index: 10;
+    background: rgba(117,170,219,0.04);
   }
   .resize-handle:hover, .resize-handle.dragging {
-    background: rgba(117,170,219,0.12);
+    background: rgba(117,170,219,0.15);
   }
   .resize-handle-h {
-    height: 6px;
+    height: 8px;
     cursor: row-resize;
   }
   .resize-handle-v {
-    width: 6px;
+    width: 8px;
     cursor: col-resize;
   }
   .resize-handle-dot {
-    width: 24px;
+    width: 32px;
     height: 3px;
     border-radius: 2px;
-    background: rgba(117,170,219,0.2);
+    background: rgba(117,170,219,0.25);
     transition: background 0.15s ease;
   }
   .resize-handle:hover .resize-handle-dot, .resize-handle.dragging .resize-handle-dot {
-    background: rgba(117,170,219,0.5);
+    background: rgba(117,170,219,0.6);
   }
   .resize-handle-dot-v {
     width: 3px;
-    height: 24px;
+    height: 32px;
   }
   ${SCROLLBAR_CSS}
   ${RESPONSIVE_CSS}
 `;
 
 /* ========== RESIZE HANDLE ========== */
-function useResizeDrag(axis, onResize, onEnd) {
+function useResizeDrag(axis, onResize, onEnd, invert = false) {
   const dragging = useRef(false);
   const startPos = useRef(0);
   const startSize = useRef(0);
@@ -103,9 +104,10 @@ function useResizeDrag(axis, onResize, onEnd) {
 
     const onMouseMove = (ev) => {
       if (!dragging.current) return;
-      const delta = axis === 'y'
+      const raw = axis === 'y'
         ? startPos.current - ev.clientY  // dragging up = bigger timeline
         : ev.clientX - startPos.current;
+      const delta = invert ? -raw : raw;
       onResize(startSize.current + delta);
     };
     const onMouseUp = () => {
@@ -121,7 +123,7 @@ function useResizeDrag(axis, onResize, onEnd) {
     document.addEventListener('mouseup', onMouseUp);
     document.body.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
     document.body.style.userSelect = 'none';
-  }, [axis, onResize, onEnd]);
+  }, [axis, onResize, onEnd, invert]);
 
   return onMouseDown;
 }
@@ -601,7 +603,7 @@ const VideoEditor = () => {
 
   const onTimelineDrag = useResizeDrag('y', clampTlH);
   const onMediaDrag = useResizeDrag('x', clampMpW);
-  const onInspectorDrag = useResizeDrag('x', clampIpW);
+  const onInspectorDrag = useResizeDrag('x', clampIpW, undefined, true);
   const [mobileActiveTab, setMobileActiveTab] = useState(null);
   const [forceExport, setForceExport] = useState(0);
   const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('clipcut_onboarded'));
