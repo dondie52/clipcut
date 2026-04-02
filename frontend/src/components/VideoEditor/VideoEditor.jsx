@@ -1572,15 +1572,49 @@ const VideoEditor = () => {
       }}>
         {editorLayout !== 'compact' && !isMobile && (
           <>
-            <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
+            <ErrorBoundary name="left-panel" inline message="Panel encountered an error">
               <Suspense fallback={<PanelLoadingFallback width={`${mediaPanelWidth || DEFAULT_MEDIA_W}px`} />}>
-                <MediaPanel
-                  mediaTab={mediaTab} onMediaTabChange={setMediaTab}
-                  mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
-                  onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
-                  isImporting={isImporting}
-                  style={{ width: `${mediaPanelWidth || DEFAULT_MEDIA_W}px` }}
-                />
+                <div style={{ width: `${mediaPanelWidth || DEFAULT_MEDIA_W}px`, flexShrink: 0, overflow: 'hidden auto', background: '#0e1218' }} className="cs">
+                  {activeToolbar === 'media' && (
+                    <MediaPanel
+                      mediaTab={mediaTab} onMediaTabChange={setMediaTab}
+                      mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
+                      onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
+                      isImporting={isImporting}
+                    />
+                  )}
+                  {activeToolbar === 'text' && (
+                    <MobileTextPanel
+                      selectedClip={selectedClip} onClipUpdate={updateClip}
+                      onAddClip={addClip} currentTime={pb.currentTime}
+                    />
+                  )}
+                  {activeToolbar === 'audio' && (
+                    <MobileAudioPanel
+                      selectedClip={selectedClip} onClipUpdate={updateClip}
+                      bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                      onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                    />
+                  )}
+                  {activeToolbar === 'stickers' && (
+                    <MobileStickerPanel onAddClip={addClip} currentTime={pb.currentTime} />
+                  )}
+                  {activeToolbar === 'effects' && (
+                    <MobileEffectsPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
+                  )}
+                  {activeToolbar === 'transition' && (
+                    <InspectorPanel
+                      rightTab="video" onRightTabChange={setRightTab}
+                      rightSubTab="basic" onRightSubTabChange={setRightSubTab}
+                      selectedClip={selectedClip} onClipUpdate={updateClip}
+                      bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                      onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                    />
+                  )}
+                  {activeToolbar === 'filters' && (
+                    <MobileFiltersPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
+                  )}
+                </div>
               </Suspense>
             </ErrorBoundary>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onMediaDrag(e, mediaPanelWidth || DEFAULT_MEDIA_W)} onDoubleClick={() => setMediaPanelWidth(null)}>
