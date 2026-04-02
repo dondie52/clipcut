@@ -428,7 +428,7 @@ DraggableTextOverlay.displayName = 'DraggableTextOverlay';
 const TextOverlaysLayer = memo(({ textOverlays, selectedClipId, onSelect, onUpdate, containerRef }) => {
   if (!textOverlays || textOverlays.length === 0) return null;
   return (
-    <div style={{ position: 'absolute', inset: 0, zIndex: 8, pointerEvents: 'none' }}>
+    <div style={{ position: 'absolute', inset: 0, zIndex: 15, pointerEvents: 'none' }}>
       {textOverlays.map(clip => (
         <DraggableTextOverlay
           key={clip.id}
@@ -971,14 +971,6 @@ const Player = ({
                         bgColor={clipProperties.textBgColor || ''}
                       />
                     )}
-                    {/* Draggable text overlays from text clips */}
-                    <TextOverlaysLayer
-                      textOverlays={textOverlays}
-                      selectedClipId={selectedClipId}
-                      onSelect={onSelectClip}
-                      onUpdate={onClipUpdate}
-                      containerRef={videoCanvasRef}
-                    />
                     {/* Center play/pause overlay */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
                       position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
@@ -1040,6 +1032,14 @@ const Player = ({
                         {fitLabels[fitMode]}
                       </span>
                     </div>
+                    {/* Text overlays from text/caption clips — rendered above all controls */}
+                    <TextOverlaysLayer
+                      textOverlays={textOverlays}
+                      selectedClipId={selectedClipId}
+                      onSelect={onSelectClip}
+                      onUpdate={onClipUpdate}
+                      containerRef={videoCanvasRef}
+                    />
                   </>
                 )}
               </>
@@ -1082,6 +1082,16 @@ const Player = ({
                   </div>
                 </div>
               </div>
+            )}
+            {/* Text overlays — always rendered on top, even without video */}
+            {!videoSrc && textOverlays.length > 0 && (
+              <TextOverlaysLayer
+                textOverlays={textOverlays}
+                selectedClipId={selectedClipId}
+                onSelect={onSelectClip}
+                onUpdate={onClipUpdate}
+                containerRef={videoCanvasRef}
+              />
             )}
           </div>
         </div>
