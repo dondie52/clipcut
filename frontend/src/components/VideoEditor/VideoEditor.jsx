@@ -11,6 +11,7 @@ import { saveProject, loadProject, getProjectMediaUrl, uploadProjectMedia } from
 import { isSupabaseConfigured } from '../../supabase/supabaseClient';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
+import { storeMedia, loadMedia } from '../../utils/mediaStore';
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
@@ -112,19 +113,14 @@ function useResizeDrag(axis, onResize, onEnd, invert = false) {
   const dragging = useRef(false);
   const startPos = useRef(0);
   const startSize = useRef(0);
-  const moveLogCount = useRef(0);
 
   const onMouseDown = useCallback((e, currentSize) => {
     e.preventDefault();
     dragging.current = true;
     startPos.current = axis === 'y' ? e.clientY : e.clientX;
     startSize.current = currentSize;
-    moveLogCount.current = 0;
     const handle = e.currentTarget;
     handle.classList.add('dragging');
-    // #region agent log
-    fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:axis === 'y' ? 'H1' : invert ? 'H3' : 'H1',location:'VideoEditor.jsx:104',message:'Resize handle mouse down',data:{axis,invert,currentSize,targetClassName:handle.className,pointer:{x:e.clientX,y:e.clientY}},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
 
     const onMouseMove = (ev) => {
       if (!dragging.current) return;
@@ -132,20 +128,11 @@ function useResizeDrag(axis, onResize, onEnd, invert = false) {
         ? startPos.current - ev.clientY  // dragging up = bigger timeline
         : ev.clientX - startPos.current;
       const delta = invert ? -raw : raw;
-      if (moveLogCount.current < 3) {
-        moveLogCount.current += 1;
-        // #region agent log
-        fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:axis === 'y' ? 'H2' : invert ? 'H3' : 'H2',location:'VideoEditor.jsx:115',message:'Resize handle mouse move',data:{axis,invert,startSize:startSize.current,raw,delta,nextSize:startSize.current + delta,pointer:{x:ev.clientX,y:ev.clientY}},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
-      }
       onResize(startSize.current + delta);
     };
     const onMouseUp = () => {
       dragging.current = false;
       handle.classList.remove('dragging');
-      // #region agent log
-      fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:axis === 'y' ? 'H2' : invert ? 'H3' : 'H2',location:'VideoEditor.jsx:123',message:'Resize handle mouse up',data:{axis,invert,startSize:startSize.current,moveLogsCaptured:moveLogCount.current},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
       document.body.style.cursor = '';
@@ -452,6 +439,7 @@ const useAutoSave = (
   const isSavingRef = useRef(false);
   const projectIdRef = useRef(projectId);
   const lastThumbnailClipIdRef = useRef(null);
+  const doSaveRef = useRef(null);
 
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
@@ -505,16 +493,24 @@ const useAutoSave = (
           };
         }
 
-        if (userId) {
-          const firstVideoClip = currentClips.find((c) => c.type === "video" && c.file);
-          const firstClipMediaId = firstVideoClip?.mediaId || null;
-          if (firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current) {
-            try {
-              projectData.thumbnail = await generateThumbnailFast(firstVideoClip.file, 1);
-              lastThumbnailClipIdRef.current = firstClipMediaId;
-            } catch (e) {
-              console.warn("Auto-save thumbnail generation failed:", e);
+        // Generate thumbnail for both Supabase and localStorage saves
+        const firstVideoClip = currentClips.find((c) => c.type === "video" && c.file);
+        const firstClipMediaId = firstVideoClip?.mediaId || null;
+        if (firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current) {
+          try {
+            const thumbBlob = await generateThumbnailFast(firstVideoClip.file, 1);
+            lastThumbnailClipIdRef.current = firstClipMediaId;
+            if (userId) {
+              projectData.thumbnail = thumbBlob;
             }
+            // Also produce a base64 data URL for localStorage persistence
+            projectData.thumbnailDataUrl = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result);
+              reader.readAsDataURL(thumbBlob);
+            });
+          } catch (e) {
+            console.warn("Auto-save thumbnail generation failed:", e);
           }
         }
 
@@ -577,19 +573,17 @@ const useAutoSave = (
             }
           }
         } else {
-          const data = {
-            projectName: currentName,
-            clips: projectData.clips,
-            savedAt: new Date().toISOString(),
-          };
-          if (currentBg?.storagePath) {
-            data.bgMusic = {
-              storagePath: currentBg.storagePath,
-              name: currentBg.name,
-              volume: currentBg.volume ?? 0.3,
-            };
+          // localStorage fallback — use saveProject (routes to localStorage) with thumbnail
+          const saved = saveProject(null, projectData);
+          const pid = saved.id;
+          if (!projectIdRef.current) projectIdRef.current = pid;
+
+          // Persist media files to IndexedDB so they survive page reloads
+          for (const m of mediaItemsRef.current) {
+            if (m.file) {
+              storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+            }
           }
-          localStorage.setItem(`clipcut_autosave_${currentName}`, JSON.stringify(data));
         }
 
         setLastSaved(new Date());
@@ -619,11 +613,16 @@ const useAutoSave = (
       }
     };
 
+    doSaveRef.current = doSave;
     const timer = setInterval(doSave, interval);
     return () => clearInterval(timer);
   }, [userId, interval, setMediaItems, setClips, setBgMusic]);
 
-  return { lastSaved, projectId: projectIdRef.current };
+  const triggerSave = useCallback(() => {
+    if (doSaveRef.current) doSaveRef.current();
+  }, []);
+
+  return { lastSaved, projectId: projectIdRef.current, triggerSave };
 };
 
 /* ========== PLAYBACK ENGINE ========== */
@@ -756,23 +755,14 @@ const VideoEditor = () => {
 
   const clampTlH = useCallback((h) => {
     const clamped = Math.max(120, Math.min(h, window.innerHeight * 0.6));
-    // #region agent log
-    fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:'H4',location:'VideoEditor.jsx:620',message:'Timeline height clamp',data:{requested:h,clamped,innerHeight:window.innerHeight},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setTimelineHeight(clamped);
   }, []);
   const clampMpW = useCallback((w) => {
     const clamped = Math.max(200, Math.min(w, 400));
-    // #region agent log
-    fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:'H2',location:'VideoEditor.jsx:624',message:'Media panel width clamp',data:{requested:w,clamped},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setMediaPanelWidth(clamped);
   }, []);
   const clampIpW = useCallback((w) => {
     const clamped = Math.max(220, Math.min(w, 450));
-    // #region agent log
-    fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:'H3',location:'VideoEditor.jsx:630',message:'Inspector width clamp',data:{requested:w,clamped},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setInspectorWidth(clamped);
   }, []);
 
@@ -782,11 +772,6 @@ const VideoEditor = () => {
   const [mobileActiveTab, setMobileActiveTab] = useState(null);
   const [forceExport, setForceExport] = useState(0);
   const [showWalkthrough, setShowWalkthrough] = useState(() => !localStorage.getItem('clipcut_onboarded'));
-  useEffect(() => {
-    // #region agent log
-    fetch('http://127.0.0.1:7249/ingest/7eca2665-ebe2-44fa-9a22-24d2bcafa132',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'1519fb'},body:JSON.stringify({sessionId:'1519fb',runId:'pre-fix',hypothesisId:'H5',location:'VideoEditor.jsx:642',message:'Editor resize configuration',data:{isMobile,editorLayout,mediaPanelWidth,inspectorWidth,timelineHeight},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
-  }, [editorLayout, inspectorWidth, isMobile, mediaPanelWidth, timelineHeight]);
 
   // Media library
   const [mediaItems, setMediaItems] = useState([]);
@@ -868,7 +853,7 @@ const VideoEditor = () => {
   }, []);
 
   // Auto-save with cloud storage (after setClips — uploads need setters)
-  const { lastSaved, projectId: savedProjectId } = useAutoSave(
+  const { lastSaved, projectId: savedProjectId, triggerSave } = useAutoSave(
     projectId,
     projectName,
     clips,
@@ -1182,9 +1167,9 @@ const VideoEditor = () => {
   }, [clips.length, notify, setClips]);
 
   const handleSave = useCallback(() => {
-    // Auto-save is already wired — trigger a manual nudge via notify
-    notify('info', 'Project saved');
-  }, [notify]);
+    triggerSave();
+    notify('success', 'Project saved');
+  }, [triggerSave, notify]);
 
   const handleSettings = useCallback(() => {
     navigate('/settings');
@@ -1615,16 +1600,31 @@ const VideoEditor = () => {
             }
           }
 
+          // Fallback: load from IndexedDB (localStorage projects)
+          if (!blobUrl && clipData.mediaId) {
+            try {
+              const stored = await loadMedia(projectId, clipData.mediaId);
+              if (stored) {
+                file = stored.file;
+                blobUrl = stored.blobUrl;
+              }
+            } catch (e) {
+              console.warn("IndexedDB media load failed:", clipData.mediaId, e);
+            }
+          }
+
           if (blobUrl && clipData.mediaId) {
             mediaMap.set(clipData.mediaId, { blobUrl, file });
           }
 
+          const mediaUnavailable = !blobUrl && clipData.type !== 'text';
           restoredClips.push({
             ...DEFAULT_CLIP_PROPERTIES,
             ...clipData,
             file: file || null,
             blobUrl: blobUrl || null,
             thumbnail: null,
+            _mediaError: mediaUnavailable ? "Media not found — re-import" : null,
           });
         }
 

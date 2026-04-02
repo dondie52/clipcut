@@ -11,7 +11,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
 import { useMobile } from "../hooks/useMobile";
-import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject } from "../services/projectService";
+import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject, loadProject as loadCloudProject, saveProject as saveCloudProject } from "../services/projectService";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
@@ -289,6 +289,25 @@ const DASH_CSS = `
   }
   .del-btn:hover { background: #ef4444; }
 
+  /* ---- Context Menu ---- */
+  .ctx-menu {
+    position: fixed; z-index: 5000;
+    background: #1a2332; border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px; padding: 4px 0; min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    animation: dashFadeIn 0.12s ease;
+  }
+  .ctx-menu-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 14px; font-size: 12px; color: rgba(255,255,255,0.8);
+    cursor: pointer; background: none; border: none; width: 100%;
+    font-family: inherit; text-align: left;
+  }
+  .ctx-menu-item:hover { background: rgba(117,170,219,0.1); color: white; }
+  .ctx-menu-item--danger { color: #ef4444; }
+  .ctx-menu-item--danger:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+  .ctx-menu-sep { height: 1px; background: rgba(255,255,255,0.06); margin: 4px 0; }
+
   /* ---- Empty State ---- */
   .empty-state {
     padding: 48px 24px; border-radius: 12px;
@@ -532,6 +551,13 @@ function relativeTime(dateStr) {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function formatEditTime(dateStr) {
+  if (!dateStr) return "Never";
+  const d = new Date(dateStr);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${time} · ${relativeTime(dateStr)}`;
+}
+
 function getGreeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good morning";
@@ -746,6 +772,46 @@ const Dashboard = () => {
     setRenamingId(null);
   }, [renameValue, projects, user?.id]);
 
+  // Context menu state
+  const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
+
+  const handleContextMenu = useCallback((e, project) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, project });
+  }, []);
+
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  // Close context menu when clicking anywhere
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handler = () => setCtxMenu(null);
+    window.addEventListener("click", handler);
+    window.addEventListener("contextmenu", handler);
+    return () => {
+      window.removeEventListener("click", handler);
+      window.removeEventListener("contextmenu", handler);
+    };
+  }, [ctxMenu]);
+
+  const handleDuplicateProject = useCallback(async (project) => {
+    closeCtxMenu();
+    try {
+      const full = await loadCloudProject(project.id, user?.id);
+      if (!full) return;
+      const saved = await saveCloudProject(user?.id, {
+        name: `${project.name} (copy)`,
+        clips: full.project_data?.clips || [],
+        duration: full.duration_seconds || 0,
+        resolution: full.resolution || "1080p",
+      });
+      if (saved) loadProjects();
+    } catch (err) {
+      logger.error("Failed to duplicate project", { error: err });
+    }
+  }, [user?.id, closeCtxMenu, loadProjects]);
+
   const sanitizedQuery = sanitizeSearchQuery(searchQuery);
   const filteredProjects = projects.filter((p) =>
     p.name.toLowerCase().includes(sanitizedQuery.toLowerCase())
@@ -927,13 +993,24 @@ const Dashboard = () => {
                       key={project.id}
                       className="project-card"
                       onClick={() => handleLoadProject(project)}
+                      onContextMenu={(e) => handleContextMenu(e, project)}
                     >
                       <div className="project-thumb">
                         {project.thumbnail ? (
-                          <img src={project.thumbnail} alt={project.name} />
-                        ) : (
+                          <img
+                            src={project.thumbnail}
+                            alt={project.name}
+                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                          />
+                        ) : null}
+                        <div style={{
+                          display: project.thumbnail ? 'none' : 'flex',
+                          alignItems: 'center', justifyContent: 'center',
+                          width: '100%', height: '100%', position: 'absolute', inset: 0,
+                          background: '#111820',
+                        }}>
                           <I i="movie" s={32} c="rgba(255,255,255,0.1)" />
-                        )}
+                        </div>
                         <button
                           className="del-btn"
                           onClick={(e) => handleDeleteProject(e, project.id)}
@@ -972,11 +1049,27 @@ const Dashboard = () => {
                           </p>
                         )}
                         <p className="meta">
-                          {project.resolution} · {project.duration || "0:00"} · {relativeTime(project.savedAt)}
+                          {project.resolution} · {formatEditTime(project.savedAt)}
                         </p>
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* Right-click context menu */}
+              {ctxMenu && (
+                <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+                  <button className="ctx-menu-item" onClick={() => { handleStartRename({ stopPropagation: () => {} }, ctxMenu.project); closeCtxMenu(); }}>
+                    <I i="edit" s={14} /> Rename
+                  </button>
+                  <button className="ctx-menu-item" onClick={() => handleDuplicateProject(ctxMenu.project)}>
+                    <I i="content_copy" s={14} /> Duplicate
+                  </button>
+                  <div className="ctx-menu-sep" />
+                  <button className="ctx-menu-item ctx-menu-item--danger" onClick={(e) => { handleDeleteProject(e, ctxMenu.project.id); closeCtxMenu(); }}>
+                    <I i="delete" s={14} /> Delete
+                  </button>
                 </div>
               )}
 

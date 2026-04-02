@@ -11,6 +11,7 @@ import { sanitizeTextInput, sanitizeFileName } from "../utils/validation";
 import { retryWithBackoff, getUserFriendlyMessage } from "../utils/errorHandling";
 import { logger } from "../utils/logger";
 import { createRateLimiter } from "../utils/rateLimiter";
+import { deleteProjectMedia as deleteProjectMediaFromIDB } from "../utils/mediaStore";
 
 /**
  * Rate limiters for API operations
@@ -494,6 +495,10 @@ function saveProjectToLocalStorage(projectData) {
   const id = projectData.id || `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   // Sanitize project name before saving to localStorage
   const sanitizedName = sanitizeTextInput(projectData.name || "Untitled Project", { maxLength: 100 });
+
+  // Convert thumbnail Blob to base64 data-URL for localStorage persistence
+  let thumbnailDataUrl = projectData.thumbnailDataUrl || null;
+
   const project = {
     id,
     name: sanitizedName,
@@ -502,6 +507,7 @@ function saveProjectToLocalStorage(projectData) {
       savedAt: new Date().toISOString(),
       ...(projectData.bgMusic ? { bgMusic: projectData.bgMusic } : {}),
     },
+    thumbnail_url: thumbnailDataUrl,
     duration_seconds: Math.round(projectData.duration || 0),
     resolution: projectData.resolution || "1080p",
     created_at: projectData.created_at || new Date().toISOString(),
@@ -547,7 +553,7 @@ function listProjectsFromLocalStorage() {
         projects.push({
           id: data.id || projectName,
           name: data.name || data.projectName || projectName,
-          thumbnail_url: null,
+          thumbnail_url: data.thumbnail_url || null,
           duration_seconds: data.duration_seconds || 0,
           resolution: data.resolution || "1080p",
           created_at: data.created_at || data.savedAt,
@@ -573,6 +579,7 @@ function listProjectsFromLocalStorage() {
 function deleteProjectFromLocalStorage(projectId) {
   localStorage.removeItem(`clipcut_project_${projectId}`);
   localStorage.removeItem(`clipcut_autosave_${projectId}`);
+  deleteProjectMediaFromIDB(projectId).catch(() => {});
 }
 
 /**
