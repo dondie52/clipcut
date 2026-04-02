@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { FILTER_PRESETS, TEXT_POSITION_PRESETS } from './constants';
+import { FILTER_PRESETS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
 
 /* ========== CSS ========== */
@@ -269,19 +269,182 @@ const SpeedControl = memo(({ speed, onChange }) => {
 });
 SpeedControl.displayName = "SpeedControl";
 
-/* ========== TEXT OVERLAY CANVAS ========== */
+/* ========== TEXT OVERLAY POSITION MAP ========== */
 const TEXT_POS_MAP = {
-  'top-left': { x: 0.05, y: 0.08, align: 'left', baseline: 'top' },
-  'top-center': { x: 0.5, y: 0.08, align: 'center', baseline: 'top' },
-  'top-right': { x: 0.95, y: 0.08, align: 'right', baseline: 'top' },
-  'center-left': { x: 0.05, y: 0.5, align: 'left', baseline: 'middle' },
-  'center': { x: 0.5, y: 0.5, align: 'center', baseline: 'middle' },
-  'center-right': { x: 0.95, y: 0.5, align: 'right', baseline: 'middle' },
-  'bottom-left': { x: 0.05, y: 0.92, align: 'left', baseline: 'bottom' },
-  'bottom-center': { x: 0.5, y: 0.92, align: 'center', baseline: 'bottom' },
-  'bottom-right': { x: 0.95, y: 0.92, align: 'right', baseline: 'bottom' },
+  'top-left':      { left: '5%',  top: '8%',  transform: 'none',              textAlign: 'left' },
+  'top-center':    { left: '50%', top: '8%',  transform: 'translateX(-50%)',  textAlign: 'center' },
+  'top-right':     { right: '5%', top: '8%',  transform: 'none',             textAlign: 'right' },
+  'center-left':   { left: '5%',  top: '50%', transform: 'translateY(-50%)',  textAlign: 'left' },
+  'center':        { left: '50%', top: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' },
+  'center-right':  { right: '5%', top: '50%', transform: 'translateY(-50%)', textAlign: 'right' },
+  'bottom-left':   { left: '5%',  bottom: '8%', transform: 'none',            textAlign: 'left' },
+  'bottom-center': { left: '50%', bottom: '8%', transform: 'translateX(-50%)', textAlign: 'center' },
+  'bottom-right':  { right: '5%', bottom: '8%', transform: 'none',            textAlign: 'right' },
 };
 
+/* ========== SINGLE DRAGGABLE TEXT OVERLAY ========== */
+const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, containerRef }) => {
+  const elRef = useRef(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0, startX: 0, startY: 0 });
+
+  const pos = clip.textPosition || 'center';
+  const hasCustomPos = clip.textX != null && clip.textY != null;
+  const scaleFactor = containerRef?.current ? containerRef.current.clientHeight / 1080 : 0.4;
+  const scaledSize = Math.max(10, Math.round((clip.textSize || 48) * scaleFactor));
+
+  // Build style for text position
+  const positionStyle = hasCustomPos
+    ? { left: `${clip.textX}%`, top: `${clip.textY}%`, transform: 'translate(-50%, -50%)' }
+    : (() => {
+        const p = TEXT_POS_MAP[pos] || TEXT_POS_MAP['center'];
+        const s = {};
+        if (p.left) s.left = p.left;
+        if (p.right) s.right = p.right;
+        if (p.top) s.top = p.top;
+        if (p.bottom) s.bottom = p.bottom;
+        s.transform = p.transform;
+        return s;
+      })();
+
+  const handleMouseDown = useCallback((e) => {
+    if (isEditing) return;
+    e.stopPropagation();
+    e.preventDefault();
+    onSelect(clip.id);
+    setIsDragging(true);
+
+    const container = containerRef?.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const el = elRef.current;
+    const elRect = el.getBoundingClientRect();
+    const centerX = ((elRect.left + elRect.width / 2 - rect.left) / rect.width) * 100;
+    const centerY = ((elRect.top + elRect.height / 2 - rect.top) / rect.height) * 100;
+
+    dragStart.current = { x: e.clientX, y: e.clientY, startX: centerX, startY: centerY };
+
+    const onMove = (ev) => {
+      const dx = ((ev.clientX - dragStart.current.x) / rect.width) * 100;
+      const dy = ((ev.clientY - dragStart.current.y) / rect.height) * 100;
+      const newX = Math.max(2, Math.min(98, dragStart.current.startX + dx));
+      const newY = Math.max(2, Math.min(98, dragStart.current.startY + dy));
+      onUpdate(clip.id, { textX: newX, textY: newY });
+    };
+    const onUp = () => {
+      setIsDragging(false);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+  }, [clip.id, isEditing, onSelect, onUpdate, containerRef]);
+
+  const handleDoubleClick = useCallback((e) => {
+    e.stopPropagation();
+    onSelect(clip.id);
+    setIsEditing(true);
+  }, [clip.id, onSelect]);
+
+  const handleBlur = useCallback(() => {
+    setIsEditing(false);
+    const el = elRef.current;
+    if (el) {
+      const newText = el.innerText.trim();
+      if (newText !== clip.text) {
+        onUpdate(clip.id, { text: newText || 'Your Text' });
+      }
+    }
+  }, [clip.id, clip.text, onUpdate]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      setIsEditing(false);
+      elRef.current?.blur();
+    }
+    if (e.key === 'Escape') {
+      setIsEditing(false);
+      elRef.current?.blur();
+    }
+    e.stopPropagation();
+  }, []);
+
+  const fontWeight = clip.textBold ? 'bold' : 'normal';
+  const fontStyle = clip.textItalic ? 'italic' : 'normal';
+  const textDecoration = clip.textUnderline ? 'underline' : 'none';
+  const fontFamily = `'${clip.textFontFamily || 'Spline Sans'}', sans-serif`;
+  const textAlign = clip.textAlign || (TEXT_POS_MAP[pos]?.textAlign) || 'center';
+
+  return (
+    <div
+      ref={elRef}
+      contentEditable={isEditing}
+      suppressContentEditableWarning
+      onMouseDown={handleMouseDown}
+      onDoubleClick={handleDoubleClick}
+      onBlur={handleBlur}
+      onKeyDown={isEditing ? handleKeyDown : undefined}
+      style={{
+        position: 'absolute',
+        ...positionStyle,
+        fontSize: `${scaledSize}px`,
+        fontWeight,
+        fontStyle,
+        textDecoration,
+        fontFamily,
+        textAlign,
+        color: clip.textColor || '#ffffff',
+        textShadow: '0 1px 4px rgba(0,0,0,0.7), 0 0 2px rgba(0,0,0,0.5)',
+        padding: `${scaledSize * 0.15}px ${scaledSize * 0.3}px`,
+        background: clip.textBgColor || 'transparent',
+        borderRadius: clip.textBgColor ? '4px' : '0',
+        cursor: isEditing ? 'text' : isDragging ? 'grabbing' : 'grab',
+        outline: isSelected ? '2px solid #75aadb' : 'none',
+        outlineOffset: '3px',
+        boxShadow: isSelected ? '0 0 0 1px rgba(117,170,219,0.3)' : 'none',
+        zIndex: isSelected ? 12 : 10,
+        minWidth: '20px',
+        maxWidth: '90%',
+        wordBreak: 'break-word',
+        whiteSpace: 'pre-wrap',
+        lineHeight: 1.2,
+        userSelect: isEditing ? 'text' : 'none',
+        pointerEvents: 'auto',
+      }}
+    >
+      {clip.text || 'Your Text'}
+    </div>
+  );
+});
+DraggableTextOverlay.displayName = 'DraggableTextOverlay';
+
+/* ========== TEXT OVERLAYS LAYER ========== */
+const TextOverlaysLayer = memo(({ textOverlays, selectedClipId, onSelect, onUpdate, containerRef }) => {
+  if (!textOverlays || textOverlays.length === 0) return null;
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 8, pointerEvents: 'none' }}>
+      {textOverlays.map(clip => (
+        <DraggableTextOverlay
+          key={clip.id}
+          clip={clip}
+          isSelected={selectedClipId === clip.id}
+          onSelect={onSelect}
+          onUpdate={onUpdate}
+          containerRef={containerRef}
+        />
+      ))}
+    </div>
+  );
+});
+TextOverlaysLayer.displayName = 'TextOverlaysLayer';
+
+/* ========== LEGACY CANVAS TEXT (for text on video clips) ========== */
 const TextOverlayCanvas = memo(({ text, color, size, position, bgColor }) => {
   const canvasRef = useRef(null);
 
@@ -297,30 +460,31 @@ const TextOverlayCanvas = memo(({ text, color, size, position, bgColor }) => {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    const pos = TEXT_POS_MAP[position] || TEXT_POS_MAP['bottom-center'];
-    const scaledSize = Math.max(12, Math.round(size * (h / 1080))); // Scale font relative to preview
+    const posData = TEXT_POS_MAP[position] || TEXT_POS_MAP['bottom-center'];
+    const pctX = parseFloat(posData.left || posData.right || '50') / 100;
+    const pctY = parseFloat(posData.top || posData.bottom || '50') / 100;
+    const scaledSize = Math.max(12, Math.round(size * (h / 1080)));
+    const align = posData.textAlign || 'center';
     ctx.font = `bold ${scaledSize}px 'Spline Sans', Arial, sans-serif`;
-    ctx.textAlign = pos.align;
-    ctx.textBaseline = pos.baseline;
+    ctx.textAlign = align;
+    ctx.textBaseline = posData.top ? 'top' : posData.bottom ? 'bottom' : 'middle';
 
-    const x = pos.x * w;
-    const y = pos.y * h;
+    const x = pctX * w;
+    const y = pctY * h;
 
-    // Draw background box if set
     if (bgColor) {
       const metrics = ctx.measureText(text);
       const pad = scaledSize * 0.25;
-      const bx = pos.align === 'center' ? x - metrics.width / 2 - pad
-        : pos.align === 'right' ? x - metrics.width - pad : x - pad;
-      const by = pos.baseline === 'middle' ? y - scaledSize / 2 - pad
-        : pos.baseline === 'bottom' ? y - scaledSize - pad : y - pad;
+      const bx = align === 'center' ? x - metrics.width / 2 - pad
+        : align === 'right' ? x - metrics.width - pad : x - pad;
+      const by = ctx.textBaseline === 'middle' ? y - scaledSize / 2 - pad
+        : ctx.textBaseline === 'bottom' ? y - scaledSize - pad : y - pad;
       ctx.fillStyle = bgColor;
       ctx.globalAlpha = 0.7;
       ctx.fillRect(bx, by, metrics.width + pad * 2, scaledSize + pad * 2);
       ctx.globalAlpha = 1;
     }
 
-    // Draw text with shadow
     ctx.shadowColor = 'rgba(0,0,0,0.6)';
     ctx.shadowBlur = 4;
     ctx.shadowOffsetX = 1;
@@ -348,10 +512,15 @@ const Player = ({
   onTimeUpdate, onDurationChange, onEnded, onSeek,
   onVideoError = null,
   clipProperties = null,
+  textOverlays = [],
+  selectedClipId = null,
+  onClipUpdate = null,
+  onSelectClip = null,
 }) => {
   const isMobile = useMobile();
   const videoRef = useRef(null);
   const containerRef = useRef(null);
+  const videoCanvasRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
   const [dDur, setDDur] = useState(duration);
   const [fitMode, setFitMode] = useState("fit");
@@ -735,7 +904,7 @@ const Player = ({
       }}>
         <div style={{ position: "relative", width: "100%", ...(isMobile ? {} : { maxWidth: "960px" }) }}>
           {/* Video canvas */}
-          <div className="player-container" onClick={(e) => {
+          <div ref={videoCanvasRef} className="player-container" onClick={(e) => {
             if (isMobile) {
               userTogglePlayPause(e);
             } else {
@@ -792,8 +961,8 @@ const Player = ({
                         ...videoPreviewStyle,
                       }}
                     />
-                    {/* Canvas text overlay preview */}
-                    {clipProperties?.text?.trim() && (
+                    {/* Canvas text overlay preview (text on video clips) */}
+                    {clipProperties?.text?.trim() && clipProperties?.type !== 'text' && (
                       <TextOverlayCanvas
                         text={clipProperties.text}
                         color={clipProperties.textColor || '#ffffff'}
@@ -802,6 +971,14 @@ const Player = ({
                         bgColor={clipProperties.textBgColor || ''}
                       />
                     )}
+                    {/* Draggable text overlays from text clips */}
+                    <TextOverlaysLayer
+                      textOverlays={textOverlays}
+                      selectedClipId={selectedClipId}
+                      onSelect={onSelectClip}
+                      onUpdate={onClipUpdate}
+                      containerRef={videoCanvasRef}
+                    />
                     {/* Center play/pause overlay */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
                       position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",

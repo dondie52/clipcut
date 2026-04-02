@@ -281,8 +281,16 @@ export const DEFAULT_CLIP_PROPERTIES = {
   textSize: 48,
   textPosition: 'bottom-center',
   textBgColor: '',
+  textBold: false,
+  textItalic: false,
+  textUnderline: false,
+  textAlign: 'center',
+  textFontFamily: 'Spline Sans',
   textStartTime: 0,
   textDuration: 0,
+  // Free-position for canvas drag (null = use textPosition preset)
+  textX: null,
+  textY: null,
 };
 
 /* ========== FILTER PRESETS ========== */
@@ -398,12 +406,25 @@ export const STICKER_PRESETS = [
   { emoji: '📌', label: 'Pin', category: 'objects' },
 ];
 
-/* ========== TEXT STYLE PRESETS (mobile) ========== */
+/* ========== TEXT STYLE PRESETS ========== */
 export const TEXT_STYLE_PRESETS = [
-  { name: 'Title', textSize: 64, textColor: '#ffffff', textPosition: 'center', textBgColor: '', icon: 'title' },
-  { name: 'Subtitle', textSize: 36, textColor: '#e2e8f0', textPosition: 'bottom-center', textBgColor: '', icon: 'subtitles' },
-  { name: 'Caption', textSize: 24, textColor: '#ffffff', textPosition: 'bottom-center', textBgColor: '#000000', icon: 'closed_caption' },
-  { name: 'Lower Third', textSize: 28, textColor: '#ffffff', textPosition: 'bottom-left', textBgColor: 'rgba(0,0,0,0.7)', icon: 'video_label' },
+  { name: 'Title', textSize: 64, textColor: '#ffffff', textPosition: 'center', textBgColor: '', textBold: true, textAlign: 'center', icon: 'title' },
+  { name: 'Subtitle', textSize: 36, textColor: '#e2e8f0', textPosition: 'bottom-center', textBgColor: '', textBold: false, textAlign: 'center', icon: 'subtitles' },
+  { name: 'Caption', textSize: 24, textColor: '#ffffff', textPosition: 'bottom-center', textBgColor: '#000000', textBold: false, textAlign: 'center', icon: 'closed_caption' },
+  { name: 'Lower Third', textSize: 28, textColor: '#ffffff', textPosition: 'bottom-left', textBgColor: 'rgba(0,0,0,0.7)', textBold: true, textAlign: 'left', icon: 'video_label' },
+];
+
+/* ========== TEXT FONT FAMILIES ========== */
+export const TEXT_FONT_FAMILIES = [
+  'Spline Sans',
+  'Arial',
+  'Georgia',
+  'Courier New',
+  'Impact',
+  'Comic Sans MS',
+  'Trebuchet MS',
+  'Verdana',
+  'Times New Roman',
 ];
 
 /* ========== SPEED PRESETS ========== */

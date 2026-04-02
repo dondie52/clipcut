@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS } from './constants';
+import { SCROLLBAR_CSS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { useMobile } from '../../hooks/useMobile';
 import {
   zoomToPxPerSec, timeToX, xToTime,
@@ -326,8 +326,9 @@ const TimelineClip = memo(({
   const width = Math.max(clip.duration * pixelsPerSecond, 40);
   const left = clip.startTime * pixelsPerSecond;
   const isAudio = clip.type === "audio";
-  const accent = isAudio ? "#34d399" : "#75aadb";
-  const accentRgba = isAudio ? "52,211,153" : "117,170,219";
+  const isText = clip.type === "text";
+  const accent = isText ? "#f59e0b" : isAudio ? "#34d399" : "#75aadb";
+  const accentRgba = isText ? "245,158,11" : isAudio ? "52,211,153" : "117,170,219";
 
   return (
     <div
@@ -339,7 +340,7 @@ const TimelineClip = memo(({
       aria-selected={isSelected}
       style={{
         position: "absolute", left: `${left}px`, width: `${width}px`,
-        height: isAudio ? "52px" : "60px", top: "4px",
+        height: isAudio ? "52px" : isText ? "52px" : "60px", top: "4px",
         background: isSelected
           ? `linear-gradient(180deg, rgba(${accentRgba},0.3) 0%, rgba(${accentRgba},0.15) 100%)`
           : `linear-gradient(180deg, rgba(${accentRgba},0.1) 0%, rgba(${accentRgba},0.04) 100%)`,
@@ -349,11 +350,18 @@ const TimelineClip = memo(({
         cursor: cutMode ? "crosshair" : "grab",
       }}
     >
-      {/* Filmstrip or waveform background */}
+      {/* Filmstrip, waveform, or text pattern background */}
       {isAudio ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 4px" }}>
           <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} audioFile={clip.file} />
         </div>
+      ) : isText ? (
+        <div style={{
+          position: "absolute", inset: 0,
+          background: isSelected
+            ? `repeating-linear-gradient(90deg, rgba(${accentRgba},0.08) 0px, rgba(${accentRgba},0.08) 4px, transparent 4px, transparent 8px)`
+            : `repeating-linear-gradient(90deg, rgba(${accentRgba},0.04) 0px, rgba(${accentRgba},0.04) 4px, transparent 4px, transparent 8px)`,
+        }} />
       ) : (
         <FilmstripThumbnails width={width} height={60} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
       )}
@@ -387,7 +395,7 @@ const TimelineClip = memo(({
           display: "flex", alignItems: "center", justifyContent: "center",
           border: `1px solid rgba(${accentRgba},${isSelected ? "0.4" : "0.15"})`,
         }}>
-          <Icon i={isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
+          <Icon i={isText ? "text_fields" : isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
         </div>
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", gap: "1px" }}>
           <span style={{
@@ -395,7 +403,7 @@ const TimelineClip = memo(({
             color: isSelected ? "white" : "#e2e8f0",
             whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             textShadow: "0 1px 3px rgba(0,0,0,0.6)", letterSpacing: "0.01em",
-          }}>{clip.name}</span>
+          }}>{isText ? (clip.text || clip.name) : clip.name}</span>
           {width > 100 && (
             <span style={{
               fontSize: "8px", fontWeight: 500,
@@ -1326,7 +1334,20 @@ const Timeline = ({
                   <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#34d399' }}>music_note</span>
                 </button>
                 <button
-                  onClick={() => { /* trigger text overlay */ }}
+                  onClick={() => {
+                    onAddClip?.({
+                      ...DEFAULT_CLIP_PROPERTIES,
+                      id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                      type: 'text',
+                      name: 'Title',
+                      text: 'Your Text',
+                      textSize: 64,
+                      textBold: true,
+                      startTime: currentTime || 0,
+                      duration: 5,
+                      track: 1,
+                    });
+                  }}
                   style={{
                     width: '32px', height: '32px', borderRadius: '6px',
                     background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
@@ -1336,7 +1357,7 @@ const Timeline = ({
                   aria-label="Add text"
                   title="Add text"
                 >
-                  <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#e2e8f0' }}>title</span>
+                  <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#f59e0b' }}>title</span>
                 </button>
               </div>
             </>

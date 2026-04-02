@@ -1,7 +1,7 @@
 import { useCallback, useRef, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, TRANSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
+import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, TEXT_FONT_FAMILIES, TRANSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { Section, Row, Slider, SmallInput, Hr, EffectCard, ColorPicker } from './InspectorComponents';
 import { useMobile } from '../../hooks/useMobile';
 
@@ -365,6 +365,187 @@ const InspectorPanel = ({
             {/* Video Tab Content */}
             {rightTab === 'video' && (
               <>
+                {/* Text Clip Controls — shown when text clip is selected */}
+                {selectedClip?.type === 'text' && (
+                  <>
+                    <Section t="Text Content" defaultExpanded>
+                      <textarea
+                        value={cp(selectedClip, 'text') || ''}
+                        onChange={(e) => update('text', e.target.value)}
+                        placeholder="Enter text..."
+                        rows={2}
+                        style={{
+                          width: '100%', padding: '8px 10px', borderRadius: '6px',
+                          background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+                          color: '#e2e8f0', fontSize: '13px', fontFamily: "'Spline Sans', sans-serif",
+                          outline: 'none', resize: 'vertical', minHeight: '50px',
+                        }}
+                      />
+                    </Section>
+
+                    <Section t="Font" defaultExpanded>
+                      <Row>
+                        <select
+                          value={cp(selectedClip, 'textFontFamily') || 'Spline Sans'}
+                          onChange={(e) => update('textFontFamily', e.target.value)}
+                          style={{
+                            flex: 1, padding: '6px 8px', borderRadius: '4px',
+                            background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+                            color: '#e2e8f0', fontSize: '11px', fontFamily: "'Spline Sans', sans-serif",
+                            outline: 'none', cursor: 'pointer',
+                          }}
+                        >
+                          {TEXT_FONT_FAMILIES.map(f => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                      </Row>
+                      <Slider
+                        l="Size"
+                        value={cp(selectedClip, 'textSize')}
+                        onChange={(val) => update('textSize', Math.max(8, Math.min(200, val)))}
+                        min={8} max={200} defaultValue={48}
+                      />
+                    </Section>
+
+                    <Section t="Style" defaultExpanded>
+                      <Row>
+                        <div style={{ display: 'flex', gap: '4px', flex: 1 }}>
+                          {[
+                            { key: 'textBold', icon: 'format_bold', label: 'Bold' },
+                            { key: 'textItalic', icon: 'format_italic', label: 'Italic' },
+                            { key: 'textUnderline', icon: 'format_underlined', label: 'Underline' },
+                          ].map(s => {
+                            const active = !!cp(selectedClip, s.key);
+                            return (
+                              <button
+                                key={s.key}
+                                onClick={() => update(s.key, !active)}
+                                aria-label={s.label}
+                                style={{
+                                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  padding: '6px', borderRadius: '4px', cursor: 'pointer',
+                                  background: active ? 'rgba(117,170,219,0.15)' : 'rgba(30,41,59,0.5)',
+                                  border: active ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                                }}
+                              >
+                                <Icon i={s.icon} s={16} c={active ? '#75aadb' : '#94a3b8'} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Row>
+                      <Row>
+                        <div style={{ display: 'flex', gap: '4px', flex: 1 }}>
+                          {[
+                            { value: 'left', icon: 'format_align_left' },
+                            { value: 'center', icon: 'format_align_center' },
+                            { value: 'right', icon: 'format_align_right' },
+                          ].map(a => {
+                            const active = (cp(selectedClip, 'textAlign') || 'center') === a.value;
+                            return (
+                              <button
+                                key={a.value}
+                                onClick={() => update('textAlign', a.value)}
+                                aria-label={`Align ${a.value}`}
+                                style={{
+                                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  padding: '6px', borderRadius: '4px', cursor: 'pointer',
+                                  background: active ? 'rgba(117,170,219,0.15)' : 'rgba(30,41,59,0.5)',
+                                  border: active ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                                }}
+                              >
+                                <Icon i={a.icon} s={16} c={active ? '#75aadb' : '#94a3b8'} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Row>
+                    </Section>
+
+                    <Section t="Color" defaultExpanded>
+                      <Row>
+                        <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Text</span>
+                        <input
+                          type="color"
+                          value={cp(selectedClip, 'textColor') || '#ffffff'}
+                          onChange={(e) => update('textColor', e.target.value)}
+                          style={{
+                            width: '32px', height: '24px', border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '1px',
+                          }}
+                        />
+                      </Row>
+                      <Row>
+                        <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Background</span>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <button
+                            onClick={() => update('textBgColor', cp(selectedClip, 'textBgColor') ? '' : 'rgba(0,0,0,0.6)')}
+                            style={{
+                              background: cp(selectedClip, 'textBgColor') ? 'rgba(117,170,219,0.15)' : 'rgba(30,41,59,0.5)',
+                              border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px',
+                              padding: '3px 8px', color: '#94a3b8', fontSize: '9px', cursor: 'pointer',
+                            }}
+                          >
+                            {cp(selectedClip, 'textBgColor') ? 'On' : 'Off'}
+                          </button>
+                          {cp(selectedClip, 'textBgColor') && (
+                            <input
+                              type="color"
+                              value={cp(selectedClip, 'textBgColor')?.startsWith('rgba') ? '#000000' : (cp(selectedClip, 'textBgColor') || '#000000')}
+                              onChange={(e) => update('textBgColor', e.target.value)}
+                              style={{
+                                width: '32px', height: '24px', border: '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '1px',
+                              }}
+                            />
+                          )}
+                        </div>
+                      </Row>
+                      <Slider
+                        l="Opacity"
+                        value={Math.round((cp(selectedClip, 'opacity') ?? 1) * 100)}
+                        onChange={(val) => update('opacity', Math.max(0, Math.min(100, val)) / 100)}
+                        min={0} max={100} defaultValue={100}
+                      />
+                    </Section>
+
+                    <Section t="Position">
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '3px' }}>
+                        {TEXT_POSITION_PRESETS.map(p => {
+                          const active = cp(selectedClip, 'textPosition') === p.value && cp(selectedClip, 'textX') == null;
+                          return (
+                            <button
+                              key={p.value}
+                              onClick={() => {
+                                update('textPosition', p.value);
+                                update('textX', null);
+                                update('textY', null);
+                              }}
+                              title={p.label}
+                              style={{
+                                background: active ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
+                                border: active ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.08)',
+                                borderRadius: '3px', padding: '6px', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                              }}
+                            >
+                              <Icon i={p.icon} s={12} c={active ? '#75aadb' : '#64748b'} />
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {cp(selectedClip, 'textX') != null && (
+                        <div style={{ marginTop: '6px', fontSize: '9px', color: '#64748b', textAlign: 'center' }}>
+                          Custom position — click a preset to reset
+                        </div>
+                      )}
+                    </Section>
+
+                    <Hr />
+                  </>
+                )}
+
                 {/* Filters Section */}
                 <Section t="Filters">
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>

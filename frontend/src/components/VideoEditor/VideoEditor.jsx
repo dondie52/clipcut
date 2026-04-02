@@ -7,7 +7,8 @@ import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
 import { useMobile, useOrientation } from '../../hooks/useMobile';
 import { useAuth } from '../../supabase/AuthContext';
-import { saveProject, loadProject, getProjectMediaUrl } from '../../services/projectService';
+import { saveProject, loadProject, getProjectMediaUrl, uploadProjectMedia } from '../../services/projectService';
+import { isSupabaseConfigured } from '../../supabase/supabaseClient';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { sanitizeTextInput } from '../../utils/validation';
@@ -406,104 +407,210 @@ const Toast = memo(({ type = "error", message, onClose, autoClose = false }) => 
 });
 Toast.displayName = "Toast";
 
+/** Upload local media files to project storage; updates clips with storagePath for reload. */
+async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips, setMediaItems, setClips) {
+  const uploaded = new Map();
+  for (const m of mediaItems) {
+    if (!m.file || m.storagePath) continue;
+    try {
+      const path = await uploadProjectMedia(userId, projectId, m.file);
+      uploaded.set(m.id, path);
+    } catch (e) {
+      console.warn("[autosave] Media upload failed:", m.name, e);
+    }
+  }
+  if (uploaded.size === 0) return { changed: false, clips, mediaItems };
+  const newMedia = mediaItems.map((m) => (uploaded.has(m.id) ? { ...m, storagePath: uploaded.get(m.id) } : m));
+  const newClips = clips.map((c) => {
+    const p = c.mediaId && uploaded.get(c.mediaId);
+    return p ? { ...c, storagePath: p } : c;
+  });
+  setMediaItems(newMedia);
+  setClips(newClips);
+  return { changed: true, clips: newClips, mediaItems: newMedia };
+}
+
 /* ========== AUTO-SAVE HOOK ========== */
-const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resolution, interval = AUTO_SAVE_INTERVAL) => {
+const useAutoSave = (
+  projectId,
+  projectName,
+  clips,
+  mediaItems,
+  userId,
+  totalDuration,
+  resolution,
+  setMediaItems,
+  setClips,
+  bgMusic,
+  setBgMusic,
+  interval = AUTO_SAVE_INTERVAL
+) => {
   const [lastSaved, setLastSaved] = useState(null);
   const isSavingRef = useRef(false);
   const projectIdRef = useRef(projectId);
   const lastThumbnailClipIdRef = useRef(null);
 
-  // Refs so the interval callback always reads current values
-  // without restarting the timer on every edit.
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
+  const mediaItemsRef = useRef(mediaItems);
+  mediaItemsRef.current = mediaItems;
   const projectNameRef = useRef(projectName);
   projectNameRef.current = projectName;
   const totalDurationRef = useRef(totalDuration);
   totalDurationRef.current = totalDuration;
   const resolutionRef = useRef(resolution);
   resolutionRef.current = resolution;
+  const bgMusicRef = useRef(bgMusic);
+  bgMusicRef.current = bgMusic;
 
-  // Update ref when projectId changes
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
 
   useEffect(() => {
+    const SKIP_KEYS = new Set(["file", "blobUrl", "thumbnail", "isProcessing"]);
+    const serializeClip = (c) => {
+      const o = {};
+      for (const [k, v] of Object.entries(c)) {
+        if (!SKIP_KEYS.has(k)) o[k] = v;
+      }
+      return o;
+    };
+
     const doSave = async () => {
-      if (clipsRef.current.length === 0) return;
       if (isSavingRef.current) return;
       isSavingRef.current = true;
 
       try {
         const currentClips = clipsRef.current;
         const currentName = projectNameRef.current;
-        // Serialize full clip properties (exclude binary data: file, blobUrl, thumbnail)
-        const SKIP_KEYS = new Set(['file', 'blobUrl', 'thumbnail', 'isProcessing']);
+        const currentBg = bgMusicRef.current;
+
         const projectData = {
           id: projectIdRef.current,
           name: currentName,
-          clips: currentClips.map(c => {
-            const serialized = {};
-            for (const [k, v] of Object.entries(c)) {
-              if (!SKIP_KEYS.has(k)) serialized[k] = v;
-            }
-            return serialized;
-          }),
+          clips: currentClips.map(serializeClip),
           duration: totalDurationRef.current,
-          resolution: resolutionRef.current || '1080p',
+          resolution: resolutionRef.current || "1080p",
         };
 
-        // Generate thumbnail from first video clip when it changes
+        if (currentBg?.storagePath) {
+          projectData.bgMusic = {
+            storagePath: currentBg.storagePath,
+            name: currentBg.name,
+            volume: currentBg.volume ?? 0.3,
+          };
+        }
+
         if (userId) {
-          const firstVideoClip = currentClips.find(c => c.type === 'video' && c.file);
+          const firstVideoClip = currentClips.find((c) => c.type === "video" && c.file);
           const firstClipMediaId = firstVideoClip?.mediaId || null;
           if (firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current) {
             try {
               projectData.thumbnail = await generateThumbnailFast(firstVideoClip.file, 1);
               lastThumbnailClipIdRef.current = firstClipMediaId;
             } catch (e) {
-              console.warn('Auto-save thumbnail generation failed:', e);
+              console.warn("Auto-save thumbnail generation failed:", e);
             }
           }
         }
 
-        // Save to cloud if user is authenticated, otherwise localStorage
         if (userId) {
-          const saved = await retryWithBackoff(
-            () => saveProject(userId, projectData),
-            { maxRetries: 2, baseDelay: 1000, maxDelay: 5000 }
-          );
-          // Update projectId ref if this was a new project
+          const saved = await retryWithBackoff(() => saveProject(userId, projectData), {
+            maxRetries: 2,
+            baseDelay: 1000,
+            maxDelay: 5000,
+          });
           if (!projectIdRef.current && saved?.id) {
             projectIdRef.current = saved.id;
           }
+
+          const pid = projectIdRef.current;
+          if (pid && isSupabaseConfigured()) {
+            const uploadResult = await uploadPendingMediaForProject(
+              userId,
+              pid,
+              mediaItemsRef.current,
+              clipsRef.current,
+              setMediaItems,
+              setClips
+            );
+            if (uploadResult.changed) {
+              clipsRef.current = uploadResult.clips;
+              mediaItemsRef.current = uploadResult.mediaItems;
+              const projectData2 = {
+                id: pid,
+                name: projectNameRef.current,
+                clips: uploadResult.clips.map(serializeClip),
+                duration: totalDurationRef.current,
+                resolution: resolutionRef.current || "1080p",
+              };
+              if (bgMusicRef.current?.storagePath) {
+                projectData2.bgMusic = {
+                  storagePath: bgMusicRef.current.storagePath,
+                  name: bgMusicRef.current.name,
+                  volume: bgMusicRef.current.volume ?? 0.3,
+                };
+              }
+              await saveProject(userId, projectData2);
+            }
+
+            const bg = bgMusicRef.current;
+            if (bg?.file && !bg?.storagePath && pid) {
+              try {
+                const path = await uploadProjectMedia(userId, pid, bg.file);
+                setBgMusic((prev) => (prev ? { ...prev, storagePath: path } : null));
+                await saveProject(userId, {
+                  id: pid,
+                  name: projectNameRef.current,
+                  clips: clipsRef.current.map(serializeClip),
+                  duration: totalDurationRef.current,
+                  resolution: resolutionRef.current || "1080p",
+                  bgMusic: { storagePath: path, name: bg.name, volume: bg.volume ?? 0.3 },
+                });
+              } catch (e) {
+                console.warn("Background music upload failed:", e);
+              }
+            }
+          }
         } else {
-          // Fallback to localStorage for unauthenticated users
           const data = {
             projectName: currentName,
             clips: projectData.clips,
             savedAt: new Date().toISOString(),
           };
+          if (currentBg?.storagePath) {
+            data.bgMusic = {
+              storagePath: currentBg.storagePath,
+              name: currentBg.name,
+              volume: currentBg.volume ?? 0.3,
+            };
+          }
           localStorage.setItem(`clipcut_autosave_${currentName}`, JSON.stringify(data));
         }
 
         setLastSaved(new Date());
       } catch (e) {
         console.warn("Auto-save failed after retries:", e);
-        // Fall back to localStorage on persistent cloud failure
         try {
           const name = projectNameRef.current;
-          const SKIP_KEYS_FB = new Set(['file', 'blobUrl', 'thumbnail', 'isProcessing']);
-          const fbClips = clipsRef.current.map(c => {
+          const SKIP_KEYS_FB = new Set(["file", "blobUrl", "thumbnail", "isProcessing"]);
+          const fbClips = clipsRef.current.map((c) => {
             const s = {};
-            for (const [k, v] of Object.entries(c)) { if (!SKIP_KEYS_FB.has(k)) s[k] = v; }
+            for (const [k, v] of Object.entries(c)) {
+              if (!SKIP_KEYS_FB.has(k)) s[k] = v;
+            }
             return s;
           });
-          localStorage.setItem(`clipcut_autosave_${name}`, JSON.stringify({
-            projectName: name, clips: fbClips, savedAt: new Date().toISOString(),
-          }));
-        } catch { /* localStorage full or unavailable */ }
+          const fb = {
+            projectName: name,
+            clips: fbClips,
+            savedAt: new Date().toISOString(),
+          };
+          localStorage.setItem(`clipcut_autosave_${name}`, JSON.stringify(fb));
+        } catch {
+          /* localStorage full or unavailable */
+        }
       } finally {
         isSavingRef.current = false;
       }
@@ -511,9 +618,8 @@ const useAutoSave = (projectId, projectName, clips, userId, totalDuration, resol
 
     const timer = setInterval(doSave, interval);
     return () => clearInterval(timer);
-  }, [userId, interval]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId, interval, setMediaItems, setClips, setBgMusic]);
 
-  // Return both lastSaved and the current projectId
   return { lastSaved, projectId: projectIdRef.current };
 };
 
@@ -537,7 +643,7 @@ const usePlaybackEngine = (clips, totalDuration) => {
   clipsRef.current = clips;
 
   const getClipAtTime = useCallback((t) => {
-    const vClips = clipsRef.current.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
+    const vClips = clipsRef.current.filter(c => c.type !== "audio" && c.type !== "text").sort((a, b) => a.startTime - b.startTime);
     for (const c of vClips) { if (t >= c.startTime && t < c.startTime + c.duration) return c; }
     return vClips.find(c => c.startTime > t) || vClips[vClips.length - 1] || null;
   }, []);
@@ -722,30 +828,22 @@ const VideoEditor = () => {
   // FFmpeg
   const ffmpeg = useFFmpeg();
 
-  // Auto-save with cloud storage
-  const { lastSaved, projectId: savedProjectId } = useAutoSave(
-    projectId, 
-    projectName, 
-    clips, 
-    user?.id, 
-    totalDuration, 
-    projectResolution
-  );
-  
-  // Update projectId when saved for the first time
-  useEffect(() => {
-    if (savedProjectId && !projectId) {
-      setProjectId(savedProjectId);
-    }
-  }, [savedProjectId, projectId]);
-
-  // Derived
+  // Derived (before setClips — clips from timeline state only)
   const selectedClip = useMemo(() => clips.find(c => c.id === selectedClipId), [clips, selectedClipId]);
   const previewSrc = useMemo(() => {
     if (pb.currentClip) return pb.currentClip.blobUrl;
     if (selectedMediaId) return mediaItems.find(m => m.id === selectedMediaId)?.blobUrl || null;
     return null;
   }, [pb.currentClip, selectedMediaId, mediaItems]);
+
+  // Text overlays visible at current playhead time
+  const textOverlays = useMemo(() => {
+    return clips.filter(c =>
+      c.type === 'text' &&
+      pb.currentTime >= c.startTime &&
+      pb.currentTime < c.startTime + c.duration
+    );
+  }, [clips, pb.currentTime]);
 
   // ---- Clip mutations (push to undo stack) ----
   // Use a ref to always read the latest clips inside the callback,
@@ -757,6 +855,27 @@ const VideoEditor = () => {
     const next = typeof fn === "function" ? fn(current) : fn;
     tlDispatch({ type: "SET_CLIPS", clips: next });
   }, []);
+
+  // Auto-save with cloud storage (after setClips — uploads need setters)
+  const { lastSaved, projectId: savedProjectId } = useAutoSave(
+    projectId,
+    projectName,
+    clips,
+    mediaItems,
+    user?.id,
+    totalDuration,
+    projectResolution,
+    setMediaItems,
+    setClips,
+    bgMusic,
+    setBgMusic
+  );
+
+  useEffect(() => {
+    if (savedProjectId && !projectId) {
+      setProjectId(savedProjectId);
+    }
+  }, [savedProjectId, projectId]);
 
   const undo = useCallback(() => tlDispatch({ type: "UNDO" }), []);
   const redo = useCallback(() => tlDispatch({ type: "REDO" }), []);
@@ -1383,124 +1502,163 @@ const VideoEditor = () => {
   // ---- Import from dashboard ----
   useEffect(() => {
     const f = location.state?.filesToImport;
-    if (f?.length > 0) { 
-      window.history.replaceState({ ...location.state, filesToImport: null }, ""); 
-      importMedia(f); 
+    if (f?.length > 0) {
+      window.history.replaceState({ ...location.state, filesToImport: null }, "");
+      importMedia(f);
     }
-    
-    // Load project if projectId is provided
+  }, [location.state?.filesToImport, importMedia]);
+
+  // ---- Load project from dashboard (wait for auth when using Supabase) ----
+  useEffect(() => {
     const projectId = location.state?.projectId;
     const projectData = location.state?.projectData;
     const projectName = location.state?.projectName;
-    
-    if (projectId) {
-      window.history.replaceState({ ...location.state, projectId: null, projectData: null, projectName: null }, "");
-      // Restore project from saved data
-      const restoreProject = async () => {
-        setIsProcessing(true);
-        setLoadMsg("Loading project...");
-        try {
-          // Load full project data from Supabase if not provided
-          let pData = projectData;
-          if (!pData && user?.id) {
+    if (!projectId) return;
+
+    if (isSupabaseConfigured() && !user?.id) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const restoreBgMusic = async (pData) => {
+      const savedBg = pData.project_data?.bgMusic;
+      if (!savedBg?.storagePath || !isSupabaseConfigured()) return;
+      try {
+        const url = await getProjectMediaUrl(savedBg.storagePath);
+        const response = await fetch(url);
+        if (!response.ok) return;
+        const blob = await response.blob();
+        const file = new File([blob], savedBg.name || "bgm", { type: blob.type });
+        const blobUrl = URL.createObjectURL(blob);
+        setBgMusic({
+          file,
+          name: savedBg.name || "Background",
+          blobUrl,
+          volume: savedBg.volume ?? 0.3,
+          storagePath: savedBg.storagePath,
+        });
+      } catch (e) {
+        console.warn("Background music restore failed:", e);
+      }
+    };
+
+    const restoreProject = async () => {
+      setIsProcessing(true);
+      setLoadMsg("Loading project...");
+      try {
+        let pData = projectData;
+        if (!pData) {
+          if (!isSupabaseConfigured()) {
+            pData = await loadProject(projectId, null);
+          } else if (user?.id) {
             pData = await loadProject(projectId, user.id);
           }
-          if (!pData) { notify("error", "Could not load project data"); return; }
+        }
+        if (!pData) {
+          notify("error", "Could not load project data");
+          return;
+        }
+        if (cancelled) return;
 
-          const pName = projectName || pData.name || "Untitled Project";
-          setProjectName(sanitizeTextInput(pName, { maxLength: 100 }) || "Untitled Project");
-          setProjectId(projectId);
-          if (pData.resolution) setProjectResolution(pData.resolution);
+        window.history.replaceState({ ...location.state, projectId: null, projectData: null, projectName: null }, "");
 
-          // Restore clips from project_data
-          const savedClips = pData.project_data?.clips || pData.clips || [];
-          if (savedClips.length === 0) {
-            notify("info", `Loaded project "${pName}" (no clips)`);
-            return;
+        const pName = projectName || pData.name || "Untitled Project";
+        setProjectName(sanitizeTextInput(pName, { maxLength: 100 }) || "Untitled Project");
+        setProjectId(projectId);
+        if (pData.resolution) setProjectResolution(pData.resolution);
+
+        const savedClips = pData.project_data?.clips || pData.clips || [];
+        if (savedClips.length === 0) {
+          await restoreBgMusic(pData);
+          notify("info", `Loaded project "${pName}" (no clips)`);
+          return;
+        }
+
+        const mediaMap = new Map();
+        const restoredClips = [];
+        let loadedCount = 0;
+
+        for (const clipData of savedClips) {
+          if (cancelled) return;
+          setLoadSub(`Restoring clip ${++loadedCount} of ${savedClips.length}`);
+
+          let blobUrl = null;
+          let file = null;
+
+          if (clipData.mediaId && mediaMap.has(clipData.mediaId)) {
+            const cached = mediaMap.get(clipData.mediaId);
+            blobUrl = cached.blobUrl;
+            file = cached.file;
+          } else if (clipData.storagePath && isSupabaseConfigured()) {
+            try {
+              const url = await getProjectMediaUrl(clipData.storagePath);
+              const response = await fetch(url);
+              if (response.ok) {
+                const blob = await response.blob();
+                file = new File([blob], clipData.name || "media", { type: blob.type });
+                blobUrl = URL.createObjectURL(blob);
+              }
+            } catch (e) {
+              console.warn("Failed to download media:", clipData.storagePath, e);
+            }
           }
 
-          // Group clips by mediaId to avoid re-downloading the same media
-          const mediaMap = new Map(); // mediaId → { blobUrl, file }
-          const restoredClips = [];
-          let loadedCount = 0;
+          if (blobUrl && clipData.mediaId) {
+            mediaMap.set(clipData.mediaId, { blobUrl, file });
+          }
 
-          for (const clipData of savedClips) {
-            setLoadSub(`Restoring clip ${++loadedCount} of ${savedClips.length}`);
+          restoredClips.push({
+            ...DEFAULT_CLIP_PROPERTIES,
+            ...clipData,
+            file: file || null,
+            blobUrl: blobUrl || null,
+            thumbnail: null,
+          });
+        }
 
-            // Try to get media for this clip
-            let blobUrl = null;
-            let file = null;
-
-            if (clipData.mediaId && mediaMap.has(clipData.mediaId)) {
-              // Already loaded this media
-              const cached = mediaMap.get(clipData.mediaId);
-              blobUrl = cached.blobUrl;
-              file = cached.file;
-            } else if (clipData.storagePath && user?.id) {
-              // Download from Supabase storage
-              try {
-                const url = await getProjectMediaUrl(clipData.storagePath);
-                const response = await fetch(url);
-                if (response.ok) {
-                  const blob = await response.blob();
-                  file = new File([blob], clipData.name || 'media', { type: blob.type });
-                  blobUrl = URL.createObjectURL(blob);
-                }
-              } catch (e) {
-                console.warn("Failed to download media:", clipData.storagePath, e);
-              }
-            }
-
-            if (blobUrl && clipData.mediaId) {
-              mediaMap.set(clipData.mediaId, { blobUrl, file });
-            }
-
-            // Reconstruct clip with all saved properties + restored media
-            restoredClips.push({
-              ...DEFAULT_CLIP_PROPERTIES,
-              ...clipData,
-              file: file || null,
-              blobUrl: blobUrl || null,
+        const newMediaItems = [];
+        const seenMedia = new Set();
+        for (const clip of restoredClips) {
+          if (clip.mediaId && !seenMedia.has(clip.mediaId) && clip.blobUrl) {
+            seenMedia.add(clip.mediaId);
+            newMediaItems.push({
+              id: clip.mediaId,
+              name: clip.name,
+              file: clip.file,
+              blobUrl: clip.blobUrl,
               thumbnail: null,
+              duration: clip.duration,
+              width: 0,
+              height: 0,
+              type: clip.type || "video",
+              isProcessing: false,
+              storagePath: clip.storagePath,
             });
           }
+        }
 
-          // Reconstruct media items from unique media references
-          const newMediaItems = [];
-          const seenMedia = new Set();
-          for (const clip of restoredClips) {
-            if (clip.mediaId && !seenMedia.has(clip.mediaId) && clip.blobUrl) {
-              seenMedia.add(clip.mediaId);
-              newMediaItems.push({
-                id: clip.mediaId,
-                name: clip.name,
-                file: clip.file,
-                blobUrl: clip.blobUrl,
-                thumbnail: null,
-                duration: clip.duration,
-                width: 0,
-                height: 0,
-                type: clip.type || 'video',
-                isProcessing: false,
-              });
-            }
-          }
-
-          setMediaItems(newMediaItems);
-          setClips(restoredClips);
-          notify("success", `Loaded "${pName}" (${restoredClips.length} clips)`);
-        } catch (e) {
-          console.error("Project load error:", e);
-          notify("error", "Failed to load project");
-        } finally {
+        setMediaItems(newMediaItems);
+        setClips(restoredClips);
+        await restoreBgMusic(pData);
+        notify("success", `Loaded "${pName}" (${restoredClips.length} clips)`);
+      } catch (e) {
+        console.error("Project load error:", e);
+        notify("error", "Failed to load project");
+      } finally {
+        if (!cancelled) {
           setIsProcessing(false);
           setLoadMsg("");
           setLoadSub("");
         }
-      };
-      restoreProject();
-    }
-  }, []); // eslint-disable-line
+      }
+    };
+
+    restoreProject();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, location.state?.projectId, notify, setBgMusic, setClips]);
 
   // ---- Preload WASM files to browser cache (full init deferred to first export/trim) ----
   useEffect(() => {
@@ -1631,6 +1789,10 @@ const VideoEditor = () => {
                 onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
                 onVideoError={handleVideoFormatError}
                 clipProperties={pb.currentClip || selectedClip}
+                textOverlays={textOverlays}
+                selectedClipId={selectedClipId}
+                onClipUpdate={updateClip}
+                onSelectClip={setSelectedClipId}
               />
             </Suspense>
           </ErrorBoundary>
