@@ -12,6 +12,7 @@ export const TOOLBAR_ITEMS = [
   { id: "media", icon: "folder_open", label: "Media" },
   { id: "audio", icon: "music_note", label: "Audio" },
   { id: "text", icon: "text_fields", label: "Text" },
+  { id: "captions", icon: "closed_caption", label: "Captions" },
   { id: "stickers", icon: "mood", label: "Stickers" },
   { id: "effects", icon: "auto_fix_high", label: "Effects" },
   { id: "transition", icon: "layers", label: "Transition" },

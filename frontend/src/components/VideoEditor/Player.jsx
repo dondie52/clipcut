@@ -516,6 +516,7 @@ const Player = ({
   selectedClipId = null,
   onClipUpdate = null,
   onSelectClip = null,
+  hasTimelineClips = false,
 }) => {
   const isMobile = useMobile();
   const videoRef = useRef(null);
@@ -554,8 +555,7 @@ const Player = ({
   const userTogglePlayPause = useCallback(() => {
     const v = videoRef.current;
     if (!videoSrc) {
-      onPlayPause?.();
-      return;
+      return; // Don't toggle play state when there's nothing to play
     }
     if (isPlaying) {
       programmaticPause(v);
@@ -1060,9 +1060,13 @@ const Player = ({
                   <Icon i="play_circle" s={36} c="#475569" />
                 </div>
                 <div style={{ textAlign: "center" }}>
-                  <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>No media loaded</p>
+                  <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>
+                    {hasTimelineClips ? "No clip at playhead" : "No media loaded"}
+                  </p>
                   <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
-                    Import media and add clips to the timeline to preview
+                    {hasTimelineClips
+                      ? "Move the playhead over a clip on the timeline to preview"
+                      : "Import media and add clips to the timeline to preview"}
                   </p>
                 </div>
                 <div style={{

@@ -260,6 +260,9 @@ const InspectorPanel = ({
           background: "rgba(8,10,14,0.5)",
           flexShrink: 0,
           borderBottom: "1px solid rgba(255,255,255,0.03)",
+          overflowX: "auto",
+          WebkitOverflowScrolling: "touch",
+          scrollbarWidth: "none",
         }}
         role="tablist"
         aria-label="Inspector sub-categories"
@@ -278,6 +281,8 @@ const InspectorPanel = ({
               letterSpacing: "0.5px",
               padding: "3px 10px",
               borderRadius: "10px",
+              flexShrink: 0,
+              whiteSpace: "nowrap",
               color: rightSubTab === t.toLowerCase() ? "#e2e8f0" : "#4a5568",
               background: rightSubTab === t.toLowerCase() ? "rgba(117,170,219,0.15)" : "transparent",
             }}
@@ -305,60 +310,6 @@ const InspectorPanel = ({
         role="tabpanel"
         aria-label={`${rightTab} settings`}
       >
-        {/* Premium empty state */}
-        {!hasClip && (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-              color: '#475569',
-              textAlign: 'center',
-              padding: '24px 16px',
-            }}
-          >
-            <div style={{
-              width: "64px", height: "64px", borderRadius: "16px",
-              background: "linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.02) 100%)",
-              border: "1px solid rgba(117,170,219,0.08)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              marginBottom: "16px",
-              boxShadow: "0 4px 16px rgba(0,0,0,0.2)",
-            }}>
-              <Icon i="touch_app" s={28} c="#3d4a5c" />
-            </div>
-            <p style={{ fontSize: '13px', fontWeight: 600, color: '#64748b', margin: '0 0 6px 0' }}>
-              No clip selected
-            </p>
-            <p style={{ fontSize: '11px', color: '#3d4a5c', margin: '0 0 20px 0', lineHeight: 1.5 }}>
-              Select a clip on the timeline to edit its properties
-            </p>
-            {/* Property preview hints */}
-            <div style={{
-              display: "flex", flexDirection: "column", gap: "8px", width: "100%",
-              padding: "12px", borderRadius: "8px",
-              background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.03)",
-            }}>
-              {[
-                { icon: "tune", label: "Transform & Position" },
-                { icon: "palette", label: "Filters & Color" },
-                { icon: "speed", label: "Speed & Time" },
-                { icon: "animation", label: "Keyframes & Animation" },
-              ].map(hint => (
-                <div key={hint.label} style={{
-                  display: "flex", alignItems: "center", gap: "10px",
-                  padding: "4px 0",
-                }}>
-                  <Icon i={hint.icon} s={14} c="#2d3748" />
-                  <span style={{ fontSize: "10px", color: "#334155" }}>{hint.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
         {/* === BASIC SUB-TAB CONTENT === */}
         {hasClip && rightSubTab === 'basic' && (
           <>

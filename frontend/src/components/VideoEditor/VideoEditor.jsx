@@ -34,6 +34,7 @@ const MobileAudioPanel = lazy(() => import('./MobileAudioPanel'));
 const MobileStickerPanel = lazy(() => import('./MobileStickerPanel'));
 const MobileEffectsPanel = lazy(() => import('./MobileEffectsPanel'));
 const MobileFiltersPanel = lazy(() => import('./MobileFiltersPanel'));
+const CaptionsPanel = lazy(() => import('./CaptionsPanel'));
 import BottomSheet from './BottomSheet';
 import Icon from './Icon';
 import { formatTimecode } from './timelineEngine';
@@ -645,7 +646,10 @@ const usePlaybackEngine = (clips, totalDuration) => {
   const getClipAtTime = useCallback((t) => {
     const vClips = clipsRef.current.filter(c => c.type !== "audio" && c.type !== "text").sort((a, b) => a.startTime - b.startTime);
     for (const c of vClips) { if (t >= c.startTime && t < c.startTime + c.duration) return c; }
-    return vClips.find(c => c.startTime > t) || vClips[vClips.length - 1] || null;
+    // Edge case: playhead exactly at end of last clip (floating-point tolerance)
+    const last = vClips[vClips.length - 1];
+    if (last && Math.abs(t - (last.startTime + last.duration)) < 0.05) return last;
+    return null;
   }, []);
 
   const currentClip = useMemo(() => getClipAtTime(currentTime), [getClipAtTime, currentTime]);
@@ -831,10 +835,15 @@ const VideoEditor = () => {
   // Derived (before setClips — clips from timeline state only)
   const selectedClip = useMemo(() => clips.find(c => c.id === selectedClipId), [clips, selectedClipId]);
   const previewSrc = useMemo(() => {
-    if (pb.currentClip) return pb.currentClip.blobUrl;
-    if (selectedMediaId) return mediaItems.find(m => m.id === selectedMediaId)?.blobUrl || null;
-    return null;
-  }, [pb.currentClip, selectedMediaId, mediaItems]);
+    if (pb.currentClip?.blobUrl) return pb.currentClip.blobUrl;
+    if (selectedMediaId) {
+      const found = mediaItems.find(m => m.id === selectedMediaId)?.blobUrl;
+      if (found) return found;
+    }
+    // Fallback: show first video clip that has a playable blobUrl
+    const first = clips.find(c => c.type !== 'audio' && c.type !== 'text' && c.blobUrl);
+    return first?.blobUrl || null;
+  }, [pb.currentClip, selectedMediaId, mediaItems, clips]);
 
   // Text overlays visible at current playhead time
   const textOverlays = useMemo(() => {
@@ -1638,10 +1647,18 @@ const VideoEditor = () => {
           }
         }
 
+        // Filter out non-text clips that failed to download (no blobUrl)
+        const playableClips = restoredClips.filter(c => c.type === 'text' || c.blobUrl);
+        const skippedCount = restoredClips.length - playableClips.length;
+
         setMediaItems(newMediaItems);
-        setClips(restoredClips);
+        setClips(playableClips);
         await restoreBgMusic(pData);
-        notify("success", `Loaded "${pName}" (${restoredClips.length} clips)`);
+        if (skippedCount > 0) {
+          notify("warning", `Loaded "${pName}" — ${skippedCount} clip(s) skipped (media unavailable)`);
+        } else {
+          notify("success", `Loaded "${pName}" (${playableClips.length} clips)`);
+        }
       } catch (e) {
         console.error("Project load error:", e);
         notify("error", "Failed to load project");
@@ -1754,6 +1771,15 @@ const VideoEditor = () => {
                       onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                     />
                   )}
+                  {activeToolbar === 'captions' && (
+                    <CaptionsPanel
+                      clips={clips}
+                      onAddClip={addClip}
+                      onSetClips={setClips}
+                      currentTime={pb.currentTime}
+                      mediaItems={mediaItems}
+                    />
+                  )}
                   {activeToolbar === 'stickers' && (
                     <MobileStickerPanel onAddClip={addClip} currentTime={pb.currentTime} />
                   )}
@@ -1793,12 +1819,13 @@ const VideoEditor = () => {
                 selectedClipId={selectedClipId}
                 onClipUpdate={updateClip}
                 onSelectClip={setSelectedClipId}
+                hasTimelineClips={clips.some(c => c.type !== 'audio' && c.type !== 'text')}
               />
             </Suspense>
           </ErrorBoundary>
         </div>
-        {editorLayout !== 'compact' && !isMobile && (
-          <>
+        {editorLayout !== 'compact' && !isMobile && selectedClip && (
+          <div className="toast-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0 }}>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, inspectorWidth || DEFAULT_INSPECTOR_W)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>
@@ -1814,7 +1841,7 @@ const VideoEditor = () => {
                 />
               </Suspense>
             </ErrorBoundary>
-          </>
+          </div>
         )}
 
         {/* Right side: time bar + context actions + timeline — inside main for landscape layout */}
@@ -1960,6 +1987,12 @@ const VideoEditor = () => {
                     onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                   />
                 )}
+                {mobileActiveTab === 'captions' && (
+                  <CaptionsPanel
+                    clips={clips} onAddClip={addClip} onSetClips={setClips}
+                    currentTime={pb.currentTime} mediaItems={mediaItems}
+                  />
+                )}
                 {mobileActiveTab === 'stickers' && (
                   <MobileStickerPanel onAddClip={addClip} currentTime={pb.currentTime} />
                 )}
@@ -1976,6 +2009,7 @@ const VideoEditor = () => {
             {[
               { id: 'media', icon: 'perm_media', label: 'Media' },
               { id: 'text', icon: 'title', label: 'Text' },
+              { id: 'captions', icon: 'closed_caption', label: 'Captions' },
               { id: 'audio', icon: 'music_note', label: 'Audio' },
               { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers' },
               { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
