@@ -911,6 +911,61 @@ const Timeline = ({
     window.addEventListener("mouseup", onUp);
   }, [pxPerSec, totalDuration, onSeek, onSelectClip]);
 
+  // Touch scrub for mobile playhead
+  const startTouchScrub = useCallback((e) => {
+    if (!timelineRef.current || e.touches.length > 1) return;
+    scrubRef.current = true;
+    setIsScrubbing(true);
+    interactionRef.current.scrubbing = true;
+    onSelectClip?.(null);
+
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left + timelineRef.current.scrollLeft;
+    const t = Math.max(0, Math.min(totalDuration, xToTime(x, pxPerSec)));
+    setPlayheadPos(t);
+    onSeek?.(t);
+  }, [pxPerSec, totalDuration, onSeek, onSelectClip]);
+
+  const moveTouchScrub = useCallback((e) => {
+    if (!scrubRef.current || !timelineRef.current || e.touches.length > 1) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const x = e.touches[0].clientX - rect.left + timelineRef.current.scrollLeft;
+    const t = Math.max(0, Math.min(totalDuration, xToTime(x, pxPerSec)));
+    setPlayheadPos(t);
+    onSeek?.(t);
+  }, [pxPerSec, totalDuration, onSeek]);
+
+  const endTouchScrub = useCallback(() => {
+    scrubRef.current = false;
+    setIsScrubbing(false);
+    interactionRef.current.scrubbing = false;
+  }, []);
+
+  // Pinch-to-zoom on mobile timeline
+  const pinchRef = useRef(null);
+  const handleTouchStartZoom = useCallback((e) => {
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      pinchRef.current = { dist: Math.hypot(dx, dy), zoom };
+    }
+  }, [zoom]);
+
+  const handleTouchMoveZoom = useCallback((e) => {
+    if (e.touches.length === 2 && pinchRef.current) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const newDist = Math.hypot(dx, dy);
+      const scale = newDist / pinchRef.current.dist;
+      const newZoom = Math.max(0, Math.min(100, Math.round(pinchRef.current.zoom * scale)));
+      setZoom(newZoom);
+    }
+  }, []);
+
+  const handleTouchEndZoom = useCallback(() => {
+    pinchRef.current = null;
+  }, []);
+
   // ────────────────────────────────────────────────────────────
   //  INTERACTION: WHEEL ZOOM + SCROLL
   // ────────────────────────────────────────────────────────────
@@ -1113,31 +1168,33 @@ const Timeline = ({
   //  RENDER
   // ────────────────────────────────────────────────────────────
   return (
-    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '30%', minHeight: '140px' } : timelineHeight ? { height: `${timelineHeight}px` } : {}) }} role="region" aria-label="Timeline editor">
+    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '35%', minHeight: '160px' } : timelineHeight ? { height: `${timelineHeight}px` } : {}) }} role="region" aria-label="Timeline editor">
       <style>{TIMELINE_CSS}</style>
 
       {/* ── Toolbar ─────────────────────────────────────── */}
-      <div style={styles.tlToolbar} role="toolbar" aria-label="Timeline tools">
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+      <div style={{ ...styles.tlToolbar, ...(isMobile ? { padding: '0 8px', gap: '4px' } : {}) }} role="toolbar" aria-label="Timeline tools">
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "4px" : "12px" }}>
           {/* Tool group */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", borderRight: "1px solid rgba(255,255,255,0.06)", paddingRight: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", borderRight: "1px solid rgba(255,255,255,0.06)", paddingRight: isMobile ? "6px" : "10px" }}>
             <TlBtn icon="near_me" onClick={() => setActiveTool("select")} active={activeTool === "select"} label="Select tool" shortcut="V" />
             <TlBtn icon="content_cut" onClick={() => setActiveTool("cut")} active={activeTool === "cut"} label="Cut tool — click clip to split" shortcut="C" />
           </div>
-          {/* Edit group */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", borderRight: "1px solid rgba(255,255,255,0.06)", paddingRight: "10px" }}>
-            <TlBtn icon="undo" onClick={onUndo} disabled={!canUndo} label="Undo" shortcut="Ctrl+Z" />
-            <TlBtn icon="redo" onClick={onRedo} disabled={!canRedo} label="Redo" shortcut="Ctrl+Y" />
-          </div>
-          {/* Clip actions */}
+          {/* Edit group — hide undo/redo on mobile (already in TopBar) */}
+          {!isMobile && (
+            <div style={{ display: "flex", alignItems: "center", gap: "4px", borderRight: "1px solid rgba(255,255,255,0.06)", paddingRight: "10px" }}>
+              <TlBtn icon="undo" onClick={onUndo} disabled={!canUndo} label="Undo" shortcut="Ctrl+Z" />
+              <TlBtn icon="redo" onClick={onRedo} disabled={!canRedo} label="Redo" shortcut="Ctrl+Y" />
+            </div>
+          )}
+          {/* Clip actions — hide duplicate on mobile */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <TlBtn icon="carpenter" onClick={handleSplit} disabled={!canSplit} label="Split at playhead" shortcut="S" />
-            <TlBtn icon="content_copy" onClick={handleDuplicate} disabled={!canSplit} label="Duplicate clip" shortcut="Ctrl+D" />
+            {!isMobile && <TlBtn icon="content_copy" onClick={handleDuplicate} disabled={!canSplit} label="Duplicate clip" shortcut="Ctrl+D" />}
             <TlBtn icon="delete" onClick={handleRippleDelete} disabled={!canDelete} label="Ripple delete" shortcut="Del" />
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "6px" : "12px" }}>
           {/* Current time display */}
           <span style={{
             fontSize: "11px", fontFamily: "monospace", color: "#75aadb", fontWeight: 600,
@@ -1147,113 +1204,140 @@ const Timeline = ({
             {formatTimecode(playheadPos)}
           </span>
 
-          {/* Minimap */}
-          <Minimap clips={clips} totalDuration={totalDuration} viewportStart={viewport.start} viewportEnd={viewport.end} width={140} />
+          {/* Desktop-only: Minimap, Snap, Zoom, Volume/Speed */}
+          {!isMobile && (
+            <>
+              <Minimap clips={clips} totalDuration={totalDuration} viewportStart={viewport.start} viewportEnd={viewport.end} width={140} />
 
-          <TlBtn icon="align_horizontal_center" onClick={() => setSnapEnabled(s => !s)} active={snapEnabled} label={`Snap (${snapEnabled ? 'on' : 'off'})`} />
+              <TlBtn icon="align_horizontal_center" onClick={() => setSnapEnabled(s => !s)} active={snapEnabled} label={`Snap (${snapEnabled ? 'on' : 'off'})`} />
 
-          {/* Zoom */}
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", borderLeft: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", padding: "0 10px" }}>
-            <TlBtn icon="zoom_out" onClick={() => setZoom(Math.max(0, zoom - 10))} label="Zoom out" shortcut="-" />
-            <input type="range" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} min={0} max={100} className="zoom-slider" style={{ width: "70px" }} aria-label={`Zoom ${zoom}%`} />
-            <TlBtn icon="zoom_in" onClick={() => setZoom(Math.min(100, zoom + 10))} label="Zoom in" shortcut="+" />
-            <span style={{ fontSize: "9px", color: "#64748b", fontWeight: 600, minWidth: "28px", textAlign: "center" }}>{zoom}%</span>
-          </div>
+              {/* Zoom */}
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", borderLeft: "1px solid rgba(255,255,255,0.06)", borderRight: "1px solid rgba(255,255,255,0.06)", padding: "0 10px" }}>
+                <TlBtn icon="zoom_out" onClick={() => setZoom(Math.max(0, zoom - 10))} label="Zoom out" shortcut="-" />
+                <input type="range" value={zoom} onChange={(e) => setZoom(Number(e.target.value))} min={0} max={100} className="zoom-slider" style={{ width: "70px" }} aria-label={`Zoom ${zoom}%`} />
+                <TlBtn icon="zoom_in" onClick={() => setZoom(Math.min(100, zoom + 10))} label="Zoom in" shortcut="+" />
+                <span style={{ fontSize: "9px", color: "#64748b", fontWeight: 600, minWidth: "28px", textAlign: "center" }}>{zoom}%</span>
+              </div>
 
-          {/* Volume/Speed popovers */}
-          <div style={{ display: "flex", alignItems: "center", gap: "4px", position: "relative" }}>
-            <div style={{ position: 'relative' }}>
-              <TlBtn icon="volume_up" onClick={() => { if (selectedClipId) setShowVolumePopover(v => !v); }} disabled={!selectedClipId} label="Volume" active={showVolumePopover} />
-              {showVolumePopover && selectedClipId && (() => {
-                const clip = clips.find(c => c.id === selectedClipId);
-                if (!clip) return null;
-                return (
-                  <>
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowVolumePopover(false)} />
-                    <div style={{
-                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-                      marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px', padding: '12px', zIndex: 100, minWidth: '140px',
-                      boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
-                    }}>
-                      <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Clip Volume</div>
-                      <input type="range" min={0} max={200} value={Math.round((clip.volume ?? 1) * 100)}
-                        onChange={(e) => onUpdateClip?.(selectedClipId, { volume: Number(e.target.value) / 100 })}
-                        style={{ width: '100%', accentColor: '#75aadb' }}
-                      />
-                      <div style={{ fontSize: '10px', color: '#75aadb', textAlign: 'center', marginTop: '4px' }}>
-                        {Math.round((clip.volume ?? 1) * 100)}%
-                      </div>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-            <div style={{ position: 'relative' }}>
-              <TlBtn icon="speed" onClick={() => { if (selectedClipId) setShowSpeedPopover(v => !v); }} disabled={!selectedClipId} label="Speed" active={showSpeedPopover} />
-              {showSpeedPopover && selectedClipId && (() => {
-                const clip = clips.find(c => c.id === selectedClipId);
-                if (!clip) return null;
-                return (
-                  <>
-                    <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowSpeedPopover(false)} />
-                    <div style={{
-                      position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-                      marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
-                      borderRadius: '8px', padding: '8px', zIndex: 100,
-                      boxShadow: '0 12px 32px rgba(0,0,0,0.5)', display: 'flex', gap: '4px',
-                    }}>
-                      {[0.25, 0.5, 1, 1.5, 2].map(s => (
-                        <button key={s} onClick={() => { onUpdateClip?.(selectedClipId, { speed: s }); setShowSpeedPopover(false); }}
-                          style={{
-                            background: (clip.speed ?? 1) === s ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
-                            border: (clip.speed ?? 1) === s ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '4px', padding: '4px 8px', fontSize: '10px', fontWeight: 500,
-                            color: (clip.speed ?? 1) === s ? '#75aadb' : '#94a3b8', cursor: 'pointer',
-                            fontFamily: 'inherit',
-                          }}
-                        >{s}x</button>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
+              {/* Volume/Speed popovers */}
+              <div style={{ display: "flex", alignItems: "center", gap: "4px", position: "relative" }}>
+                <div style={{ position: 'relative' }}>
+                  <TlBtn icon="volume_up" onClick={() => { if (selectedClipId) setShowVolumePopover(v => !v); }} disabled={!selectedClipId} label="Volume" active={showVolumePopover} />
+                  {showVolumePopover && selectedClipId && (() => {
+                    const clip = clips.find(c => c.id === selectedClipId);
+                    if (!clip) return null;
+                    return (
+                      <>
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowVolumePopover(false)} />
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                          marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '8px', padding: '12px', zIndex: 100, minWidth: '140px',
+                          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                        }}>
+                          <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '8px', fontWeight: 600 }}>Clip Volume</div>
+                          <input type="range" min={0} max={200} value={Math.round((clip.volume ?? 1) * 100)}
+                            onChange={(e) => onUpdateClip?.(selectedClipId, { volume: Number(e.target.value) / 100 })}
+                            style={{ width: '100%', accentColor: '#75aadb' }}
+                          />
+                          <div style={{ fontSize: '10px', color: '#75aadb', textAlign: 'center', marginTop: '4px' }}>
+                            {Math.round((clip.volume ?? 1) * 100)}%
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <TlBtn icon="speed" onClick={() => { if (selectedClipId) setShowSpeedPopover(v => !v); }} disabled={!selectedClipId} label="Speed" active={showSpeedPopover} />
+                  {showSpeedPopover && selectedClipId && (() => {
+                    const clip = clips.find(c => c.id === selectedClipId);
+                    if (!clip) return null;
+                    return (
+                      <>
+                        <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setShowSpeedPopover(false)} />
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                          marginBottom: '8px', background: 'rgba(26,35,50,0.98)', border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: '8px', padding: '8px', zIndex: 100,
+                          boxShadow: '0 12px 32px rgba(0,0,0,0.5)', display: 'flex', gap: '4px',
+                        }}>
+                          {[0.25, 0.5, 1, 1.5, 2].map(s => (
+                            <button key={s} onClick={() => { onUpdateClip?.(selectedClipId, { speed: s }); setShowSpeedPopover(false); }}
+                              style={{
+                                background: (clip.speed ?? 1) === s ? 'rgba(117,170,219,0.2)' : 'rgba(30,41,59,0.5)',
+                                border: (clip.speed ?? 1) === s ? '1px solid #75aadb' : '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: '4px', padding: '4px 8px', fontSize: '10px', fontWeight: 500,
+                                color: (clip.speed ?? 1) === s ? '#75aadb' : '#94a3b8', cursor: 'pointer',
+                                fontFamily: 'inherit',
+                              }}
+                            >{s}x</button>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* ── Tracks area ─────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Track labels — wider for readability */}
+        {/* Track labels */}
         <div style={{
-          width: "56px", background: "linear-gradient(180deg, #0f1620 0%, #0c1018 100%)",
+          width: isMobile ? "36px" : "56px", background: "linear-gradient(180deg, #0f1620 0%, #0c1018 100%)",
           borderRight: "1px solid rgba(117,170,219,0.08)",
           display: "flex", flexDirection: "column", paddingTop: "32px", zIndex: 10, flexShrink: 0,
         }}>
-          <TrackLabel icon="visibility" lockIcon="lock_open" label="V1" trackType="video" height={76}
-            isMuted={trackMutes.video} isLocked={trackLocks.video}
-            onToggleMute={() => setTrackMutes((p) => ({ ...p, video: !p.video }))}
-            onToggleLock={() => setTrackLocks((p) => ({ ...p, video: !p.video }))}
-          />
-          {hasV2Clips && (
-            <TrackLabel icon="visibility" lockIcon="lock_open" label="V2" trackType="video" height={76}
-              isMuted={trackMutes.video2} isLocked={trackLocks.video2}
-              onToggleMute={() => setTrackMutes((p) => ({ ...p, video2: !p.video2 }))}
-              onToggleLock={() => setTrackLocks((p) => ({ ...p, video2: !p.video2 }))}
-            />
-          )}
-          <TrackLabel icon="volume_up" lockIcon="lock_open" label="A1" trackType="audio" height={68}
-            isMuted={trackMutes.audio} isLocked={trackLocks.audio}
-            onToggleMute={() => setTrackMutes((p) => ({ ...p, audio: !p.audio }))}
-            onToggleLock={() => setTrackLocks((p) => ({ ...p, audio: !p.audio }))}
-          />
-          {hasA2Clips && (
-            <TrackLabel icon="volume_up" lockIcon="lock_open" label="A2" trackType="audio" height={68}
-              isMuted={trackMutes.audio2} isLocked={trackLocks.audio2}
-              onToggleMute={() => setTrackMutes((p) => ({ ...p, audio2: !p.audio2 }))}
-              onToggleLock={() => setTrackLocks((p) => ({ ...p, audio2: !p.audio2 }))}
-            />
+          {isMobile ? (
+            <>
+              <div style={{ height: '76px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <span style={{ fontSize: '9px', fontWeight: 700, color: '#75aadb', letterSpacing: '0.5px' }}>V1</span>
+              </div>
+              {hasV2Clips && (
+                <div style={{ height: '76px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontSize: '9px', fontWeight: 700, color: '#75aadb', letterSpacing: '0.5px' }}>V2</span>
+                </div>
+              )}
+              <div style={{ height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <span style={{ fontSize: '9px', fontWeight: 700, color: '#34d399', letterSpacing: '0.5px' }}>A1</span>
+              </div>
+              {hasA2Clips && (
+                <div style={{ height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                  <span style={{ fontSize: '9px', fontWeight: 700, color: '#34d399', letterSpacing: '0.5px' }}>A2</span>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <TrackLabel icon="visibility" lockIcon="lock_open" label="V1" trackType="video" height={76}
+                isMuted={trackMutes.video} isLocked={trackLocks.video}
+                onToggleMute={() => setTrackMutes((p) => ({ ...p, video: !p.video }))}
+                onToggleLock={() => setTrackLocks((p) => ({ ...p, video: !p.video }))}
+              />
+              {hasV2Clips && (
+                <TrackLabel icon="visibility" lockIcon="lock_open" label="V2" trackType="video" height={76}
+                  isMuted={trackMutes.video2} isLocked={trackLocks.video2}
+                  onToggleMute={() => setTrackMutes((p) => ({ ...p, video2: !p.video2 }))}
+                  onToggleLock={() => setTrackLocks((p) => ({ ...p, video2: !p.video2 }))}
+                />
+              )}
+              <TrackLabel icon="volume_up" lockIcon="lock_open" label="A1" trackType="audio" height={68}
+                isMuted={trackMutes.audio} isLocked={trackLocks.audio}
+                onToggleMute={() => setTrackMutes((p) => ({ ...p, audio: !p.audio }))}
+                onToggleLock={() => setTrackLocks((p) => ({ ...p, audio: !p.audio }))}
+              />
+              {hasA2Clips && (
+                <TrackLabel icon="volume_up" lockIcon="lock_open" label="A2" trackType="audio" height={68}
+                  isMuted={trackMutes.audio2} isLocked={trackLocks.audio2}
+                  onToggleMute={() => setTrackMutes((p) => ({ ...p, audio2: !p.audio2 }))}
+                  onToggleLock={() => setTrackLocks((p) => ({ ...p, audio2: !p.audio2 }))}
+                />
+              )}
+            </>
           )}
         </div>
 
@@ -1262,6 +1346,9 @@ const Timeline = ({
           ref={timelineRef}
           onMouseDown={startScrub}
           onWheel={handleWheel}
+          onTouchStart={(e) => { startTouchScrub(e); handleTouchStartZoom(e); }}
+          onTouchMove={(e) => { moveTouchScrub(e); handleTouchMoveZoom(e); }}
+          onTouchEnd={() => { endTouchScrub(); handleTouchEndZoom(); }}
           tabIndex={0}
           role="application"
           aria-label="Timeline — arrow keys to scrub, S to split, Del to delete, Ctrl+wheel to zoom"

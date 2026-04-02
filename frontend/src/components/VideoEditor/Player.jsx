@@ -361,6 +361,8 @@ const Player = ({
   const [buffered, setBuffered] = useState(0);
   const [isPiP, setIsPiP] = useState(false);
   const [videoError, setVideoError] = useState(null);
+  const [mobileControlsVisible, setMobileControlsVisible] = useState(true);
+  const controlsTimerRef = useRef(null);
 
   // State machine for video element lifecycle
   const videoStateRef = useRef('idle'); // 'idle' | 'loading' | 'ready' | 'playing' | 'paused'
@@ -733,7 +735,16 @@ const Player = ({
       }}>
         <div style={{ position: "relative", width: "100%", maxWidth: "960px" }}>
           {/* Video canvas */}
-          <div className="player-container" onClick={userTogglePlayPause} style={{
+          <div className="player-container" onClick={(e) => {
+            if (isMobile) {
+              setMobileControlsVisible(v => !v);
+              // Auto-hide after 3s
+              clearTimeout(controlsTimerRef.current);
+              controlsTimerRef.current = setTimeout(() => setMobileControlsVisible(false), 3000);
+            } else {
+              userTogglePlayPause(e);
+            }
+          }} style={{
             width: "100%", aspectRatio: "16/9", background: "#000",
             borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
             boxShadow: "0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)",
@@ -885,7 +896,13 @@ const Player = ({
         </div>
       </div>
 
-      {/* Seekbar */}
+      {/* Seekbar + Controls — hide on mobile via tap-to-toggle */}
+      <div style={isMobile ? {
+        transition: 'opacity 0.2s ease, transform 0.2s ease',
+        opacity: mobileControlsVisible ? 1 : 0,
+        transform: mobileControlsVisible ? 'translateY(0)' : 'translateY(4px)',
+        pointerEvents: mobileControlsVisible ? 'auto' : 'none',
+      } : {}}>
       {videoSrc && (
         <div style={{ padding: "0 20px" }}>
           <Seekbar currentTime={dTime} duration={dDur} onSeek={seekTo} buffered={buffered} />
@@ -896,9 +913,11 @@ const Player = ({
       <div style={{
         ...styles.controls,
         height: isMobile ? "auto" : "48px",
-        gap: isMobile ? "4px" : "8px",
-        flexDirection: isMobile ? "column" : "row",
-        padding: isMobile ? "4px 12px 8px" : styles.controls.padding,
+        gap: isMobile ? "8px" : "8px",
+        flexDirection: "row",
+        flexWrap: isMobile ? "wrap" : "nowrap",
+        justifyContent: isMobile ? "center" : styles.controls.justifyContent,
+        padding: isMobile ? "6px 12px 8px" : styles.controls.padding,
       }} className="player-controls">
         {/* Timecode display */}
         <div style={{
@@ -922,10 +941,12 @@ const Player = ({
             : { position: "absolute", left: "50%", transform: "translateX(-50%)", display: "flex", alignItems: "center", gap: "6px" }
           )
         }}>
-          <button onClick={() => stepFrame(false)} className="ctrl-btn" style={styles.ghost} title="Prev frame (,)">
-            <Icon i="first_page" s={16} c="#475569" />
-          </button>
-          <button onClick={() => skip(-5)} className="ctrl-btn" style={styles.ghost} title="Skip -5s (←)">
+          {!isMobile && (
+            <button onClick={() => stepFrame(false)} className="ctrl-btn" style={styles.ghost} title="Prev frame (,)">
+              <Icon i="first_page" s={16} c="#475569" />
+            </button>
+          )}
+          <button onClick={() => skip(-5)} className="ctrl-btn" style={{ ...styles.ghost, minWidth: '44px', minHeight: '44px' }} title="Skip -5s (←)">
             <Icon i="skip_previous" s={20} c="#94a3b8" />
           </button>
           <button onClick={userTogglePlayPause} className="play-glow" style={{
@@ -938,16 +959,18 @@ const Player = ({
           }} title={`${isPlaying ? "Pause" : "Play"} (Space)`}>
             <Icon i={isPlaying ? "pause" : "play_arrow"} s={28} c="white" />
           </button>
-          <button onClick={() => skip(5)} className="ctrl-btn" style={styles.ghost} title="Skip +5s (→)">
+          <button onClick={() => skip(5)} className="ctrl-btn" style={{ ...styles.ghost, minWidth: '44px', minHeight: '44px' }} title="Skip +5s (→)">
             <Icon i="skip_next" s={20} c="#94a3b8" />
           </button>
-          <button onClick={() => stepFrame(true)} className="ctrl-btn" style={styles.ghost} title="Next frame (.)">
-            <Icon i="last_page" s={16} c="#475569" />
-          </button>
+          {!isMobile && (
+            <button onClick={() => stepFrame(true)} className="ctrl-btn" style={styles.ghost} title="Next frame (.)">
+              <Icon i="last_page" s={16} c="#475569" />
+            </button>
+          )}
         </div>
 
-        {/* Right controls */}
-        <div style={{ display: "flex", alignItems: "center", gap: "4px", ...(isMobile ? { justifyContent: "center" } : {}) }}>
+        {/* Right controls — hide volume/speed on mobile (available in inspector) */}
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", ...(isMobile ? { display: "none" } : {}) }}>
           <VolumeControl volume={volume} onChange={setVolume} muted={muted} onToggleMute={() => setMuted(m => !m)} />
           <SpeedControl speed={speed} onChange={setSpeed} />
           {!isMobile && <button onClick={cycleFit} className="chip-btn" title="Fit mode">{fitLabels[fitMode]}</button>}
@@ -963,6 +986,7 @@ const Player = ({
           )}
         </div>
       </div>
+      </div>{/* end mobile controls wrapper */}
     </section>
   );
 };

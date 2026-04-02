@@ -41,7 +41,7 @@ const DASH_CSS = `
   *, *::before, *::after { box-sizing: border-box; }
 
   .dash-root {
-    width: 100vw; height: 100vh; background: var(--cc-bg);
+    width: 100%; height: 100vh; background: var(--cc-bg);
     font-family: var(--cc-font); display: flex;
     overflow: hidden; color: var(--cc-text);
     position: relative;
@@ -471,6 +471,12 @@ const DASH_CSS = `
     .proj-search { width: 100%; }
     .empty-state { padding: 32px 16px; }
     .bw-stripe { bottom: 56px; }
+  }
+
+  @media (max-width: 400px) {
+    .projects-grid { grid-template-columns: 1fr; }
+    .stats-row { gap: 8px; }
+    .top-bar h1 { font-size: 14px; }
   }
 `;
 

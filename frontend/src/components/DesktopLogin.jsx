@@ -411,7 +411,7 @@ const DesktopLogin = ({ onNavigateToRegister }) => {
           {resetSuccess && (
             <div className="lg-alert lg-alert--success" role="status">
               <span className="material-symbols-outlined" style={{ fontSize: "18px" }}>check_circle</span>
-              If an account exists with this email, you'll receive a reset link.
+              If an account exists with this email, you'll receive a password reset link.
             </div>
           )}
           {error && (

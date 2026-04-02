@@ -28,6 +28,7 @@ const MediaPanel = lazy(() => import('./MediaPanel'));
 const Player = lazy(() => import('./Player'));
 const InspectorPanel = lazy(() => import('./InspectorPanel'));
 const Timeline = lazy(() => import('./Timeline'));
+import BottomSheet from './BottomSheet';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -670,6 +671,14 @@ const VideoEditor = () => {
   const canUndo = tlState.past.length > 0;
   const canRedo = tlState.future.length > 0;
   const [selectedClipId, setSelectedClipId] = useState(null);
+
+  // Auto-open inspector bottom sheet when a clip is selected on mobile
+  useEffect(() => {
+    if (isMobile && selectedClipId) {
+      setMobileActiveTab('inspector');
+      setMobileDrawerOpen(true);
+    }
+  }, [isMobile, selectedClipId]);
 
   const totalDuration = useMemo(() => {
     if (clips.length === 0) return 30;
@@ -1532,9 +1541,9 @@ const VideoEditor = () => {
         editorLayout={editorLayout} onLayoutChange={setEditorLayout}
         forceOpenExport={forceExport > 0} onExportModalClosed={() => setForceExport(0)}
       />
-      <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />
+      {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
-      <main aria-label="Editor workspace" style={{ flex: editorLayout === 'wide-timeline' ? '0 0 55%' : 1, display: "flex", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+      <main aria-label="Editor workspace" style={{ flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : 1), display: "flex", flexDirection: isMobile ? "column" : "row", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
         {editorLayout !== 'compact' && !isMobile && (
           <>
             <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
@@ -1588,11 +1597,7 @@ const VideoEditor = () => {
       {/* Mobile bottom sheet + tab bar */}
       {isMobile && (
         <>
-          {mobileDrawerOpen && (
-            <div className="mobile-sheet-backdrop" onClick={() => setMobileDrawerOpen(false)} />
-          )}
-          <div className={`mobile-bottom-sheet ${mobileDrawerOpen ? 'open' : ''}`}>
-            <div className="sheet-handle" />
+          <BottomSheet isOpen={mobileDrawerOpen} onClose={() => setMobileDrawerOpen(false)}>
             <ErrorBoundary name="mobile-panel" inline message="Panel error">
               <Suspense fallback={<PanelLoadingFallback width="100%" height="200px" />}>
                 {mobileActiveTab === 'media' && (
@@ -1603,9 +1608,27 @@ const VideoEditor = () => {
                     isImporting={isImporting}
                   />
                 )}
-                {mobileActiveTab === 'edit' && (
+                {mobileActiveTab === 'text' && (
                   <InspectorPanel
-                    rightTab={rightTab} onRightTabChange={setRightTab}
+                    rightTab="text" onRightTabChange={setRightTab}
+                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
+                {mobileActiveTab === 'audio' && (
+                  <InspectorPanel
+                    rightTab="audio" onRightTabChange={setRightTab}
+                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
+                {mobileActiveTab === 'stickers' && (
+                  <InspectorPanel
+                    rightTab="stickers" onRightTabChange={setRightTab}
                     rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
                     selectedClip={selectedClip} onClipUpdate={updateClip}
                     bgMusic={bgMusic} onImportBgMusic={importBgMusic}
@@ -1621,25 +1644,40 @@ const VideoEditor = () => {
                     onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                   />
                 )}
+                {mobileActiveTab === 'filters' && (
+                  <InspectorPanel
+                    rightTab="effects" onRightTabChange={setRightTab}
+                    rightSubTab="filters" onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
+                {mobileActiveTab === 'inspector' && (
+                  <InspectorPanel
+                    rightTab={rightTab} onRightTabChange={setRightTab}
+                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                    selectedClip={selectedClip} onClipUpdate={updateClip}
+                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                  />
+                )}
               </Suspense>
             </ErrorBoundary>
-          </div>
+          </BottomSheet>
           <nav className="mobile-tab-bar" aria-label="Editor tools">
             {[
               { id: 'media', icon: 'perm_media', label: 'Media' },
-              { id: 'edit', icon: 'tune', label: 'Edit' },
+              { id: 'text', icon: 'title', label: 'Text' },
+              { id: 'audio', icon: 'music_note', label: 'Audio' },
+              { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers' },
               { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
-              { id: 'export', icon: 'download', label: 'Export' },
+              { id: 'filters', icon: 'filter_vintage', label: 'Filters' },
             ].map(tab => (
               <button
                 key={tab.id}
                 className={mobileActiveTab === tab.id ? 'active' : ''}
                 onClick={() => {
-                  if (tab.id === 'export') {
-                    setMobileDrawerOpen(false);
-                    setForceExport(v => v + 1);
-                    return;
-                  }
                   if (mobileActiveTab === tab.id) {
                     setMobileDrawerOpen(v => !v);
                   } else {

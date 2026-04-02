@@ -367,8 +367,8 @@ export const RESPONSIVE_CSS = `
       display: flex; flex-direction: column; align-items: center; gap: 2px;
       background: none; border: none; color: rgba(255,255,255,0.4);
       font-size: 9px; font-weight: 600; font-family: 'Spline Sans', sans-serif;
-      cursor: pointer; padding: 6px 14px; min-height: 44px; min-width: 44px;
-      transition: color 0.15s ease;
+      cursor: pointer; padding: 6px 8px; min-height: 44px; min-width: 44px;
+      transition: color 0.15s ease; flex: 1;
     }
     .mobile-tab-bar button.active { color: #75AADB; }
     .mobile-tab-bar button .material-symbols-outlined { font-size: 22px; }

@@ -703,7 +703,7 @@ const TopBar = ({
       <style>{TOP_BAR_CSS}</style>
       
       <header
-        style={{ ...styles.topBar, ...(isMobile ? { height: '38px', padding: '0 8px' } : {}) }}
+        style={{ ...styles.topBar, ...(isMobile ? { height: '48px', padding: '0 10px' } : {}) }}
         role="banner"
         aria-label="ClipCut editor header"
       >

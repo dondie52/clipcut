@@ -3,6 +3,7 @@ import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, TRANSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
 import { Section, Row, Slider, SmallInput, Hr, EffectCard, ColorPicker } from './InspectorComponents';
+import { useMobile } from '../../hooks/useMobile';
 
 /* ========== CSS ANIMATIONS ========== */
 const INSPECTOR_CSS = `
@@ -109,6 +110,7 @@ const InspectorPanel = ({
   onRemoveBgMusic,
   style: styleProp,
 }) => {
+  const isMobile = useMobile();
   const bgMusicFileRef = useRef(null);
   // Helper to update a clip property
   const update = useCallback((key, value) => {
@@ -183,39 +185,42 @@ const InspectorPanel = ({
   return (
     <aside
       className="editor-right-panel"
-      style={{ ...styles.rightPanel, ...styleProp }}
+      style={{ ...styles.rightPanel, ...styleProp, ...(isMobile ? { width: '100%', minWidth: 0, maxWidth: '100%', borderLeft: 'none' } : {}) }}
       role="complementary"
       aria-label="Inspector panel"
     >
       <style>{INSPECTOR_CSS}</style>
 
-      {/* Panel header */}
-      <div style={{
-        height: "32px", display: "flex", alignItems: "center", padding: "0 14px",
-        borderBottom: "1px solid rgba(117,170,219,0.04)",
-        background: "rgba(15,23,42,0.3)",
-      }}>
-        <span style={{ fontSize: "10px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1.5px" }}>
-          Inspector
-        </span>
-        {hasClip && (
-          <span style={{
-            marginLeft: "auto", fontSize: "9px", fontWeight: 500, color: "#75aadb",
-            background: "rgba(117,170,219,0.1)", padding: "2px 8px", borderRadius: "10px",
-          }}>
-            {selectedClip?.name || "Clip"}
+      {/* Panel header — compact on mobile */}
+      {!isMobile && (
+        <div style={{
+          height: "32px", display: "flex", alignItems: "center", padding: "0 14px",
+          borderBottom: "1px solid rgba(117,170,219,0.04)",
+          background: "rgba(15,23,42,0.3)",
+        }}>
+          <span style={{ fontSize: "10px", fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: "1.5px" }}>
+            Inspector
           </span>
-        )}
-      </div>
+          {hasClip && (
+            <span style={{
+              marginLeft: "auto", fontSize: "9px", fontWeight: 500, color: "#75aadb",
+              background: "rgba(117,170,219,0.1)", padding: "2px 8px", borderRadius: "10px",
+            }}>
+              {selectedClip?.name || "Clip"}
+            </span>
+          )}
+        </div>
+      )}
 
-      {/* Main tabs — with icons */}
+      {/* Main tabs — horizontal scrollable on mobile */}
       <nav
         style={{
           display: "flex",
           borderBottom: "1px solid rgba(117,170,219,0.06)",
-          height: "38px",
+          height: isMobile ? "44px" : "38px",
           flexShrink: 0,
           background: "rgba(15,23,42,0.2)",
+          ...(isMobile ? { overflowX: 'auto', WebkitOverflowScrolling: 'touch', gap: '0', scrollbarWidth: 'none' } : {}),
         }}
         role="tablist"
         aria-label="Inspector categories"
@@ -228,18 +233,19 @@ const InspectorPanel = ({
             className={`inspector-tab ${rightTab === t.toLowerCase() ? 'active' : ''}`}
             style={{
               ...styles.ghost,
-              flex: 1,
-              fontSize: "9px",
+              flex: isMobile ? 'none' : 1,
+              fontSize: isMobile ? "10px" : "9px",
               fontWeight: 700,
               color: rightTab === t.toLowerCase() ? "#75aadb" : "#4a5568",
               display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "1px",
+              ...(isMobile ? { padding: '0 14px', minWidth: '60px', minHeight: '44px', whiteSpace: 'nowrap' } : {}),
             }}
             role="tab"
             aria-selected={rightTab === t.toLowerCase()}
             aria-controls={`panel-${t.toLowerCase()}`}
             tabIndex={rightTab === t.toLowerCase() ? 0 : -1}
           >
-            <Icon i={tabIcons[t.toLowerCase()]} s={14} c={rightTab === t.toLowerCase() ? "#75aadb" : "#4a5568"} />
+            <Icon i={tabIcons[t.toLowerCase()]} s={isMobile ? 16 : 14} c={rightTab === t.toLowerCase() ? "#75aadb" : "#4a5568"} />
             <span style={{ letterSpacing: "0.5px" }}>{t}</span>
           </button>
         ))}
