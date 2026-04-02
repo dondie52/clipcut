@@ -61,6 +61,8 @@ const VIDEO_EDITOR_CSS = `
   .loading-card { animation: slideUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
   .toast-enter { animation: slideInRight 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
   .toast-exit { animation: slideOutRight 0.25s ease forwards; }
+  @keyframes inspectorSlideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+  .inspector-enter { animation: inspectorSlideIn 0.2s ease-out; }
   .shimmer-bar {
     background: linear-gradient(90deg, rgba(117,170,219,0.3) 25%, rgba(117,170,219,0.6) 50%, rgba(117,170,219,0.3) 75%);
     background-size: 200% 100%;
@@ -1806,7 +1808,7 @@ const VideoEditor = () => {
             </div>
           </>
         )}
-        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : {}}>
+        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <ErrorBoundary name="player" inline message="Video player encountered an error">
             <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
               <Player
@@ -1825,7 +1827,7 @@ const VideoEditor = () => {
           </ErrorBoundary>
         </div>
         {editorLayout !== 'compact' && !isMobile && selectedClip && (
-          <div className="toast-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0 }}>
+          <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0 }}>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, inspectorWidth || DEFAULT_INSPECTOR_W)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>

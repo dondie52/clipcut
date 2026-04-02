@@ -706,9 +706,8 @@ const Dashboard = () => {
     navigate("/editor", {
       state: {
         projectId: project.id,
-        projectData: project.data,
         projectName: project.name,
-      }
+      },
     });
   }, [navigate]);
 

@@ -93,7 +93,7 @@ export async function saveProject(userId, projectData) {
 
   checkRateLimit(apiRateLimiter, 'save');
 
-  const { name, id, clips, duration, resolution, thumbnail } = projectData;
+  const { name, id, clips, duration, resolution, thumbnail, bgMusic } = projectData;
   
   // Sanitize project name before saving (max 100 chars, remove HTML, trim)
   const sanitizedName = sanitizeTextInput(name || "Untitled Project", { maxLength: 100 });
@@ -105,6 +105,7 @@ export async function saveProject(userId, projectData) {
     project_data: {
       clips: clips,
       savedAt: new Date().toISOString(),
+      ...(bgMusic ? { bgMusic } : {}),
     },
     duration_seconds: Math.round(duration || 0),
     resolution: resolution || "1080p",
@@ -499,6 +500,7 @@ function saveProjectToLocalStorage(projectData) {
     project_data: {
       clips: projectData.clips,
       savedAt: new Date().toISOString(),
+      ...(projectData.bgMusic ? { bgMusic: projectData.bgMusic } : {}),
     },
     duration_seconds: Math.round(projectData.duration || 0),
     resolution: projectData.resolution || "1080p",
