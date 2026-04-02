@@ -730,24 +730,25 @@ const Player = ({
       {/* Viewport — the visual heart of the editor */}
       <div className="player-viewport" style={{
         flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
-        padding: "12px 20px 8px",
-        background: "radial-gradient(ellipse at center, rgba(117,170,219,0.02) 0%, transparent 70%)",
+        ...(isMobile ? { padding: 0 } : { padding: "12px 20px 8px" }),
+        background: isMobile ? "none" : "radial-gradient(ellipse at center, rgba(117,170,219,0.02) 0%, transparent 70%)",
       }}>
-        <div style={{ position: "relative", width: "100%", maxWidth: "960px" }}>
+        <div style={{ position: "relative", width: "100%", ...(isMobile ? {} : { maxWidth: "960px" }) }}>
           {/* Video canvas */}
           <div className="player-container" onClick={(e) => {
             if (isMobile) {
-              setMobileControlsVisible(v => !v);
-              // Auto-hide after 3s
-              clearTimeout(controlsTimerRef.current);
-              controlsTimerRef.current = setTimeout(() => setMobileControlsVisible(false), 3000);
+              userTogglePlayPause(e);
             } else {
               userTogglePlayPause(e);
             }
           }} style={{
             width: "100%", aspectRatio: "16/9", background: "#000",
-            borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
-            boxShadow: "0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)",
+            ...(isMobile ? {
+              borderRadius: 0, border: "none", boxShadow: "none",
+            } : {
+              borderRadius: "6px", border: "1px solid rgba(117,170,219,0.1)",
+              boxShadow: "0 8px 40px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)",
+            }),
             overflow: "hidden", position: "relative",
           }}>
             {videoSrc ? (
@@ -804,46 +805,55 @@ const Player = ({
                     {/* Center play/pause overlay */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
                       position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
-                      background: "radial-gradient(circle at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 70%)",
-                      pointerEvents: isPlaying ? "none" : "auto",
+                      background: isMobile
+                        ? (isPlaying ? "none" : "rgba(0,0,0,0.3)")
+                        : "radial-gradient(circle at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 70%)",
+                      pointerEvents: isMobile ? "auto" : (isPlaying ? "none" : "auto"),
+                      transition: "background 0.2s ease",
                     }}>
                       <button className="big-play" onClick={(e) => { e.stopPropagation(); userTogglePlayPause(); }} style={{
-                        width: "64px", height: "64px", borderRadius: "50%",
-                        background: "rgba(117,170,219,0.15)", border: "2px solid rgba(255,255,255,0.25)",
+                        width: isMobile ? "56px" : "64px", height: isMobile ? "56px" : "64px", borderRadius: "50%",
+                        background: isMobile ? "rgba(0,0,0,0.45)" : "rgba(117,170,219,0.15)",
+                        border: isMobile ? "none" : "2px solid rgba(255,255,255,0.25)",
                         display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
                         backdropFilter: "blur(12px)",
-                        boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+                        boxShadow: isMobile ? "none" : "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+                        opacity: isMobile ? (isPlaying ? 0 : 1) : 1,
+                        transition: "opacity 0.2s ease",
+                        minWidth: 'auto', minHeight: 'auto',
                       }}>
-                        <Icon i={isPlaying ? "pause" : "play_arrow"} s={32} c="white" />
+                        <Icon i={isPlaying ? "pause" : "play_arrow"} s={isMobile ? 28 : 32} c="white" />
                       </button>
                     </div>
-                    {/* Safe area / letterbox corners */}
-                    <div style={{ position: "absolute", top: "8px", left: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
-                    <div style={{ position: "absolute", top: "8px", right: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
-                    <div style={{ position: "absolute", bottom: "8px", left: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
-                    <div style={{ position: "absolute", bottom: "8px", right: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />
-                    {/* Preview label — top-left */}
-                    <div style={{
-                      position: "absolute", top: "10px", left: "10px", pointerEvents: "none",
-                      display: "flex", alignItems: "center", gap: "5px", opacity: 0.4,
-                    }}>
+                    {/* Safe area / letterbox corners (hidden on mobile for edge-to-edge) */}
+                    {!isMobile && <div style={{ position: "absolute", top: "8px", left: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />}
+                    {!isMobile && <div style={{ position: "absolute", top: "8px", right: "8px", width: "16px", height: "16px", borderTop: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />}
+                    {!isMobile && <div style={{ position: "absolute", bottom: "8px", left: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderLeft: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />}
+                    {!isMobile && <div style={{ position: "absolute", bottom: "8px", right: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />}
+                    {/* Preview label — top-left (hidden on mobile) */}
+                    {!isMobile && (
                       <div style={{
-                        width: "5px", height: "5px", borderRadius: "50%",
-                        background: isPlaying ? "#22c55e" : "#75aadb",
-                        boxShadow: isPlaying ? "0 0 6px rgba(34,197,94,0.5)" : "none",
-                        transition: "all 0.3s ease",
-                      }} />
-                      <span style={{ fontSize: "9px", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "1.2px" }}>
-                        Preview
-                      </span>
-                      {hasActiveEffects && (
-                        <span style={{
-                          fontSize: "7px", fontWeight: 700, color: "#75aadb",
-                          background: "rgba(117,170,219,0.15)", padding: "1px 4px", borderRadius: "2px",
-                          letterSpacing: "0.3px", textTransform: "uppercase",
-                        }}>FX</span>
-                      )}
-                    </div>
+                        position: "absolute", top: "10px", left: "10px", pointerEvents: "none",
+                        display: "flex", alignItems: "center", gap: "5px", opacity: 0.4,
+                      }}>
+                        <div style={{
+                          width: "5px", height: "5px", borderRadius: "50%",
+                          background: isPlaying ? "#22c55e" : "#75aadb",
+                          boxShadow: isPlaying ? "0 0 6px rgba(34,197,94,0.5)" : "none",
+                          transition: "all 0.3s ease",
+                        }} />
+                        <span style={{ fontSize: "9px", fontWeight: 600, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "1.2px" }}>
+                          Preview
+                        </span>
+                        {hasActiveEffects && (
+                          <span style={{
+                            fontSize: "7px", fontWeight: 700, color: "#75aadb",
+                            background: "rgba(117,170,219,0.15)", padding: "1px 4px", borderRadius: "2px",
+                            letterSpacing: "0.3px", textTransform: "uppercase",
+                          }}>FX</span>
+                        )}
+                      </div>
+                    )}
                     {/* Fit mode label — top-right */}
                     <div style={{
                       position: "absolute", top: "10px", right: "10px", pointerEvents: "none",
@@ -896,13 +906,8 @@ const Player = ({
         </div>
       </div>
 
-      {/* Seekbar + Controls — hide on mobile via tap-to-toggle */}
-      <div style={isMobile ? {
-        transition: 'opacity 0.2s ease, transform 0.2s ease',
-        opacity: mobileControlsVisible ? 1 : 0,
-        transform: mobileControlsVisible ? 'translateY(0)' : 'translateY(4px)',
-        pointerEvents: mobileControlsVisible ? 'auto' : 'none',
-      } : {}}>
+      {/* Seekbar + Controls — hidden entirely on mobile (compact time bar in VideoEditor instead) */}
+      {isMobile ? null : <>
       {videoSrc && (
         <div style={{ padding: "0 20px" }}>
           <Seekbar currentTime={dTime} duration={dDur} onSeek={seekTo} buffered={buffered} />
@@ -986,7 +991,7 @@ const Player = ({
           )}
         </div>
       </div>
-      </div>{/* end mobile controls wrapper */}
+      </>}{/* end desktop controls */}
     </section>
   );
 };

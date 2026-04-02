@@ -5,7 +5,7 @@ import Toolbar from './Toolbar';
 import { styles, RESPONSIVE_CSS } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { useFFmpeg } from '../../hooks/useFFmpeg';
-import { useMobile } from '../../hooks/useMobile';
+import { useMobile, useOrientation } from '../../hooks/useMobile';
 import { useAuth } from '../../supabase/AuthContext';
 import { saveProject, loadProject, getProjectMediaUrl } from '../../services/projectService';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
@@ -28,10 +28,24 @@ const MediaPanel = lazy(() => import('./MediaPanel'));
 const Player = lazy(() => import('./Player'));
 const InspectorPanel = lazy(() => import('./InspectorPanel'));
 const Timeline = lazy(() => import('./Timeline'));
+const MobileTextPanel = lazy(() => import('./MobileTextPanel'));
+const MobileAudioPanel = lazy(() => import('./MobileAudioPanel'));
+const MobileStickerPanel = lazy(() => import('./MobileStickerPanel'));
+const MobileEffectsPanel = lazy(() => import('./MobileEffectsPanel'));
+const MobileFiltersPanel = lazy(() => import('./MobileFiltersPanel'));
 import BottomSheet from './BottomSheet';
+import Icon from './Icon';
+import { formatTimecode } from './timelineEngine';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
+  /* Ensure Material Symbols font renders immediately with swap fallback */
+  .material-symbols-outlined {
+    font-display: swap;
+    width: 1em;
+    height: 1em;
+    overflow: hidden;
+  }
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
@@ -620,6 +634,7 @@ const VideoEditor = () => {
   const [mediaTab, setMediaTab] = useState("local");
   const [editorLayout, setEditorLayout] = useState("default");
   const isMobile = useMobile();
+  const isLandscape = useOrientation();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   // Resizable panel sizes
@@ -1519,12 +1534,18 @@ const VideoEditor = () => {
   }, []);
 
   return (
-    <div style={{ ...styles.root, ...(isMobile ? { height: '100dvh', paddingBottom: '56px' } : {}) }} role="application" aria-label="ClipCut Video Editor">
+    <div style={{
+      ...styles.root,
+      ...(isMobile ? {
+        height: '100dvh',
+        ...(isLandscape ? { paddingBottom: 0, paddingRight: '44px' } : { paddingBottom: '56px' }),
+      } : {}),
+    }} role="application" aria-label="ClipCut Video Editor">
       <link href="https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
       <style>{VIDEO_EDITOR_CSS}</style>
 
-      {/* Skip link for keyboard/screen reader users */}
-      <a href="#editor-timeline" className="skip-link">Skip to timeline</a>
+      {/* Skip link for keyboard/screen reader users (hidden on mobile) */}
+      {!isMobile && <a href="#editor-timeline" className="skip-link">Skip to timeline</a>}
 
       {/* ARIA live region for status announcements */}
       <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
@@ -1543,7 +1564,12 @@ const VideoEditor = () => {
       />
       {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
-      <main aria-label="Editor workspace" style={{ flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : 1), display: "flex", flexDirection: isMobile ? "column" : "row", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+      <main aria-label="Editor workspace" style={{
+        flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : 1),
+        display: "flex",
+        flexDirection: (isMobile && isLandscape) ? "row" : (isMobile ? "column" : "row"),
+        minWidth: 0, minHeight: 0, overflow: "hidden",
+      }}>
         {editorLayout !== 'compact' && !isMobile && (
           <>
             <ErrorBoundary name="media-panel" inline message="Media panel encountered an error">
@@ -1562,17 +1588,19 @@ const VideoEditor = () => {
             </div>
           </>
         )}
-        <ErrorBoundary name="player" inline message="Video player encountered an error">
-          <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
-            <Player
-              isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
-              videoSrc={previewSrc} currentTime={pb.clipOffset}
-              onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
-              onVideoError={handleVideoFormatError}
-              clipProperties={pb.currentClip || selectedClip}
-            />
-          </Suspense>
-        </ErrorBoundary>
+        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : {}}>
+          <ErrorBoundary name="player" inline message="Video player encountered an error">
+            <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
+              <Player
+                isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
+                videoSrc={previewSrc} currentTime={pb.clipOffset}
+                onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
+                onVideoError={handleVideoFormatError}
+                clipProperties={pb.currentClip || selectedClip}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        </div>
         {editorLayout !== 'compact' && !isMobile && (
           <>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, inspectorWidth || DEFAULT_INSPECTOR_W)} onDoubleClick={() => setInspectorWidth(null)}>
@@ -1592,6 +1620,121 @@ const VideoEditor = () => {
             </ErrorBoundary>
           </>
         )}
+
+        {/* Right side: time bar + context actions + timeline — inside main for landscape layout */}
+        {isMobile && (
+          <div style={isLandscape ? { flex: '0 0 40%', display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden', borderLeft: '1px solid rgba(117,170,219,0.08)' } : { display: 'contents' }}>
+            {/* Mobile compact time bar: fullscreen | timecode | undo/redo */}
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              height: '36px', padding: '0 12px',
+              background: '#0e1218', borderTop: '1px solid rgba(117,170,219,0.06)',
+              flexShrink: 0,
+            }}>
+              <button
+                onClick={() => {
+                  const el = document.querySelector('.player-container');
+                  if (el) { el.requestFullscreen?.() || el.webkitRequestFullscreen?.(); }
+                }}
+                style={{
+                  background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                }}
+                aria-label="Fullscreen"
+              >
+                <Icon i="fullscreen" s={20} c="#94a3b8" />
+              </button>
+              <div style={{
+                fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+                fontSize: '12px', letterSpacing: '0.5px', color: '#e2e8f0',
+                display: 'flex', alignItems: 'center', gap: '4px',
+              }}>
+                <span style={{ color: '#75aadb', fontWeight: 600 }}>
+                  {formatTimecode(pb.currentTime)}
+                </span>
+                <span style={{ color: '#475569' }}>/</span>
+                <span style={{ color: '#94a3b8' }}>
+                  {formatTimecode(totalDuration)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+                <button
+                  onClick={undo} disabled={!canUndo}
+                  style={{
+                    background: 'none', border: 'none', cursor: canUndo ? 'pointer' : 'not-allowed',
+                    opacity: canUndo ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                  }}
+                  aria-label="Undo"
+                >
+                  <Icon i="undo" s={18} c="#94a3b8" />
+                </button>
+                <button
+                  onClick={redo} disabled={!canRedo}
+                  style={{
+                    background: 'none', border: 'none', cursor: canRedo ? 'pointer' : 'not-allowed',
+                    opacity: canRedo ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                  }}
+                  aria-label="Redo"
+                >
+                  <Icon i="redo" s={18} c="#94a3b8" />
+                </button>
+              </div>
+            </div>
+
+            {/* Mobile clip context actions — shown when a clip is selected */}
+            {selectedClipId && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '4px',
+                height: '64px', padding: '4px 12px',
+                background: '#0e1218', borderTop: '1px solid rgba(117,170,219,0.06)',
+                overflowX: 'auto', overflowY: 'hidden',
+                WebkitOverflowScrolling: 'touch',
+                flexShrink: 0,
+                transition: 'height 0.2s ease, opacity 0.2s ease',
+              }}>
+                {[
+                  { icon: 'volume_off', label: 'Mute clip audio', action: () => updateClip(selectedClipId, { volume: selectedClip?.volume === 0 ? 1 : 0 }) },
+                  { icon: 'image', label: 'Cover', action: () => {} },
+                  { icon: 'music_note', label: '+ Add audio', action: () => { setMobileActiveTab('audio'); setMobileDrawerOpen(true); } },
+                  { icon: 'title', label: '+ Add text', action: () => { setMobileActiveTab('text'); setMobileDrawerOpen(true); } },
+                ].map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={item.action}
+                    style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                      gap: '4px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
+                      borderRadius: '8px', padding: '6px 8px', cursor: 'pointer',
+                      minWidth: '64px', flex: '0 0 auto', minHeight: 'auto',
+                    }}
+                  >
+                    <Icon i={item.icon} s={20} c="#e2e8f0" />
+                    <span style={{ fontSize: '9px', color: '#94a3b8', whiteSpace: 'nowrap', fontFamily: "'Spline Sans', sans-serif" }}>
+                      {item.label}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
+              <Suspense fallback={<TimelineLoadingFallback />}>
+                <Timeline id="editor-timeline"
+                  clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
+                  onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
+                  onAddClip={addClip} onRippleDelete={rippleDelete}
+                  currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
+                  isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+                  mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+                  timelineHeight={timelineHeight}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
       </main>
 
       {/* Mobile bottom sheet + tab bar */}
@@ -1609,58 +1752,26 @@ const VideoEditor = () => {
                   />
                 )}
                 {mobileActiveTab === 'text' && (
-                  <InspectorPanel
-                    rightTab="text" onRightTabChange={setRightTab}
-                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                  <MobileTextPanel
                     selectedClip={selectedClip} onClipUpdate={updateClip}
-                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                    onAddClip={addClip} currentTime={pb.currentTime}
                   />
                 )}
                 {mobileActiveTab === 'audio' && (
-                  <InspectorPanel
-                    rightTab="audio" onRightTabChange={setRightTab}
-                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
+                  <MobileAudioPanel
                     selectedClip={selectedClip} onClipUpdate={updateClip}
                     bgMusic={bgMusic} onImportBgMusic={importBgMusic}
                     onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                   />
                 )}
                 {mobileActiveTab === 'stickers' && (
-                  <InspectorPanel
-                    rightTab="stickers" onRightTabChange={setRightTab}
-                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-                    selectedClip={selectedClip} onClipUpdate={updateClip}
-                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                  />
+                  <MobileStickerPanel onAddClip={addClip} currentTime={pb.currentTime} />
                 )}
                 {mobileActiveTab === 'effects' && (
-                  <InspectorPanel
-                    rightTab="effects" onRightTabChange={setRightTab}
-                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-                    selectedClip={selectedClip} onClipUpdate={updateClip}
-                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                  />
+                  <MobileEffectsPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
                 )}
                 {mobileActiveTab === 'filters' && (
-                  <InspectorPanel
-                    rightTab="effects" onRightTabChange={setRightTab}
-                    rightSubTab="filters" onRightSubTabChange={setRightSubTab}
-                    selectedClip={selectedClip} onClipUpdate={updateClip}
-                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                  />
-                )}
-                {mobileActiveTab === 'inspector' && (
-                  <InspectorPanel
-                    rightTab={rightTab} onRightTabChange={setRightTab}
-                    rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
-                    selectedClip={selectedClip} onClipUpdate={updateClip}
-                    bgMusic={bgMusic} onImportBgMusic={importBgMusic}
-                    onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                  />
+                  <MobileFiltersPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
                 )}
               </Suspense>
             </ErrorBoundary>
@@ -1676,7 +1787,7 @@ const VideoEditor = () => {
             ].map(tab => (
               <button
                 key={tab.id}
-                className={mobileActiveTab === tab.id ? 'active' : ''}
+                className={mobileActiveTab === tab.id && mobileDrawerOpen ? 'active' : ''}
                 onClick={() => {
                   if (mobileActiveTab === tab.id) {
                     setMobileDrawerOpen(v => !v);
@@ -1686,7 +1797,7 @@ const VideoEditor = () => {
                   }
                 }}
               >
-                <span className="material-symbols-outlined" style={{ fontSize: 22, color: mobileActiveTab === tab.id ? '#75AADB' : undefined }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 22, color: mobileActiveTab === tab.id && mobileDrawerOpen ? '#75AADB' : undefined }}>
                   {tab.icon}
                 </span>
                 <span>{tab.label}</span>
@@ -1696,24 +1807,27 @@ const VideoEditor = () => {
         </>
       )}
 
+      {/* Desktop timeline — mobile timeline is inside <main> */}
       {!isMobile && (
-        <div className="resize-handle resize-handle-h" onMouseDown={(e) => onTimelineDrag(e, timelineHeight || DEFAULT_TIMELINE_H)} onDoubleClick={() => setTimelineHeight(null)}>
-          <div className="resize-handle-dot" />
-        </div>
+        <>
+          <div className="resize-handle resize-handle-h" onMouseDown={(e) => onTimelineDrag(e, timelineHeight || DEFAULT_TIMELINE_H)} onDoubleClick={() => setTimelineHeight(null)}>
+            <div className="resize-handle-dot" />
+          </div>
+          <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
+            <Suspense fallback={<TimelineLoadingFallback />}>
+              <Timeline id="editor-timeline"
+                clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
+                onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
+                onAddClip={addClip} onRippleDelete={rippleDelete}
+                currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
+                isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
+                mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+                timelineHeight={timelineHeight}
+              />
+            </Suspense>
+          </ErrorBoundary>
+        </>
       )}
-      <ErrorBoundary name="timeline" inline message="Timeline encountered an error">
-        <Suspense fallback={<TimelineLoadingFallback />}>
-          <Timeline id="editor-timeline"
-            clips={clips} selectedClipId={selectedClipId} onSelectClip={setSelectedClipId}
-            onUpdateClip={updateClip} onDeleteClip={deleteClip} onSplitClip={splitClip}
-            onAddClip={addClip} onRippleDelete={rippleDelete}
-            currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
-            isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
-            mediaItems={mediaItems} onAddToTimeline={addToTimeline}
-            timelineHeight={timelineHeight}
-          />
-        </Suspense>
-      </ErrorBoundary>
 
       {/* Non-blocking thin bar during initial FFmpeg WASM load */}
       {ffmpeg.isLoading && !ffmpeg.currentOperation && !loadMsg && <FFmpegInitBar progress={ffmpeg.loadProgress} />}

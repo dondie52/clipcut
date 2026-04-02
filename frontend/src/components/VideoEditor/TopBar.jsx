@@ -703,7 +703,7 @@ const TopBar = ({
       <style>{TOP_BAR_CSS}</style>
       
       <header
-        style={{ ...styles.topBar, ...(isMobile ? { height: '48px', padding: '0 10px' } : {}) }}
+        style={{ ...styles.topBar, ...(isMobile ? { height: '44px', padding: '0 10px' } : {}) }}
         role="banner"
         aria-label="ClipCut editor header"
       >
@@ -775,39 +775,41 @@ const TopBar = ({
                 hasMediaToExport={hasMediaToExport}
               />
             </div>
-            {/* Undo/Redo buttons */}
-            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-              <button
-                onClick={onUndo}
-                disabled={!canUndo}
-                className="menu-btn"
-                style={{
-                  ...styles.ghost,
-                  padding: "4px 6px",
-                  opacity: canUndo ? 1 : 0.4,
-                  cursor: canUndo ? "pointer" : "not-allowed"
-                }}
-                title="Undo (Ctrl+Z)"
-                aria-label="Undo"
-              >
-                <Icon i="undo" s={14} c={canUndo ? "#94a3b8" : "#475569"} />
-              </button>
-              <button
-                onClick={onRedo}
-                disabled={!canRedo}
-                className="menu-btn"
-                style={{
-                  ...styles.ghost,
-                  padding: "4px 6px",
-                  opacity: canRedo ? 1 : 0.4,
-                  cursor: canRedo ? "pointer" : "not-allowed"
-                }}
-                title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
-                aria-label="Redo"
-              >
-                <Icon i="redo" s={14} c={canRedo ? "#94a3b8" : "#475569"} />
-              </button>
-            </div>
+            {/* Undo/Redo buttons — hidden on mobile (moved to time bar below preview) */}
+            {!isMobile && (
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                <button
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  className="menu-btn"
+                  style={{
+                    ...styles.ghost,
+                    padding: "4px 6px",
+                    opacity: canUndo ? 1 : 0.4,
+                    cursor: canUndo ? "pointer" : "not-allowed"
+                  }}
+                  title="Undo (Ctrl+Z)"
+                  aria-label="Undo"
+                >
+                  <Icon i="undo" s={14} c={canUndo ? "#94a3b8" : "#475569"} />
+                </button>
+                <button
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  className="menu-btn"
+                  style={{
+                    ...styles.ghost,
+                    padding: "4px 6px",
+                    opacity: canRedo ? 1 : 0.4,
+                    cursor: canRedo ? "pointer" : "not-allowed"
+                  }}
+                  title="Redo (Ctrl+Shift+Z or Ctrl+Y)"
+                  aria-label="Redo"
+                >
+                  <Icon i="redo" s={14} c={canRedo ? "#94a3b8" : "#475569"} />
+                </button>
+              </div>
+            )}
             {/* Auto-save indicator */}
             {!isMobile && lastSaved && (
               <span
@@ -882,19 +884,36 @@ const TopBar = ({
           )}
           <button
             onClick={handleExportClick}
-            className="export-btn"
+            className={isMobile ? '' : 'export-btn'}
             style={{
-              ...styles.exportBtn,
-              ...(isMobile ? { padding: '5px 10px', fontSize: '11px' } : {}),
-              opacity: (hasMediaToExport && !isExporting) ? 1 : 0.5,
-              cursor: (hasMediaToExport && !isExporting) ? 'pointer' : 'not-allowed'
+              ...(isMobile ? {
+                background: (hasMediaToExport && !isExporting) ? '#22c55e' : 'rgba(34,197,94,0.5)',
+                border: 'none',
+                borderRadius: '20px',
+                padding: '6px 14px',
+                fontSize: '12px',
+                fontWeight: 700,
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontFamily: "'Spline Sans', sans-serif",
+                cursor: (hasMediaToExport && !isExporting) ? 'pointer' : 'not-allowed',
+                minHeight: '32px',
+                minWidth: 'auto',
+                transition: 'all 0.2s ease',
+              } : {
+                ...styles.exportBtn,
+                opacity: (hasMediaToExport && !isExporting) ? 1 : 0.5,
+                cursor: (hasMediaToExport && !isExporting) ? 'pointer' : 'not-allowed',
+              }),
             }}
             disabled={!hasMediaToExport || isExporting}
             aria-label={isExporting ? 'Exporting...' : (hasMediaToExport ? 'Export video' : 'Add media to timeline to export')}
             title={isExporting ? 'Export in progress...' : (hasMediaToExport ? 'Export video (Ctrl+E)' : 'Add media to timeline first')}
           >
-            <Icon i="download" s={14} c="#0a0a0a" />
-            {!isMobile && (isExporting ? 'Exporting...' : 'Export')}
+            <Icon i="download" s={14} c={isMobile ? '#fff' : '#0a0a0a'} />
+            {isExporting ? 'Exporting...' : 'Export'}
           </button>
         </div>
       </header>

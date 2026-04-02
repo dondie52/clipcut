@@ -17,6 +17,8 @@ import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
 import { getUserFriendlyMessage } from "../utils/errorHandling";
 
+const ADVISOR_DISMISSED_KEY = "clipcut-dashboard-advisor-dismissed";
+
 /* ========== CSS ========== */
 const DASH_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -155,6 +157,9 @@ const DASH_CSS = `
   .dash-layout {
     display: grid; grid-template-columns: 1fr 256px; gap: 28px;
     align-items: start;
+  }
+  .dash-layout--single {
+    grid-template-columns: 1fr;
   }
   .dash-main { min-width: 0; }
 
@@ -323,10 +328,24 @@ const DASH_CSS = `
 
   /* ---- Advisor Panel ---- */
   .advisor-panel { position: sticky; top: 0; }
+  .advisor-label-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin-bottom: 12px;
+  }
   .advisor-label {
-    display: flex; align-items: center; gap: 6px; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 6px; margin-bottom: 0;
     font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.25);
     text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  .advisor-dismiss {
+    flex-shrink: 0; width: 28px; height: 28px; border-radius: 6px;
+    border: none; background: rgba(255,255,255,0.06);
+    color: rgba(255,255,255,0.4); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .advisor-dismiss:hover {
+    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8);
   }
   .advisor-item {
     padding: 14px; border-radius: 10px; margin-bottom: 10px;
@@ -599,6 +618,22 @@ const Dashboard = () => {
   const [loadError, setLoadError] = useState(null);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [advisorDismissed, setAdvisorDismissed] = useState(() => {
+    try {
+      return typeof window !== "undefined" && localStorage.getItem(ADVISOR_DISMISSED_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const dismissAdvisor = useCallback(() => {
+    try {
+      localStorage.setItem(ADVISOR_DISMISSED_KEY, "1");
+    } catch {
+      /* ignore quota / private mode */
+    }
+    setAdvisorDismissed(true);
+  }, []);
 
   // Derived state
   const displayName = user?.user_metadata?.full_name
@@ -784,7 +819,7 @@ const Dashboard = () => {
 
         {/* ===== SCROLLABLE BODY ===== */}
         <div className="dash-body">
-          <div className="dash-layout">
+          <div className={`dash-layout ${!isMobile && advisorDismissed ? "dash-layout--single" : ""}`}>
 
             {/* ===== LEFT: MAIN CONTENT ===== */}
             <div className="dash-main">
@@ -978,10 +1013,21 @@ const Dashboard = () => {
             </div>
 
             {/* ===== RIGHT: ADVISOR PANEL ===== */}
-            {!isMobile && <aside className="advisor-panel">
-              <div className="advisor-label">
-                <I i="assistant" s={14} c="rgba(255,255,255,0.25)" />
-                Advisor
+            {!isMobile && !advisorDismissed && <aside className="advisor-panel">
+              <div className="advisor-label-row">
+                <div className="advisor-label">
+                  <I i="assistant" s={14} c="rgba(255,255,255,0.25)" />
+                  Advisor
+                </div>
+                <button
+                  type="button"
+                  className="advisor-dismiss"
+                  onClick={dismissAdvisor}
+                  aria-label="Dismiss advisor panel"
+                  title="Hide advisor"
+                >
+                  <I i="close" s={18} />
+                </button>
               </div>
 
               {/* Security */}

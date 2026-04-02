@@ -511,7 +511,7 @@ const TlBtn = memo(({ icon, onClick, disabled, active, label, shortcut, color = 
   <button
     onClick={onClick} disabled={disabled}
     className={`timeline-toolbar-btn ${active ? "active-tool" : ""}`}
-    style={{ background: "none", border: "none", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex" }}
+    style={{ background: "none", border: "none", cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "center", width: "28px", height: "28px", minWidth: "28px" }}
     aria-label={label} title={`${label}${shortcut ? ` (${shortcut})` : ""}`}
   >
     <Icon i={icon} s={17} c={active ? "#75aadb" : disabled ? "#334155" : color} />
@@ -1168,7 +1168,7 @@ const Timeline = ({
   //  RENDER
   // ────────────────────────────────────────────────────────────
   return (
-    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { height: '35%', minHeight: '160px' } : timelineHeight ? { height: `${timelineHeight}px` } : {}) }} role="region" aria-label="Timeline editor">
+    <footer id={id} style={{ ...styles.timeline, ...(isMobile ? { flex: 1, minHeight: '120px', height: 'auto' } : timelineHeight ? { height: `${timelineHeight}px` } : {}) }} role="region" aria-label="Timeline editor">
       <style>{TIMELINE_CSS}</style>
 
       {/* ── Toolbar ─────────────────────────────────────── */}
@@ -1294,22 +1294,51 @@ const Timeline = ({
         }}>
           {isMobile ? (
             <>
-              <div style={{ height: '76px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div style={{ height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ fontSize: '9px', fontWeight: 700, color: '#75aadb', letterSpacing: '0.5px' }}>V1</span>
               </div>
               {hasV2Clips && (
-                <div style={{ height: '76px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <span style={{ fontSize: '9px', fontWeight: 700, color: '#75aadb', letterSpacing: '0.5px' }}>V2</span>
                 </div>
               )}
-              <div style={{ height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <div style={{ height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style={{ fontSize: '9px', fontWeight: 700, color: '#34d399', letterSpacing: '0.5px' }}>A1</span>
               </div>
               {hasA2Clips && (
-                <div style={{ height: '68px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                <div style={{ height: '44px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                   <span style={{ fontSize: '9px', fontWeight: 700, color: '#34d399', letterSpacing: '0.5px' }}>A2</span>
                 </div>
               )}
+              {/* Side action buttons */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '6px 2px', alignItems: 'center' }}>
+                <button
+                  onClick={() => { /* trigger audio import via parent */ }}
+                  style={{
+                    width: '32px', height: '32px', borderRadius: '6px',
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', minWidth: 'auto', minHeight: 'auto',
+                  }}
+                  aria-label="Add audio"
+                  title="Add audio"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#34d399' }}>music_note</span>
+                </button>
+                <button
+                  onClick={() => { /* trigger text overlay */ }}
+                  style={{
+                    width: '32px', height: '32px', borderRadius: '6px',
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    cursor: 'pointer', minWidth: 'auto', minHeight: 'auto',
+                  }}
+                  aria-label="Add text"
+                  title="Add text"
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 14, color: '#e2e8f0' }}>title</span>
+                </button>
+              </div>
             </>
           ) : (
             <>
@@ -1443,7 +1472,7 @@ const Timeline = ({
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, "video")}
               style={{
-                height: "68px", position: "relative", marginLeft: "12px", marginBottom: "6px",
+                height: isMobile ? "48px" : "68px", position: "relative", marginLeft: isMobile ? "4px" : "12px", marginBottom: isMobile ? "2px" : "6px",
                 borderRadius: "6px",
                 background: trackMutes.video
                   ? "rgba(117,170,219,0.02)"
@@ -1469,7 +1498,7 @@ const Timeline = ({
             {/* V2 track — shown when clips exist on track 1 */}
             {hasV2Clips && (
               <div style={{
-                height: "68px", position: "relative", marginLeft: "12px", marginBottom: "6px",
+                height: isMobile ? "48px" : "68px", position: "relative", marginLeft: isMobile ? "4px" : "12px", marginBottom: isMobile ? "2px" : "6px",
                 borderRadius: "6px",
                 background: trackMutes.video2
                   ? "rgba(117,170,219,0.02)"
@@ -1489,13 +1518,13 @@ const Timeline = ({
               </div>
             )}
 
-            {/* Audio track — taller */}
+            {/* Audio track */}
             <div
               onDragOver={(e) => handleDragOver(e, "audio")}
               onDragLeave={handleDragLeave}
               onDrop={(e) => handleDrop(e, "audio")}
               style={{
-                height: "60px", position: "relative", marginLeft: "12px",
+                height: isMobile ? "44px" : "60px", position: "relative", marginLeft: isMobile ? "4px" : "12px",
                 borderRadius: "6px",
                 background: trackMutes.audio
                   ? "rgba(52,211,153,0.02)"
@@ -1521,7 +1550,7 @@ const Timeline = ({
             {/* A2 track — shown when clips exist on track 1 */}
             {hasA2Clips && (
               <div style={{
-                height: "60px", position: "relative", marginLeft: "12px", marginTop: "6px",
+                height: isMobile ? "44px" : "60px", position: "relative", marginLeft: isMobile ? "4px" : "12px", marginTop: isMobile ? "2px" : "6px",
                 borderRadius: "6px",
                 background: trackMutes.audio2
                   ? "rgba(52,211,153,0.02)"

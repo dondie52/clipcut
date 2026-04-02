@@ -324,8 +324,8 @@ export const RESPONSIVE_CSS = `
     /* Prevent iOS zoom on input focus */
     input, select, textarea { font-size: 16px !important; }
 
-    /* Timeline: larger clip height for fat fingers */
-    .timeline-clip { min-height: 56px !important; }
+    /* Timeline: clip height fits mobile track containers */
+    .timeline-clip { min-height: 40px !important; height: 40px !important; top: 4px !important; }
 
     /* Resize handles: wider on touch */
     .resize-handle { min-width: 18px !important; }
@@ -354,21 +354,25 @@ export const RESPONSIVE_CSS = `
       margin: 8px auto;
     }
 
-    /* Mobile tab bar (editor bottom) */
+    /* Mobile tab bar (editor bottom) — scrollable for 8 tabs */
     .mobile-tab-bar {
       position: fixed; bottom: 0; left: 0; right: 0;
       height: 56px; background: #0e1218;
       border-top: 1px solid rgba(117,170,219,0.1);
-      display: flex; align-items: center; justify-content: space-around;
+      display: flex; align-items: center;
       z-index: 3000;
       padding-bottom: env(safe-area-inset-bottom, 0);
+      overflow-x: auto; overflow-y: hidden;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
     }
+    .mobile-tab-bar::-webkit-scrollbar { display: none; }
     .mobile-tab-bar button {
       display: flex; flex-direction: column; align-items: center; gap: 2px;
       background: none; border: none; color: rgba(255,255,255,0.4);
       font-size: 9px; font-weight: 600; font-family: 'Spline Sans', sans-serif;
-      cursor: pointer; padding: 6px 8px; min-height: 44px; min-width: 44px;
-      transition: color 0.15s ease; flex: 1;
+      cursor: pointer; padding: 6px 8px; min-height: 44px; min-width: 56px;
+      transition: color 0.15s ease; flex: 0 0 auto;
     }
     .mobile-tab-bar button.active { color: #75AADB; }
     .mobile-tab-bar button .material-symbols-outlined { font-size: 22px; }
@@ -403,6 +407,29 @@ export const RESPONSIVE_CSS = `
 
     /* Timeline touch support */
     .timeline-track-area { touch-action: pan-x pan-y; }
+  }
+
+  /* Mobile landscape: side-by-side layout */
+  @media (max-width: 768px) and (orientation: landscape) {
+    .mobile-tab-bar {
+      position: fixed; right: 0; top: 0; bottom: 0;
+      left: auto;
+      width: 44px; height: auto;
+      flex-direction: column;
+      justify-content: flex-start;
+      padding-top: 44px; /* below top bar */
+      padding-bottom: env(safe-area-inset-bottom, 0);
+      border-top: none;
+      border-left: 1px solid rgba(117,170,219,0.1);
+      overflow-y: auto; overflow-x: hidden;
+    }
+    .mobile-tab-bar button {
+      min-width: 44px; min-height: 44px;
+      padding: 4px 2px;
+    }
+    .mobile-tab-bar button span:last-child {
+      font-size: 7px;
+    }
   }
 
   /* Tablet: narrower panels */

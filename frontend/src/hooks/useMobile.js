@@ -28,4 +28,24 @@ export function useMobile(breakpoint = TABLET_BREAKPOINT) {
   return isMobile;
 }
 
+/**
+ * Returns true when the device is in landscape orientation.
+ * Uses matchMedia for efficient orientation change detection.
+ */
+export function useOrientation() {
+  const [isLandscape, setIsLandscape] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(orientation: landscape)').matches;
+  });
+
+  useEffect(() => {
+    const mql = window.matchMedia('(orientation: landscape)');
+    const handler = (e) => setIsLandscape(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  return isLandscape;
+}
+
 export default useMobile;

@@ -71,15 +71,15 @@ const LOGIN_CSS = `
   .lg-hero-bg { position: absolute; inset: 0; z-index: 0; }
 
   .lg-hero-bg-img {
-    position: absolute; inset: 0; background-size: cover;
+    position: absolute; inset: 0; z-index: 0; background-size: cover;
     background-position: center; transition: opacity 1.5s ease-in-out;
   }
 
   .lg-hero-overlay {
     position: absolute; inset: 0; z-index: 1;
     background:
-      linear-gradient(180deg, rgba(10,10,10,0.55) 0%, rgba(10,10,10,0.3) 40%, rgba(10,10,10,0.85) 100%),
-      linear-gradient(135deg, rgba(117,170,219,0.05) 0%, transparent 50%);
+      linear-gradient(180deg, rgba(10,10,10,0.28) 0%, rgba(10,10,10,0.32) 38%, rgba(10,10,10,0.88) 100%),
+      linear-gradient(135deg, rgba(117,170,219,0.06) 0%, transparent 50%);
   }
 
   /* Film strip edge */

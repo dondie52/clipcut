@@ -299,10 +299,14 @@ export const FILTER_PRESETS = [
 
 /* ========== EFFECT PRESETS ========== */
 export const EFFECT_PRESETS = [
-  { name: 'Motion Blur', type: 'blur', params: { radius: 5 }, css: 'blur(2px)' },
-  { name: 'Sharpen', type: 'sharpen', params: { strength: 1.0 }, css: 'contrast(1.1)' },
-  { name: 'Vignette', type: 'vignette', params: {}, css: null },
-  { name: 'Gaussian Blur', type: 'blur', params: { radius: 10 }, css: 'blur(4px)' },
+  { name: 'Motion Blur', type: 'blur', params: { radius: 5 }, css: 'blur(2px)', icon: 'blur_on' },
+  { name: 'Sharpen', type: 'sharpen', params: { strength: 1.0 }, css: 'contrast(1.1)', icon: 'deblur' },
+  { name: 'Vignette', type: 'vignette', params: {}, css: null, icon: 'vignette' },
+  { name: 'Gaussian Blur', type: 'blur', params: { radius: 10 }, css: 'blur(4px)', icon: 'lens_blur' },
+  { name: 'Glitch', type: 'glitch', params: { intensity: 3 }, css: null, icon: 'broken_image' },
+  { name: 'Zoom', type: 'zoom', params: { factor: 1.5 }, css: null, icon: 'zoom_in' },
+  { name: 'Shake', type: 'shake', params: { intensity: 5 }, css: null, icon: 'vibration' },
+  { name: 'Flash', type: 'flash', params: { duration: 0.5 }, css: null, icon: 'flash_on' },
 ];
 
 /* ========== ANIMATION PRESETS ========== */
@@ -337,6 +341,69 @@ export const TEXT_POSITION_PRESETS = [
   { value: 'bottom-left', label: 'Bottom Left', icon: 'south_west' },
   { value: 'bottom-center', label: 'Bottom', icon: 'south' },
   { value: 'bottom-right', label: 'Bottom Right', icon: 'south_east' },
+];
+
+/* ========== STICKER PRESETS ========== */
+export const STICKER_PRESETS = [
+  // Smileys
+  { emoji: '😀', label: 'Grinning', category: 'smileys' },
+  { emoji: '😂', label: 'Laughing', category: 'smileys' },
+  { emoji: '🥹', label: 'Touched', category: 'smileys' },
+  { emoji: '😍', label: 'Heart Eyes', category: 'smileys' },
+  { emoji: '🤩', label: 'Star Struck', category: 'smileys' },
+  { emoji: '😎', label: 'Cool', category: 'smileys' },
+  { emoji: '🥳', label: 'Party', category: 'smileys' },
+  { emoji: '😱', label: 'Shocked', category: 'smileys' },
+  { emoji: '🤔', label: 'Thinking', category: 'smileys' },
+  { emoji: '😴', label: 'Sleeping', category: 'smileys' },
+  // Hands
+  { emoji: '👍', label: 'Thumbs Up', category: 'hands' },
+  { emoji: '👎', label: 'Thumbs Down', category: 'hands' },
+  { emoji: '👏', label: 'Clap', category: 'hands' },
+  { emoji: '🙌', label: 'Raised Hands', category: 'hands' },
+  { emoji: '🤝', label: 'Handshake', category: 'hands' },
+  { emoji: '✌️', label: 'Peace', category: 'hands' },
+  { emoji: '🤞', label: 'Fingers Crossed', category: 'hands' },
+  { emoji: '💪', label: 'Strong', category: 'hands' },
+  // Symbols
+  { emoji: '❤️', label: 'Heart', category: 'symbols' },
+  { emoji: '🔥', label: 'Fire', category: 'symbols' },
+  { emoji: '⭐', label: 'Star', category: 'symbols' },
+  { emoji: '💯', label: '100', category: 'symbols' },
+  { emoji: '✨', label: 'Sparkles', category: 'symbols' },
+  { emoji: '💥', label: 'Boom', category: 'symbols' },
+  { emoji: '🎯', label: 'Target', category: 'symbols' },
+  { emoji: '⚡', label: 'Lightning', category: 'symbols' },
+  { emoji: '🚀', label: 'Rocket', category: 'symbols' },
+  { emoji: '💎', label: 'Diamond', category: 'symbols' },
+  // Objects
+  { emoji: '🎬', label: 'Clapper', category: 'objects' },
+  { emoji: '🎵', label: 'Music', category: 'objects' },
+  { emoji: '🎤', label: 'Mic', category: 'objects' },
+  { emoji: '📸', label: 'Camera', category: 'objects' },
+  { emoji: '🎮', label: 'Gaming', category: 'objects' },
+  { emoji: '🏆', label: 'Trophy', category: 'objects' },
+  { emoji: '🎁', label: 'Gift', category: 'objects' },
+  { emoji: '💡', label: 'Idea', category: 'objects' },
+  // Arrows & Labels
+  { emoji: '👆', label: 'Point Up', category: 'arrows' },
+  { emoji: '👇', label: 'Point Down', category: 'arrows' },
+  { emoji: '👈', label: 'Point Left', category: 'arrows' },
+  { emoji: '👉', label: 'Point Right', category: 'arrows' },
+  { emoji: '⬆️', label: 'Arrow Up', category: 'arrows' },
+  { emoji: '⬇️', label: 'Arrow Down', category: 'arrows' },
+  { emoji: '🔔', label: 'Bell', category: 'objects' },
+  { emoji: '💬', label: 'Speech', category: 'objects' },
+  { emoji: '🏷️', label: 'Tag', category: 'objects' },
+  { emoji: '📌', label: 'Pin', category: 'objects' },
+];
+
+/* ========== TEXT STYLE PRESETS (mobile) ========== */
+export const TEXT_STYLE_PRESETS = [
+  { name: 'Title', textSize: 64, textColor: '#ffffff', textPosition: 'center', textBgColor: '', icon: 'title' },
+  { name: 'Subtitle', textSize: 36, textColor: '#e2e8f0', textPosition: 'bottom-center', textBgColor: '', icon: 'subtitles' },
+  { name: 'Caption', textSize: 24, textColor: '#ffffff', textPosition: 'bottom-center', textBgColor: '#000000', icon: 'closed_caption' },
+  { name: 'Lower Third', textSize: 28, textColor: '#ffffff', textPosition: 'bottom-left', textBgColor: 'rgba(0,0,0,0.7)', icon: 'video_label' },
 ];
 
 /* ========== SPEED PRESETS ========== */
