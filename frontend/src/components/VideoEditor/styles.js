@@ -432,9 +432,5 @@ export const RESPONSIVE_CSS = `
     }
   }
 
-  /* Tablet: narrower panels */
-  @media (min-width: 769px) and (max-width: 1024px) {
-    .editor-left-panel { width: 220px !important; }
-    .editor-right-panel { width: 240px !important; }
-  }
+  /* Tablet / narrow desktop: panel widths are driven in VideoEditor (viewport-aware caps + inline wrapper width). */
 `;

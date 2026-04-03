@@ -16,7 +16,10 @@ const PLAYER_CSS = `
   .player-root:fullscreen .player-viewport { padding: 0; }
   .player-root:fullscreen .player-viewport > div { max-width: 100%; border-radius: 0; border: none; }
 
-  .player-container { position: relative; cursor: pointer; }
+  .player-container { position: relative; cursor: pointer; container-type: inline-size; }
+  @container (max-width: 420px) {
+    .player-preview-badge { display: none !important; }
+  }
   .player-container:hover .overlay-controls { opacity: 1; pointer-events: auto; }
   .overlay-controls { opacity: 0; transition: opacity 0.25s ease; pointer-events: none; }
   .overlay-controls.paused { opacity: 1; pointer-events: auto; }
@@ -1002,10 +1005,13 @@ const Player = ({
                     {!isMobile && <div style={{ position: "absolute", bottom: "8px", right: "8px", width: "16px", height: "16px", borderBottom: "1px solid rgba(255,255,255,0.08)", borderRight: "1px solid rgba(255,255,255,0.08)", pointerEvents: "none" }} />}
                     {/* Preview label — top-left (hidden on mobile) */}
                     {!isMobile && (
-                      <div style={{
-                        position: "absolute", top: "10px", left: "10px", pointerEvents: "none",
-                        display: "flex", alignItems: "center", gap: "5px", opacity: 0.4,
-                      }}>
+                      <div
+                        className="player-preview-badge"
+                        style={{
+                          position: "absolute", top: "10px", left: "10px", pointerEvents: "none",
+                          display: "flex", alignItems: "center", gap: "5px", opacity: 0.4,
+                        }}
+                      >
                         <div style={{
                           width: "5px", height: "5px", borderRadius: "50%",
                           background: isPlaying ? "#22c55e" : "#75aadb",

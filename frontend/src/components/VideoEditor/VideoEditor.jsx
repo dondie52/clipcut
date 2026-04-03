@@ -152,6 +152,16 @@ const DEFAULT_TIMELINE_H = 280;
 const DEFAULT_MEDIA_W = 280;
 const DEFAULT_INSPECTOR_W = 320;
 
+/** Caps for resizable side panels — scale with viewport on tablet / narrow desktop */
+function maxMediaPanelCap(vw) {
+  return Math.max(200, Math.min(400, Math.floor(vw * 0.36)));
+}
+function maxInspectorPanelCap(vw) {
+  return Math.max(220, Math.min(450, Math.floor(vw * 0.32)));
+}
+
+const LEFT_COLUMN_FILL_STYLE = { width: '100%', minWidth: 0, minHeight: 0, alignSelf: 'stretch' };
+
 /* ========== LAZY LOADING FALLBACKS ========== */
 const PanelLoadingFallback = memo(({ width, height = "100%" }) => (
   <div style={{
@@ -766,18 +776,51 @@ const VideoEditor = () => {
   const [timelineHeight, setTimelineHeight] = useState(null); // null = use default
   const [mediaPanelWidth, setMediaPanelWidth] = useState(null);
   const [inspectorWidth, setInspectorWidth] = useState(null);
+  const [viewportW, setViewportW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1200));
+
+  const maxMediaCap = useMemo(() => maxMediaPanelCap(viewportW), [viewportW]);
+  const maxInspectorCap = useMemo(() => maxInspectorPanelCap(viewportW), [viewportW]);
+  const effectiveMediaW = useMemo(
+    () => Math.min(mediaPanelWidth ?? DEFAULT_MEDIA_W, maxMediaCap),
+    [mediaPanelWidth, maxMediaCap]
+  );
+  const effectiveInspectorW = useMemo(
+    () => Math.min(inspectorWidth ?? DEFAULT_INSPECTOR_W, maxInspectorCap),
+    [inspectorWidth, maxInspectorCap]
+  );
 
   const clampTlH = useCallback((h) => {
     const clamped = Math.max(120, Math.min(h, window.innerHeight * 0.6));
     setTimelineHeight(clamped);
   }, []);
   const clampMpW = useCallback((w) => {
-    const clamped = Math.max(200, Math.min(w, 400));
-    setMediaPanelWidth(clamped);
+    const cap = maxMediaPanelCap(window.innerWidth);
+    setMediaPanelWidth(Math.max(200, Math.min(w, cap)));
   }, []);
   const clampIpW = useCallback((w) => {
-    const clamped = Math.max(220, Math.min(w, 450));
-    setInspectorWidth(clamped);
+    const cap = maxInspectorPanelCap(window.innerWidth);
+    setInspectorWidth(Math.max(220, Math.min(w, cap)));
+  }, []);
+
+  useEffect(() => {
+    let timeout;
+    const handler = () => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        const vw = window.innerWidth;
+        setViewportW(vw);
+        const mCap = maxMediaPanelCap(vw);
+        const iCap = maxInspectorPanelCap(vw);
+        setMediaPanelWidth((prev) => (prev != null ? Math.min(prev, mCap) : null));
+        setInspectorWidth((prev) => (prev != null ? Math.min(prev, iCap) : null));
+      }, 150);
+    };
+    window.addEventListener('resize', handler);
+    handler();
+    return () => {
+      clearTimeout(timeout);
+      window.removeEventListener('resize', handler);
+    };
   }, []);
 
   const onTimelineDrag = useResizeDrag('y', clampTlH);
@@ -1858,14 +1901,15 @@ const VideoEditor = () => {
         {editorLayout !== 'compact' && !isMobile && (
           <>
             <ErrorBoundary name="left-panel" inline message="Panel encountered an error">
-              <Suspense fallback={<PanelLoadingFallback width={`${mediaPanelWidth || DEFAULT_MEDIA_W}px`} />}>
-                <div style={{ width: `${mediaPanelWidth || DEFAULT_MEDIA_W}px`, flexShrink: 0, overflow: 'hidden auto', background: '#0e1218' }} className="cs">
+              <Suspense fallback={<PanelLoadingFallback width={`${effectiveMediaW}px`} />}>
+                <div style={{ width: `${effectiveMediaW}px`, flexShrink: 0, overflow: 'hidden auto', background: '#0e1218' }} className="cs">
                   {activeToolbar === 'media' && (
                     <MediaPanel
                       mediaTab={mediaTab} onMediaTabChange={setMediaTab}
                       mediaItems={mediaItems} onImportMedia={importMedia} onRemoveMedia={removeMedia}
                       onAddToTimeline={addToTimeline} selectedMediaId={selectedMediaId} onSelectMedia={setSelectedMediaId}
                       isImporting={isImporting}
+                      style={LEFT_COLUMN_FILL_STYLE}
                     />
                   )}
                   {activeToolbar === 'text' && (
@@ -1903,6 +1947,7 @@ const VideoEditor = () => {
                       selectedClip={selectedClip} onClipUpdate={updateClip}
                       bgMusic={bgMusic} onImportBgMusic={importBgMusic}
                       onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
+                      style={LEFT_COLUMN_FILL_STYLE}
                     />
                   )}
                   {activeToolbar === 'filters' && (
@@ -1911,7 +1956,7 @@ const VideoEditor = () => {
                 </div>
               </Suspense>
             </ErrorBoundary>
-            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onMediaDrag(e, mediaPanelWidth || DEFAULT_MEDIA_W)} onDoubleClick={() => setMediaPanelWidth(null)}>
+            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onMediaDrag(e, effectiveMediaW)} onDoubleClick={() => setMediaPanelWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>
           </>
@@ -1937,18 +1982,18 @@ const VideoEditor = () => {
         </div>
         {editorLayout !== 'compact' && !isMobile && selectedClip && (
           <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0 }}>
-            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, inspectorWidth || DEFAULT_INSPECTOR_W)} onDoubleClick={() => setInspectorWidth(null)}>
+            <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, effectiveInspectorW)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>
             <ErrorBoundary name="inspector" inline message="Inspector panel encountered an error">
-              <Suspense fallback={<PanelLoadingFallback width={`${inspectorWidth || DEFAULT_INSPECTOR_W}px`} />}>
+              <Suspense fallback={<PanelLoadingFallback width={`${effectiveInspectorW}px`} />}>
                 <InspectorPanel
                   rightTab={rightTab} onRightTabChange={setRightTab}
                   rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
                   selectedClip={selectedClip} onClipUpdate={updateClip}
                   bgMusic={bgMusic} onImportBgMusic={importBgMusic}
                   onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
-                  style={{ width: `${inspectorWidth || DEFAULT_INSPECTOR_W}px` }}
+                  style={{ width: `${effectiveInspectorW}px` }}
                 />
               </Suspense>
             </ErrorBoundary>
