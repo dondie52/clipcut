@@ -465,6 +465,14 @@ const useAutoSave = (
       for (const [k, v] of Object.entries(c)) {
         if (!SKIP_KEYS.has(k)) o[k] = v;
       }
+      // Always write an idbKey so restore can find media in IndexedDB
+      if (c.mediaId && projectIdRef.current) {
+        o.idbKey = `idb://${projectIdRef.current}:${c.mediaId}`;
+      }
+      // Never persist blob: URLs as storagePath — they expire on page close
+      if (o.storagePath && o.storagePath.startsWith('blob:')) {
+        delete o.storagePath;
+      }
       return o;
     };
 
@@ -485,12 +493,13 @@ const useAutoSave = (
           resolution: resolutionRef.current || "1080p",
         };
 
-        if (currentBg?.storagePath) {
+        if (currentBg?.storagePath || currentBg?.mediaId) {
           projectData.bgMusic = {
-            storagePath: currentBg.storagePath,
             name: currentBg.name,
             volume: currentBg.volume ?? 0.3,
           };
+          if (currentBg.storagePath) projectData.bgMusic.storagePath = currentBg.storagePath;
+          if (currentBg.mediaId) projectData.bgMusic.mediaId = currentBg.mediaId;
         }
 
         // Generate thumbnail for both Supabase and localStorage saves
@@ -583,6 +592,11 @@ const useAutoSave = (
             if (m.file) {
               storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
             }
+          }
+          // Also persist background music
+          const bg = bgMusicRef.current;
+          if (bg?.file && bg?.mediaId) {
+            storeMedia(pid, bg.mediaId, bg.file, { name: bg.name, type: bg.file.type }).catch(() => {});
           }
         }
 
@@ -900,6 +914,13 @@ const VideoEditor = () => {
   const importMedia = useCallback(async (files) => {
     setIsImporting(true);
     try {
+      // Ensure a projectId exists for IndexedDB keying
+      let pid = projectId;
+      if (!pid) {
+        pid = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setProjectId(pid);
+      }
+
       // No FFmpeg init needed — browser-native APIs handle import
       let n = 0;
       for (const file of files) {
@@ -907,6 +928,11 @@ const VideoEditor = () => {
         setLoadSub(`${++n} of ${files.length}`);
         const id = genId();
         const blobUrl = URL.createObjectURL(file);
+
+        // Persist raw file bytes to IndexedDB immediately so they survive page reloads
+        storeMedia(pid, id, file, { name: file.name, type: file.type }).catch((e) =>
+          console.warn('[import] IndexedDB store failed:', file.name, e)
+        );
         const isAudio = file.type.startsWith("audio/");
 
         setMediaItems(p => [...p, {
@@ -976,7 +1002,7 @@ const VideoEditor = () => {
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
     } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [notify]);
+  }, [notify, projectId]);
 
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
@@ -987,9 +1013,15 @@ const VideoEditor = () => {
     // Revoke previous bg music blob
     if (bgMusic?.blobUrl) URL.revokeObjectURL(bgMusic.blobUrl);
     const blobUrl = URL.createObjectURL(file);
-    setBgMusic({ file, name: file.name, blobUrl, volume: 0.3 });
+    const bgMediaId = `bgm-${Date.now()}`;
+    setBgMusic({ file, name: file.name, blobUrl, volume: 0.3, mediaId: bgMediaId });
+    // Persist bgMusic to IndexedDB so it survives page reloads
+    const pid = projectId || `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    storeMedia(pid, bgMediaId, file, { name: file.name, type: file.type }).catch((e) =>
+      console.warn('[bgMusic] IndexedDB store failed:', e)
+    );
     notify('success', `Background music: ${file.name}`);
-  }, [bgMusic, notify]);
+  }, [bgMusic, notify, projectId]);
 
   const updateBgMusicVolume = useCallback((volume) => {
     setBgMusic(prev => prev ? { ...prev, volume } : null);
@@ -1519,29 +1551,102 @@ const VideoEditor = () => {
 
     const restoreBgMusic = async (pData) => {
       const savedBg = pData.project_data?.bgMusic;
-      if (!savedBg?.storagePath || !isSupabaseConfigured()) return;
-      try {
-        const url = await getProjectMediaUrl(savedBg.storagePath);
-        const response = await fetch(url);
-        if (!response.ok) return;
-        const blob = await response.blob();
-        const file = new File([blob], savedBg.name || "bgm", { type: blob.type });
-        const blobUrl = URL.createObjectURL(blob);
+      if (!savedBg) return;
+
+      let file = null, blobUrl = null;
+
+      // Try IndexedDB first (works for all users)
+      if (savedBg.mediaId) {
+        try {
+          const stored = await loadMedia(projectId, savedBg.mediaId);
+          if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+        } catch (e) {
+          console.warn('[restoreBgMusic] IndexedDB load failed:', e);
+        }
+      }
+
+      // Fallback to Supabase Storage
+      if (!blobUrl && savedBg.storagePath && isSupabaseConfigured()) {
+        try {
+          const url = await getProjectMediaUrl(savedBg.storagePath);
+          const response = await fetch(url);
+          if (response.ok) {
+            const blob = await response.blob();
+            file = new File([blob], savedBg.name || "bgm", { type: blob.type });
+            blobUrl = URL.createObjectURL(blob);
+          }
+        } catch (e) {
+          console.warn('[restoreBgMusic] Supabase download failed:', e);
+        }
+      }
+
+      if (blobUrl) {
         setBgMusic({
           file,
           name: savedBg.name || "Background",
           blobUrl,
           volume: savedBg.volume ?? 0.3,
           storagePath: savedBg.storagePath,
+          mediaId: savedBg.mediaId,
         });
-      } catch (e) {
-        console.warn("Background music restore failed:", e);
       }
+    };
+
+    /** Parse an idb:// key into { idbProjectId, idbMediaId }. */
+    const parseIdbKey = (key) => {
+      if (!key || !key.startsWith('idb://')) return null;
+      const payload = key.slice(6); // strip "idb://"
+      const colonIdx = payload.lastIndexOf(':');
+      if (colonIdx < 0) return null;
+      return { idbProjectId: payload.slice(0, colonIdx), idbMediaId: payload.slice(colonIdx + 1) };
+    };
+
+    /** Try loading media from IndexedDB, then Supabase, returning { file, blobUrl } or nulls. */
+    const resolveMedia = async (clipData) => {
+      let file = null, blobUrl = null;
+
+      // 1. Try IndexedDB first (fast, local — works for all users)
+      const parsed = parseIdbKey(clipData.idbKey);
+      if (parsed) {
+        try {
+          const stored = await loadMedia(parsed.idbProjectId, parsed.idbMediaId);
+          if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+        } catch (e) {
+          console.warn('[restore] IndexedDB load failed:', clipData.idbKey, e);
+        }
+      }
+
+      // Also try with the current projectId as key (for older saves without idbKey)
+      if (!blobUrl && clipData.mediaId) {
+        try {
+          const stored = await loadMedia(projectId, clipData.mediaId);
+          if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+        } catch (e) {
+          console.warn('[restore] IndexedDB fallback load failed:', clipData.mediaId, e);
+        }
+      }
+
+      // 2. If IndexedDB miss and user is authenticated, fetch from Supabase Storage
+      if (!blobUrl && clipData.storagePath && isSupabaseConfigured() && !clipData.storagePath.startsWith('blob:')) {
+        try {
+          const url = await getProjectMediaUrl(clipData.storagePath);
+          const response = await fetch(url);
+          if (response.ok) {
+            const blob = await response.blob();
+            file = new File([blob], clipData.name || 'media', { type: blob.type });
+            blobUrl = URL.createObjectURL(blob);
+          }
+        } catch (e) {
+          console.warn('[restore] Supabase download failed:', clipData.storagePath, e);
+        }
+      }
+
+      return { file, blobUrl };
     };
 
     const restoreProject = async () => {
       setIsProcessing(true);
-      setLoadMsg("Loading project...");
+      setLoadMsg("Restoring media...");
       try {
         let pData = projectData;
         if (!pData) {
@@ -1571,6 +1676,8 @@ const VideoEditor = () => {
           return;
         }
 
+        setLoadMsg("Restoring media...");
+
         const mediaMap = new Map();
         const restoredClips = [];
         let loadedCount = 0;
@@ -1586,31 +1693,10 @@ const VideoEditor = () => {
             const cached = mediaMap.get(clipData.mediaId);
             blobUrl = cached.blobUrl;
             file = cached.file;
-          } else if (clipData.storagePath && isSupabaseConfigured()) {
-            try {
-              const url = await getProjectMediaUrl(clipData.storagePath);
-              const response = await fetch(url);
-              if (response.ok) {
-                const blob = await response.blob();
-                file = new File([blob], clipData.name || "media", { type: blob.type });
-                blobUrl = URL.createObjectURL(blob);
-              }
-            } catch (e) {
-              console.warn("Failed to download media:", clipData.storagePath, e);
-            }
-          }
-
-          // Fallback: load from IndexedDB (localStorage projects)
-          if (!blobUrl && clipData.mediaId) {
-            try {
-              const stored = await loadMedia(projectId, clipData.mediaId);
-              if (stored) {
-                file = stored.file;
-                blobUrl = stored.blobUrl;
-              }
-            } catch (e) {
-              console.warn("IndexedDB media load failed:", clipData.mediaId, e);
-            }
+          } else {
+            const resolved = await resolveMedia(clipData);
+            file = resolved.file;
+            blobUrl = resolved.blobUrl;
           }
 
           if (blobUrl && clipData.mediaId) {
@@ -1628,6 +1714,7 @@ const VideoEditor = () => {
           });
         }
 
+        // Rebuild media panel items from all unique restored media
         const newMediaItems = [];
         const seenMedia = new Set();
         for (const clip of restoredClips) {
@@ -1656,6 +1743,27 @@ const VideoEditor = () => {
         setMediaItems(newMediaItems);
         setClips(playableClips);
         await restoreBgMusic(pData);
+
+        // Asynchronously regenerate metadata and thumbnails for restored media items
+        for (const mi of newMediaItems) {
+          if (!mi.file || mi.type === 'audio') continue;
+          (async () => {
+            try {
+              const info = await getVideoInfoFast(mi.file);
+              setMediaItems(prev => prev.map(m =>
+                m.id === mi.id ? { ...m, duration: info.duration || m.duration, width: info.width, height: info.height } : m
+              ));
+              const thumbBlob = await generateThumbnailFast(mi.file, 0);
+              const thumbUrl = URL.createObjectURL(thumbBlob);
+              setMediaItems(prev => prev.map(m =>
+                m.id === mi.id ? { ...m, thumbnail: thumbUrl } : m
+              ));
+            } catch (e) {
+              console.warn('[restore] Thumbnail regen failed:', mi.name, e);
+            }
+          })();
+        }
+
         if (skippedCount > 0) {
           notify("warning", `Loaded "${pName}" — ${skippedCount} clip(s) skipped (media unavailable)`);
         } else {
@@ -1822,6 +1930,7 @@ const VideoEditor = () => {
                 onClipUpdate={updateClip}
                 onSelectClip={setSelectedClipId}
                 hasTimelineClips={clips.some(c => c.type !== 'audio' && c.type !== 'text')}
+                isRestoringMedia={isProcessing && loadMsg.includes('Restoring')}
               />
             </Suspense>
           </ErrorBoundary>

@@ -517,6 +517,7 @@ const Player = ({
   onClipUpdate = null,
   onSelectClip = null,
   hasTimelineClips = false,
+  isRestoringMedia = false,
 }) => {
   const isMobile = useMobile();
   const videoRef = useRef(null);
@@ -1044,43 +1045,63 @@ const Player = ({
                 )}
               </>
             ) : (
-              /* Premium empty state */
+              /* Premium empty state / restoring state */
               <div style={{
                 display: "flex", flexDirection: "column", alignItems: "center", gap: "16px",
                 color: "#475569", width: "100%", height: "100%", justifyContent: "center",
                 background: "radial-gradient(ellipse at center, rgba(117,170,219,0.04) 0%, transparent 60%)",
               }}>
-                <div style={{
-                  width: "80px", height: "80px", borderRadius: "50%",
-                  background: "linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.03) 100%)",
-                  border: "1px solid rgba(117,170,219,0.1)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
-                }}>
-                  <Icon i="play_circle" s={36} c="#475569" />
-                </div>
-                <div style={{ textAlign: "center" }}>
-                  <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>
-                    {hasTimelineClips ? "No clip at playhead" : "No media loaded"}
-                  </p>
-                  <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
-                    {hasTimelineClips
-                      ? "Move the playhead over a clip on the timeline to preview"
-                      : "Import media and add clips to the timeline to preview"}
-                  </p>
-                </div>
-                <div style={{
-                  display: "flex", gap: "16px", marginTop: "4px",
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                    <Icon i="upload_file" s={13} c="#334155" />
-                    <span style={{ fontSize: "10px", color: "#334155" }}>Ctrl+I to import</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                    <Icon i="space_bar" s={13} c="#334155" />
-                    <span style={{ fontSize: "10px", color: "#334155" }}>Space to play</span>
-                  </div>
-                </div>
+                {isRestoringMedia ? (
+                  <>
+                    <div style={{
+                      width: "48px", height: "48px", border: "3px solid rgba(117,170,219,0.15)",
+                      borderTop: "3px solid #75aadb", borderRadius: "50%",
+                      animation: "spin 0.8s linear infinite",
+                    }} />
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{ fontSize: "14px", fontWeight: 600, color: "#75aadb", margin: "0 0 4px" }}>
+                        Restoring media...
+                      </p>
+                      <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
+                        Loading media files from storage
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{
+                      width: "80px", height: "80px", borderRadius: "50%",
+                      background: "linear-gradient(135deg, rgba(117,170,219,0.08) 0%, rgba(117,170,219,0.03) 100%)",
+                      border: "1px solid rgba(117,170,219,0.1)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      boxShadow: "0 8px 32px rgba(0,0,0,0.3)",
+                    }}>
+                      <Icon i="play_circle" s={36} c="#475569" />
+                    </div>
+                    <div style={{ textAlign: "center" }}>
+                      <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>
+                        {hasTimelineClips ? "No clip at playhead" : "No media loaded"}
+                      </p>
+                      <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
+                        {hasTimelineClips
+                          ? "Move the playhead over a clip on the timeline to preview"
+                          : "Import media and add clips to the timeline to preview"}
+                      </p>
+                    </div>
+                    <div style={{
+                      display: "flex", gap: "16px", marginTop: "4px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                        <Icon i="upload_file" s={13} c="#334155" />
+                        <span style={{ fontSize: "10px", color: "#334155" }}>Ctrl+I to import</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                        <Icon i="space_bar" s={13} c="#334155" />
+                        <span style={{ fontSize: "10px", color: "#334155" }}>Space to play</span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {/* Text overlays — always rendered on top, even without video */}
