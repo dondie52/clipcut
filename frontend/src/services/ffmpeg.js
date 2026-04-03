@@ -160,7 +160,6 @@ export async function preloadFFmpeg() {
     await Promise.all([
       fetch(`${baseURL}/ffmpeg-core.js`, cacheOptions),
       fetch(`${baseURL}/ffmpeg-core.wasm`, cacheOptions),
-      fetch(`${baseURL}/ffmpeg-core.worker.js`, cacheOptions),
     ]);
     
     console.log('[FFmpeg] WASM files preloaded to cache');
@@ -211,10 +210,9 @@ export async function loadFFmpeg(onProgress = null) {
 
       bump(12);
 
-      const [coreURL, wasmURL, workerURL] = await Promise.all([
+      const [coreURL, wasmURL] = await Promise.all([
         ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        ffmpegUtil.toBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
       ]);
 
       bump(42);
@@ -228,7 +226,6 @@ export async function loadFFmpeg(onProgress = null) {
       await ffmpeg.load({
         coreURL,
         wasmURL,
-        workerURL,
       });
 
       if (loadRampTimer) {

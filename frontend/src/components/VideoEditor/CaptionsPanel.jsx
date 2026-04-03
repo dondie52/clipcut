@@ -21,40 +21,94 @@ const CaptionsPanel = memo(function CaptionsPanel({
 }) {
   const [selectedStyle, setSelectedStyle] = useState('classic');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState({ stage: '', pct: 0 });
+  const [progress, setProgress] = useState({ stage: '', pct: 0, detail: null });
   const [error, setError] = useState('');
   const [manualText, setManualText] = useState('');
+  const [abortController, setAbortController] = useState(null);
 
   const captionClipCount = clips.filter(c => c.isCaption).length;
   const hasWorker = !!WORKER_URL;
 
-  // Find the first video media item with a file for transcription
-  const videoMedia = mediaItems?.find(m => m.type === 'video' && m.file);
+  // Prefer a real File; blob URL alone still works for FFmpeg + transcription (e.g. after project restore)
+  const videoMedia = mediaItems?.find(m => m.type === 'video' && (m.file || m.blobUrl));
   const videoDuration = videoMedia?.duration || 0;
+  const videoSource = videoMedia && (videoMedia.file || videoMedia.blobUrl);
+
+  const handleCancel = useCallback(() => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+    }
+    setIsGenerating(false);
+    setProgress({ stage: '', pct: 0 });
+    setError('Caption generation was cancelled.');
+  }, [abortController]);
 
   const handleAutoGenerate = useCallback(async () => {
-    if (!videoMedia?.file || !hasWorker) return;
+    if (!hasWorker) {
+      setError('Set VITE_TRANSCRIPT_WORKER_URL to enable auto-captions.');
+      return;
+    }
+    if (!videoSource) {
+      setError('Import a video into the media library first (auto-captions need the source file or blob).');
+      return;
+    }
+
+    const ac = new AbortController();
+    setAbortController(ac);
     setIsGenerating(true);
     setError('');
     setProgress({ stage: 'extracting', pct: 0 });
 
     try {
+      // Check for cancellation before starting
+      if (ac.signal.aborted) return;
+
       const captionClips = await generateCaptionClips(
-        videoMedia.file,
+        videoSource,
         WORKER_URL,
         selectedStyle,
-        (stage, pct) => setProgress({ stage, pct }),
+        (stage, pct, detail) => {
+          if (ac.signal.aborted) return;
+          setProgress({ stage, pct, detail: detail || null });
+        },
       );
+
+      if (ac.signal.aborted) return;
+
+      console.log('[Captions] Adding', captionClips.length, 'clips to timeline');
       for (const clip of captionClips) {
         onAddClip(clip);
       }
+      if (captionClips.length === 0) {
+        setError('No captions were generated. The video may have no detectable speech.');
+      }
     } catch (e) {
+      if (ac.signal.aborted) return; // User cancelled — don't show error
       console.error('[Captions] Auto-generate failed:', e);
-      setError(e.message || 'Failed to generate captions');
+
+      let msg;
+      if (e?.message === 'TRANSCRIPTION_FAILED') {
+        msg = e.detail || 'Transcription failed for all audio chunks. Check your internet connection and worker URL.';
+      } else if (e?.message?.includes('timed out')) {
+        msg = 'Audio extraction timed out (2 min limit). Try a shorter video or check your connection.';
+      } else if (e?.message?.includes('no audio track')) {
+        msg = 'This video has no audio track. Use the manual transcript option below.';
+      } else if (e?.message?.includes('blob URL') || e?.message?.includes('re-importing')) {
+        msg = 'Failed to read the video file. Try re-importing the video.';
+      } else if (e?.message?.includes('Failed to load') || e?.message?.includes('FFmpeg')) {
+        msg = 'Failed to load FFmpeg. Try refreshing the page.';
+      } else if (e?.message?.includes('No speech detected')) {
+        msg = 'No speech detected in the video. Use the manual transcript option below.';
+      } else {
+        msg = e.message || 'Failed to generate captions. Check the console for details.';
+      }
+      setError(msg);
     } finally {
       setIsGenerating(false);
+      setAbortController(null);
     }
-  }, [videoMedia, hasWorker, selectedStyle, onAddClip]);
+  }, [videoSource, hasWorker, selectedStyle, onAddClip]);
 
   const handleManualGenerate = useCallback(() => {
     if (!manualText.trim()) return;
@@ -71,11 +125,23 @@ const CaptionsPanel = memo(function CaptionsPanel({
     onSetClips(prev => prev.filter(c => !c.isCaption));
   }, [onSetClips]);
 
-  const stageLabel = {
-    extracting: 'Extracting audio...',
-    transcribing: 'Transcribing speech...',
-    grouping: 'Generating captions...',
-    done: 'Done!',
+  const getStageLabel = () => {
+    const { stage, pct, detail } = progress;
+    switch (stage) {
+      case 'extracting':
+        return pct > 0 ? `Extracting audio... ${pct}%` : 'Extracting audio...';
+      case 'transcribing':
+        if (detail?.totalChunks > 1) {
+          return `Transcribing... chunk ${detail.chunk}/${detail.totalChunks}`;
+        }
+        return 'Transcribing speech...';
+      case 'grouping':
+        return 'Generating captions...';
+      case 'done':
+        return 'Done!';
+      default:
+        return 'Processing...';
+    }
   };
 
   return (
@@ -151,7 +217,7 @@ const CaptionsPanel = memo(function CaptionsPanel({
       {hasWorker && (
         <button
           onClick={handleAutoGenerate}
-          disabled={isGenerating || !videoMedia}
+          disabled={isGenerating || !videoSource}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
             background: isGenerating ? 'rgba(117,170,219,0.1)' : 'linear-gradient(135deg, #75aadb 0%, #5a8fc0 100%)',
@@ -161,8 +227,8 @@ const CaptionsPanel = memo(function CaptionsPanel({
             padding: '10px 16px',
             fontSize: '12px',
             fontWeight: 600,
-            cursor: isGenerating || !videoMedia ? 'not-allowed' : 'pointer',
-            opacity: isGenerating || !videoMedia ? 0.6 : 1,
+            cursor: isGenerating || !videoSource ? 'not-allowed' : 'pointer',
+            opacity: isGenerating || !videoSource ? 0.6 : 1,
             transition: 'all 0.15s ease',
           }}
         >
@@ -186,9 +252,29 @@ const CaptionsPanel = memo(function CaptionsPanel({
               transition: 'width 0.3s ease',
             }} />
           </div>
-          <p style={{ fontSize: '10px', color: '#64748b', margin: 0 }}>
-            {stageLabel[progress.stage] || 'Processing...'}
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <p style={{ fontSize: '10px', color: '#64748b', margin: 0 }}>
+              {getStageLabel()}
+            </p>
+            <button
+              onClick={handleCancel}
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '2px 6px',
+                fontSize: '10px',
+                fontWeight: 600,
+                color: '#ef4444',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: 'background 0.15s ease',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,0.1)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

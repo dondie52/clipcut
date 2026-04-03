@@ -154,7 +154,7 @@ export function phrasesToClips(phrases, styleKey = 'classic') {
 /**
  * Full auto-caption pipeline: extract audio -> transcribe -> group -> clips.
  *
- * @param {File} videoFile — the video file to transcribe
+ * @param {File|Blob|string} videoFile — video file, blob, or blob URL (FFmpeg writeFile accepts all)
  * @param {string} workerUrl — Cloudflare Workers AI Whisper endpoint
  * @param {string} styleKey — key from CAPTION_STYLES
  * @param {Function} onProgress — (stage: string, pct: number) => void
@@ -165,9 +165,11 @@ export async function generateCaptionClips(videoFile, workerUrl, styleKey, onPro
   const { transcribeVideo } = await import('./transcriptService');
 
   onProgress?.('extracting', 0);
-  const { words } = await transcribeVideo(videoFile, workerUrl, (stage, pct) => {
-    onProgress?.(stage, pct);
+  const { words } = await transcribeVideo(videoFile, workerUrl, (stage, pct, detail) => {
+    onProgress?.(stage, pct, detail);
   });
+
+  console.log('[Captions] Transcription returned', words?.length ?? 0, 'words');
 
   if (!words || words.length === 0) {
     throw new Error('No speech detected in video');
@@ -175,7 +177,9 @@ export async function generateCaptionClips(videoFile, workerUrl, styleKey, onPro
 
   onProgress?.('grouping', 90);
   const phrases = groupWordsIntoCaptions(words);
+  console.log('[Captions] Grouped into', phrases.length, 'caption phrases');
   const clips = phrasesToClips(phrases, styleKey);
+  console.log('[Captions] Generated', clips.length, 'caption clips');
 
   onProgress?.('done', 100);
   return clips;
