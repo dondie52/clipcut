@@ -4,6 +4,7 @@
  *   POST /            — Frame analysis (LLaVA vision + Llama JSON)
  *   POST /transcribe  — Audio transcription (Whisper)
  *   POST /score       — Transcript scoring  (Llama structured JSON)
+ *   POST /edit        — Intent parsing (natural language → structured edit actions)
  *
  * Deploy: cd workers/ai-proxy && npx wrangler deploy
  */
@@ -90,6 +91,76 @@ async function handleScore(request, env) {
   return jsonResponse({ result });
 }
 
+/* ─── Route: POST /edit ────────────────────────────────────── */
+const VALID_ACTION_TYPES = new Set([
+  'add_captions', 'remove_silence', 'cut_clip', 'split_clip',
+  'add_text', 'apply_filter', 'change_speed', 'add_music',
+]);
+
+const EDIT_SYSTEM_PROMPT = `You are a video editing assistant. Parse the user's request into a JSON array of actions.
+Each action has a "type" and "params" object. Valid types and their params:
+
+- add_captions: style (classic|boxed|modern|minimal)
+- remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
+- cut_clip: from (seconds), to (seconds)
+- split_clip: at (seconds)
+- add_text: text (string), position (top|center|bottom), duration (seconds)
+- apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
+- change_speed: speed (0.5|1|1.5|2|4)
+- add_music: genre (chill|epic|happy|sad|energetic)
+
+Context about the video will be provided. Use it to make smart defaults.
+Return ONLY a valid JSON array. No markdown fences, no explanation, no extra text.`;
+
+async function handleEdit(request, env) {
+  const body = await request.json();
+  const { prompt, context } = body;
+
+  if (!prompt || typeof prompt !== 'string') {
+    return jsonResponse({ error: 'Missing or invalid prompt' }, 400);
+  }
+
+  const contextStr = context
+    ? `\nVideo context: duration=${context.duration}s, hasAudio=${context.hasAudio}, clips=${context.clipCount}, playhead=${context.currentTime}s`
+    : '';
+
+  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+    messages: [
+      { role: 'system', content: EDIT_SYSTEM_PROMPT },
+      { role: 'user', content: prompt + contextStr },
+    ],
+  });
+
+  const raw = result?.response || '';
+
+  // Parse JSON from the response, stripping any accidental markdown fences
+  let actions;
+  try {
+    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+    actions = JSON.parse(cleaned);
+  } catch (parseErr) {
+    console.error('[edit] Failed to parse LLM JSON:', raw);
+    return jsonResponse({ error: 'AI returned invalid JSON', raw }, 422);
+  }
+
+  if (!Array.isArray(actions)) {
+    return jsonResponse({ error: 'Expected JSON array of actions', raw }, 422);
+  }
+
+  // Validate and sanitize each action
+  const validated = actions
+    .filter(a => a && typeof a === 'object' && VALID_ACTION_TYPES.has(a.type))
+    .map(a => ({ type: a.type, params: a.params || {} }));
+
+  if (validated.length === 0) {
+    return jsonResponse({ error: 'No valid actions parsed from prompt', raw }, 422);
+  }
+
+  console.log(`[edit] Parsed ${validated.length} action(s):`, validated.map(a => a.type));
+
+  return jsonResponse({ actions: validated });
+}
+
 /* ─── Route: POST / (existing frame analysis) ──────────────── */
 async function handleFrameAnalysis(request, env) {
   const { prompt, image } = await request.json();
@@ -162,6 +233,8 @@ export default {
           return await handleTranscribe(request);
         case '/score':
           return await handleScore(request, env);
+        case '/edit':
+          return await handleEdit(request, env);
         default:
           return await handleFrameAnalysis(request, env);
       }

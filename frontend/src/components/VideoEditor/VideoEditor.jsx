@@ -36,6 +36,7 @@ const MobileStickerPanel = lazy(() => import('./MobileStickerPanel'));
 const MobileEffectsPanel = lazy(() => import('./MobileEffectsPanel'));
 const MobileFiltersPanel = lazy(() => import('./MobileFiltersPanel'));
 const CaptionsPanel = lazy(() => import('./CaptionsPanel'));
+const AIChatPanel = lazy(() => import('./AIChatPanel'));
 import BottomSheet from './BottomSheet';
 import Icon from './Icon';
 import { formatTimecode } from './timelineEngine';
@@ -840,6 +841,12 @@ const VideoEditor = () => {
   const isLandscape = useOrientation();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
+  // AI chat panel state
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiMessages, setAiMessages] = useState([]);
+  const [aiThinking, setAiThinking] = useState(false);
+  const aiUndoStackRef = useRef([]);
+
   // Resizable panel sizes
   const [timelineHeight, setTimelineHeight] = useState(null); // null = use default
   const [mediaPanelWidth, setMediaPanelWidth] = useState(null);
@@ -1359,6 +1366,77 @@ const VideoEditor = () => {
   const handleSettings = useCallback(() => {
     navigate('/settings');
   }, [navigate]);
+
+  // ---- AI Edit handlers ----
+  const handleAiSendMessage = useCallback(async (text) => {
+    const userMsg = { id: `u-${Date.now()}`, role: 'user', text };
+    setAiMessages(prev => [...prev, userMsg]);
+    setAiThinking(true);
+
+    try {
+      // Import dynamically to keep bundle small until first use
+      const { executeAiEdit } = await import('../../services/aiEditService');
+
+      // Build context from current editor state
+      const context = {
+        duration: totalDuration,
+        hasAudio: clips.some(c => c.type === 'audio' || (c.type === 'video' && c.file)),
+        clipCount: clips.length,
+        currentTime: pb.currentTime,
+      };
+
+      // Snapshot clips for undo before AI modifies anything
+      const snapshot = JSON.parse(JSON.stringify(clips.map(c => {
+        const { file, ...rest } = c;
+        return rest;
+      })));
+      const filesMap = new Map(clips.filter(c => c.file).map(c => [c.id, c.file]));
+
+      const result = await executeAiEdit(text, context, {
+        clips, setClips, updateClip, addClip: (clip) => {
+          setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
+        },
+        splitClip, selectedClipId, mediaItems,
+      });
+
+      // Store undo snapshot
+      const undoId = `ai-${Date.now()}`;
+      aiUndoStackRef.current.push({ id: undoId, snapshot, filesMap });
+
+      const assistantMsg = {
+        id: `a-${Date.now()}`, role: 'assistant',
+        text: result.summary || 'Done!',
+        actions: result.actionLabels || [],
+        canUndo: true,
+        onUndo: () => {
+          // Restore clips from snapshot
+          const entry = aiUndoStackRef.current.find(e => e.id === undoId);
+          if (entry) {
+            const restored = entry.snapshot.map(c => {
+              const file = entry.filesMap.get(c.id);
+              return file ? { ...c, file } : c;
+            });
+            setClips(restored);
+            aiUndoStackRef.current = aiUndoStackRef.current.filter(e => e.id !== undoId);
+            // Mark undo button as used
+            setAiMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, canUndo: false } : m));
+            notify('info', 'AI edit undone');
+          }
+        },
+      };
+      setAiMessages(prev => [...prev, assistantMsg]);
+    } catch (err) {
+      const errMsg = { id: `e-${Date.now()}`, role: 'assistant', text: `Error: ${err.message || 'Something went wrong. Please try again.'}` };
+      setAiMessages(prev => [...prev, errMsg]);
+    } finally {
+      setAiThinking(false);
+    }
+  }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime]);
+
+  const toggleAiPanel = useCallback(() => {
+    setAiPanelOpen(prev => !prev);
+    if (isMobile) setMobileDrawerOpen(prev => !prev);
+  }, [isMobile]);
 
   // ---- Download helper ----
   const downloadBlob = useCallback((blob, res) => {
@@ -2066,6 +2144,7 @@ const VideoEditor = () => {
         onNewProject={handleNewProject} onSave={handleSave} onSettings={handleSettings}
         editorLayout={editorLayout} onLayoutChange={setEditorLayout}
         forceOpenExport={forceExport > 0} onExportModalClosed={() => setForceExport(0)}
+        onAiToggle={toggleAiPanel} aiPanelOpen={aiPanelOpen}
       />
       {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
@@ -2164,7 +2243,7 @@ const VideoEditor = () => {
             </Suspense>
           </ErrorBoundary>
         </div>
-        {editorLayout !== 'compact' && !isMobile && selectedClip && (
+        {editorLayout !== 'compact' && !isMobile && selectedClip && !aiPanelOpen && (
           <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0, width: `${effectiveInspectorW + 8}px`, overflow: 'hidden' }}>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, effectiveInspectorW)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
@@ -2183,6 +2262,20 @@ const VideoEditor = () => {
               </Suspense>
             </ErrorBoundary>
           </div>
+        )}
+        {/* AI Chat Panel — desktop sidebar (replaces inspector when open) */}
+        {!isMobile && aiPanelOpen && (
+          <ErrorBoundary name="ai-chat" inline message="AI panel encountered an error">
+            <Suspense fallback={<PanelLoadingFallback width="360px" />}>
+              <AIChatPanel
+                isOpen={aiPanelOpen}
+                onClose={() => setAiPanelOpen(false)}
+                messages={aiMessages}
+                isThinking={aiThinking}
+                onSendMessage={handleAiSendMessage}
+              />
+            </Suspense>
+          </ErrorBoundary>
         )}
 
         {/* Right side: time bar + context actions + timeline — inside main for landscape layout */}
@@ -2347,6 +2440,16 @@ const VideoEditor = () => {
                 {mobileActiveTab === 'filters' && (
                   <MobileFiltersPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
                 )}
+                {mobileActiveTab === 'ai' && (
+                  <AIChatPanel
+                    isOpen={true}
+                    onClose={() => setMobileDrawerOpen(false)}
+                    messages={aiMessages}
+                    isThinking={aiThinking}
+                    onSendMessage={handleAiSendMessage}
+                    isMobile={true}
+                  />
+                )}
               </Suspense>
             </ErrorBoundary>
           </BottomSheet>
@@ -2359,6 +2462,7 @@ const VideoEditor = () => {
               { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers' },
               { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
               { id: 'filters', icon: 'filter_vintage', label: 'Filters' },
+              { id: 'ai', icon: 'auto_awesome', label: 'AI' },
             ].map(tab => (
               <button
                 key={tab.id}

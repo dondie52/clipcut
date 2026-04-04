@@ -601,6 +601,8 @@ const TopBar = ({
   onLayoutChange,
   forceOpenExport = false,
   onExportModalClosed,
+  onAiToggle,
+  aiPanelOpen = false,
 }) => {
   const isMobile = useMobile();
   const [showExportModal, setShowExportModal] = useState(false);
@@ -862,6 +864,15 @@ const TopBar = ({
         
         {/* Right section - Actions */}
         <div style={{ display: "flex", alignItems: "center", gap: isMobile ? "4px" : "8px" }}>
+          {onAiToggle && (
+            <GhostBtn
+              i="auto_awesome"
+              title="AI Editor"
+              aria-label={aiPanelOpen ? "Close AI editor" : "Open AI editor"}
+              onClick={onAiToggle}
+              style={aiPanelOpen ? { color: '#75aadb', background: 'rgba(117,170,219,0.12)' } : undefined}
+            />
+          )}
           {!isMobile && (
             <GhostBtn
               i="keyboard"
