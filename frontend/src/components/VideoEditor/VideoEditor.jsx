@@ -2191,7 +2191,7 @@ const VideoEditor = () => {
             {/* Mobile compact time bar: fullscreen | timecode | undo/redo */}
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              height: '36px', padding: '0 12px',
+              height: '44px', padding: '0 12px',
               background: '#0e1218', borderTop: '1px solid rgba(117,170,219,0.06)',
               flexShrink: 0,
             }}>
@@ -2203,7 +2203,7 @@ const VideoEditor = () => {
                 style={{
                   background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                  width: '44px', height: '44px', minWidth: 'auto', minHeight: 'auto',
                 }}
                 aria-label="Fullscreen"
               >
@@ -2228,7 +2228,7 @@ const VideoEditor = () => {
                   style={{
                     background: 'none', border: 'none', cursor: canUndo ? 'pointer' : 'not-allowed',
                     opacity: canUndo ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                    width: '44px', height: '44px', minWidth: 'auto', minHeight: 'auto',
                   }}
                   aria-label="Undo"
                 >
@@ -2239,7 +2239,7 @@ const VideoEditor = () => {
                   style={{
                     background: 'none', border: 'none', cursor: canRedo ? 'pointer' : 'not-allowed',
                     opacity: canRedo ? 1 : 0.35, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: '36px', height: '36px', minWidth: 'auto', minHeight: 'auto',
+                    width: '44px', height: '44px', minWidth: 'auto', minHeight: 'auto',
                   }}
                   aria-label="Redo"
                 >
@@ -2272,7 +2272,7 @@ const VideoEditor = () => {
                       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
                       gap: '4px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)',
                       borderRadius: '8px', padding: '6px 8px', cursor: 'pointer',
-                      minWidth: '64px', flex: '0 0 auto', minHeight: 'auto',
+                      minWidth: '64px', flex: '0 0 auto', minHeight: '44px',
                     }}
                   >
                     <Icon i={item.icon} s={20} c="#e2e8f0" />
