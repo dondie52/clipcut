@@ -257,12 +257,12 @@ export const styles = {
     position: "relative"
   },
   timeline: {
-    height: "38%",
+    flex: "0 0 auto",
+    height: "280px",
     background: "#08090c",
     borderTop: "2px solid rgba(117, 170, 219, 0.1)",
     display: "flex",
     flexDirection: "column",
-    flexShrink: 1,
     minHeight: "120px",
     overflow: "hidden",
     position: "relative"

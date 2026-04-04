@@ -2046,7 +2046,7 @@ const VideoEditor = () => {
       {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
       <main aria-label="Editor workspace" style={{
-        flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : '1 1 auto'),
+        flex: isMobile ? 1 : '1 1 0%',
         display: "flex",
         flexDirection: (isMobile && isLandscape) ? "row" : (isMobile ? "column" : "row"),
         minWidth: 0, minHeight: isMobile ? 0 : '200px', overflow: "hidden",
@@ -2055,7 +2055,8 @@ const VideoEditor = () => {
           <>
             <ErrorBoundary name="left-panel" inline message="Panel encountered an error">
               <Suspense fallback={<PanelLoadingFallback width={`${effectiveMediaW}px`} />}>
-                <div style={{ width: `${effectiveMediaW}px`, flexShrink: 0, overflow: 'hidden auto', background: '#0e1218' }} className="cs">
+                <div style={{ width: `${effectiveMediaW}px`, flexShrink: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: '#0e1218' }}>
+                  <div style={{ flex: '1 1 0%', overflow: 'hidden auto', minHeight: 0 }} className="cs">
                   {activeToolbar === 'media' && (
                     <MediaPanel
                       mediaTab={mediaTab} onMediaTabChange={setMediaTab}
@@ -2111,6 +2112,7 @@ const VideoEditor = () => {
                   {activeToolbar === 'filters' && (
                     <MobileFiltersPanel selectedClip={selectedClip} onClipUpdate={updateClip} />
                   )}
+                  </div>
                 </div>
               </Suspense>
             </ErrorBoundary>
@@ -2119,7 +2121,7 @@ const VideoEditor = () => {
             </div>
           </>
         )}
-        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : { flex: '1 1 0%', minWidth: `${MIN_PREVIEW_W}px`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : { flex: '1 1 0%', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary name="player" inline message="Video player encountered an error">
             <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
               <Player
@@ -2139,7 +2141,7 @@ const VideoEditor = () => {
           </ErrorBoundary>
         </div>
         {editorLayout !== 'compact' && !isMobile && selectedClip && (
-          <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0, maxWidth: `${effectiveInspectorW + 8}px`, overflow: 'hidden' }}>
+          <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0, width: `${effectiveInspectorW + 8}px`, overflow: 'hidden' }}>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, effectiveInspectorW)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>
