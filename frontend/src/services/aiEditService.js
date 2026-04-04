@@ -297,7 +297,6 @@ function executeCutClip(params, editor) {
 
     if (clipEnd > to) {
       // Part after cut (shifted left)
-      const afterStart = clip.startTime < from ? from - cutDuration + (from - clip.startTime) : clip.startTime;
       newClips.push({
         ...clip,
         id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -401,7 +400,7 @@ function executeChangeSpeed(params, editor) {
   const { clips, setClips, selectedClipId } = editor;
   const speed = params.speed;
 
-  const validSpeeds = [0.25, 0.5, 1, 1.5, 2, 4];
+  const validSpeeds = [0.5, 1, 1.5, 2, 4];
   if (!validSpeeds.includes(speed)) {
     throw new Error(`Invalid speed ${speed}. Use: ${validSpeeds.join(', ')}`);
   }

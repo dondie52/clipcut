@@ -1435,7 +1435,10 @@ const VideoEditor = () => {
 
   const toggleAiPanel = useCallback(() => {
     setAiPanelOpen(prev => !prev);
-    if (isMobile) setMobileDrawerOpen(prev => !prev);
+    if (isMobile) {
+      setMobileActiveTab('ai');
+      setMobileDrawerOpen(prev => !prev);
+    }
   }, [isMobile]);
 
   // ---- Download helper ----
