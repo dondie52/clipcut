@@ -1,4 +1,4 @@
-import { useCallback, useRef, memo } from 'react';
+import { useCallback, useRef, memo, useState } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS, FILTER_PRESETS, EFFECT_PRESETS, ANIMATION_PRESETS, SPEED_PRESETS, TEXT_POSITION_PRESETS, TEXT_FONT_FAMILIES, TRANSITION_PRESETS, DEFAULT_CLIP_PROPERTIES } from './constants';
@@ -104,6 +104,8 @@ const InspectorPanel = ({
   onRightSubTabChange,
   selectedClip,
   onClipUpdate,
+  onAllCaptionsUpdate,
+  clips,
   bgMusic,
   onImportBgMusic,
   onUpdateBgMusicVolume,
@@ -112,11 +114,24 @@ const InspectorPanel = ({
 }) => {
   const isMobile = useMobile();
   const bgMusicFileRef = useRef(null);
+  const [applyToAllCaptions, setApplyToAllCaptions] = useState(true);
+  const isCaption = selectedClip?.isCaption === true;
+
   // Helper to update a clip property
   const update = useCallback((key, value) => {
     if (!selectedClip) return;
     onClipUpdate(selectedClip.id, { [key]: value });
   }, [selectedClip, onClipUpdate]);
+
+  // Helper that propagates to all captions when "Apply to all" is checked
+  const captionUpdate = useCallback((key, value) => {
+    if (!selectedClip) return;
+    if (isCaption && applyToAllCaptions && onAllCaptionsUpdate) {
+      onAllCaptionsUpdate({ [key]: value });
+    } else {
+      onClipUpdate(selectedClip.id, { [key]: value });
+    }
+  }, [selectedClip, onClipUpdate, isCaption, applyToAllCaptions, onAllCaptionsUpdate]);
 
   // Effect handlers
   const handleToggleEffect = useCallback((effectId) => {
@@ -334,6 +349,28 @@ const InspectorPanel = ({
                       />
                     </Section>
 
+                    {isCaption && (
+                      <Section t="Timing" defaultExpanded>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                          <SmallInput
+                            l="Start (s)"
+                            v={String((selectedClip.startTime ?? 0).toFixed(2))}
+                            type="number"
+                            onChange={(val) => update('startTime', Math.max(0, parseFloat(val) || 0))}
+                          />
+                          <SmallInput
+                            l="End (s)"
+                            v={String(((selectedClip.startTime || 0) + (selectedClip.duration || 0)).toFixed(2))}
+                            type="number"
+                            onChange={(val) => {
+                              const endTime = Math.max(0, parseFloat(val) || 0);
+                              update('duration', Math.max(0.1, endTime - (selectedClip.startTime || 0)));
+                            }}
+                          />
+                        </div>
+                      </Section>
+                    )}
+
                     <Section t="Font" defaultExpanded>
                       <Row>
                         <select
@@ -354,7 +391,7 @@ const InspectorPanel = ({
                       <Slider
                         l="Size"
                         value={cp(selectedClip, 'textSize')}
-                        onChange={(val) => update('textSize', Math.max(8, Math.min(200, val)))}
+                        onChange={(val) => captionUpdate('textSize', Math.max(8, Math.min(200, val)))}
                         min={8} max={200} defaultValue={48}
                       />
                     </Section>
@@ -420,7 +457,7 @@ const InspectorPanel = ({
                         <input
                           type="color"
                           value={cp(selectedClip, 'textColor') || '#ffffff'}
-                          onChange={(e) => update('textColor', e.target.value)}
+                          onChange={(e) => captionUpdate('textColor', e.target.value)}
                           style={{
                             width: '32px', height: '24px', border: '1px solid rgba(255,255,255,0.1)',
                             borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '1px',
@@ -431,7 +468,7 @@ const InspectorPanel = ({
                         <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 500 }}>Background</span>
                         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                           <button
-                            onClick={() => update('textBgColor', cp(selectedClip, 'textBgColor') ? '' : 'rgba(0,0,0,0.6)')}
+                            onClick={() => captionUpdate('textBgColor', cp(selectedClip, 'textBgColor') ? '' : 'rgba(0,0,0,0.6)')}
                             style={{
                               background: cp(selectedClip, 'textBgColor') ? 'rgba(117,170,219,0.15)' : 'rgba(30,41,59,0.5)',
                               border: '1px solid rgba(255,255,255,0.08)', borderRadius: '4px',
@@ -444,7 +481,7 @@ const InspectorPanel = ({
                             <input
                               type="color"
                               value={cp(selectedClip, 'textBgColor')?.startsWith('rgba') ? '#000000' : (cp(selectedClip, 'textBgColor') || '#000000')}
-                              onChange={(e) => update('textBgColor', e.target.value)}
+                              onChange={(e) => captionUpdate('textBgColor', e.target.value)}
                               style={{
                                 width: '32px', height: '24px', border: '1px solid rgba(255,255,255,0.1)',
                                 borderRadius: '4px', background: 'rgba(30,41,59,0.5)', cursor: 'pointer', padding: '1px',
@@ -456,12 +493,27 @@ const InspectorPanel = ({
                       <Slider
                         l="Opacity"
                         value={Math.round((cp(selectedClip, 'opacity') ?? 1) * 100)}
-                        onChange={(val) => update('opacity', Math.max(0, Math.min(100, val)) / 100)}
+                        onChange={(val) => captionUpdate('opacity', Math.max(0, Math.min(100, val)) / 100)}
                         min={0} max={100} defaultValue={100}
                       />
                     </Section>
 
                     <Section t="Position">
+                      {isCaption && (
+                        <label style={{
+                          display: 'flex', alignItems: 'center', gap: '6px',
+                          fontSize: '10px', color: '#94a3b8', cursor: 'pointer',
+                          padding: '0 0 6px',
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={applyToAllCaptions}
+                            onChange={(e) => setApplyToAllCaptions(e.target.checked)}
+                            style={{ accentColor: '#75aadb', width: '14px', height: '14px' }}
+                          />
+                          Apply to all captions
+                        </label>
+                      )}
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '3px' }}>
                         {TEXT_POSITION_PRESETS.map(p => {
                           const active = cp(selectedClip, 'textPosition') === p.value && cp(selectedClip, 'textX') == null;
@@ -469,9 +521,9 @@ const InspectorPanel = ({
                             <button
                               key={p.value}
                               onClick={() => {
-                                update('textPosition', p.value);
-                                update('textX', null);
-                                update('textY', null);
+                                captionUpdate('textPosition', p.value);
+                                captionUpdate('textX', null);
+                                captionUpdate('textY', null);
                               }}
                               title={p.label}
                               style={{

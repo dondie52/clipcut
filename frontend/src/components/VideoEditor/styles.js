@@ -262,8 +262,8 @@ export const styles = {
     borderTop: "2px solid rgba(117, 170, 219, 0.1)",
     display: "flex",
     flexDirection: "column",
-    flexShrink: 0,
-    minHeight: 0,
+    flexShrink: 1,
+    minHeight: "120px",
     overflow: "hidden",
     position: "relative"
   },

@@ -317,6 +317,14 @@ const TrackLabel = memo(({
 });
 TrackLabel.displayName = "TrackLabel";
 
+/* ========== HELPERS ========== */
+const formatStartTime = (t) => {
+  const s = Math.max(0, t || 0);
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
 /* ========== CLIP COMPONENT ========== */
 const TimelineClip = memo(({
   clip, isSelected, pixelsPerSecond,
@@ -409,7 +417,7 @@ const TimelineClip = memo(({
               fontSize: "8px", fontWeight: 500,
               color: isSelected ? `rgba(${accentRgba},0.9)` : "#64748b",
               textShadow: "0 1px 2px rgba(0,0,0,0.4)",
-            }}>{formatDuration(clip.duration)}</span>
+            }}>{formatStartTime(clip.startTime)} · {formatDuration(clip.duration)}</span>
           )}
         </div>
         {width > 80 && width <= 100 && (
@@ -417,7 +425,7 @@ const TimelineClip = memo(({
             fontSize: "8px", fontWeight: 600, marginLeft: "auto", flexShrink: 0,
             color: isSelected ? "rgba(255,255,255,0.8)" : "#94a3b8",
             background: "rgba(0,0,0,0.3)", padding: "2px 5px", borderRadius: "3px",
-          }}>{formatDuration(clip.duration)}</span>
+          }}>{formatStartTime(clip.startTime)}</span>
         )}
       </div>
 

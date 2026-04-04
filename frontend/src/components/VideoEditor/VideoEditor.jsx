@@ -450,6 +450,8 @@ const useAutoSave = (
   const projectIdRef = useRef(projectId);
   const lastThumbnailClipIdRef = useRef(null);
   const doSaveRef = useRef(null);
+  const consecutiveFailuresRef = useRef(0);
+  const backoffTicksRef = useRef(0);
 
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
@@ -488,6 +490,18 @@ const useAutoSave = (
 
     const doSave = async () => {
       if (isSavingRef.current) return;
+      // Exponential backoff: after consecutive failures, skip ticks to avoid spamming
+      if (consecutiveFailuresRef.current >= 3) {
+        if (backoffTicksRef.current > 0) {
+          backoffTicksRef.current--;
+          return;
+        }
+        // Next backoff: skip 2^(failures-3) ticks (e.g. 1, 2, 4, 8...)
+        backoffTicksRef.current = Math.min(
+          Math.pow(2, consecutiveFailuresRef.current - 3),
+          20 // cap at ~10 min with 30s interval
+        );
+      }
       isSavingRef.current = true;
 
       try {
@@ -611,8 +625,15 @@ const useAutoSave = (
         }
 
         setLastSaved(new Date());
+        consecutiveFailuresRef.current = 0;
+        backoffTicksRef.current = 0;
       } catch (e) {
-        console.warn("Auto-save failed after retries:", e);
+        consecutiveFailuresRef.current++;
+        if (consecutiveFailuresRef.current <= 1) {
+          console.warn("Auto-save failed:", e?.message || e);
+        } else if (consecutiveFailuresRef.current === 3) {
+          console.warn(`[autosave] ${consecutiveFailuresRef.current} consecutive failures — backing off. Will retry less frequently.`);
+        }
         try {
           const name = projectNameRef.current;
           const SKIP_KEYS_FB = new Set(["file", "blobUrl", "thumbnail", "isProcessing"]);
@@ -790,7 +811,9 @@ const VideoEditor = () => {
   );
 
   const clampTlH = useCallback((h) => {
-    const clamped = Math.max(120, Math.min(h, window.innerHeight * 0.6));
+    // Reserve space: 42 TopBar + 46 Toolbar + 8 resize handle + 200 min player
+    const maxTl = window.innerHeight - 296;
+    const clamped = Math.max(120, Math.min(h, maxTl));
     setTimelineHeight(clamped);
   }, []);
   const clampMpW = useCallback((w) => {
@@ -889,13 +912,36 @@ const VideoEditor = () => {
     return first?.blobUrl || null;
   }, [pb.currentClip, selectedMediaId, mediaItems, clips]);
 
-  // Text overlays visible at current playhead time
+  // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption)
   const textOverlays = useMemo(() => {
-    return clips.filter(c =>
-      c.type === 'text' &&
+    const allCaptions = clips.filter(c => c.isCaption);
+    const allText = clips.filter(c => c.type === 'text' && !c.isCaption);
+    const result = clips.filter(c =>
+      (c.type === 'text' || c.isCaption) &&
+      c.type !== 'audio' &&
       pb.currentTime >= c.startTime &&
       pb.currentTime < c.startTime + c.duration
     );
+    // DEBUG: full diagnostic for caption rendering
+    if (allCaptions.length > 0 && result.filter(c => c.isCaption).length === 0) {
+      const sample = allCaptions.slice(0, 3);
+      console.log(
+        '[DEBUG TextOverlays] currentTime:', pb.currentTime.toFixed(3),
+        '\n  total clips:', clips.length,
+        '| captions:', allCaptions.length,
+        '| manual text:', allText.length,
+        '| visible now:', result.length,
+        '\n  first 3 captions:',
+        sample.map(c => ({
+          id: c.id, type: c.type, isCaption: c.isCaption,
+          text: (c.text || '').slice(0, 30),
+          startTime: c.startTime, duration: c.duration,
+          track: c.track,
+          range: `${c.startTime?.toFixed(2)}-${(c.startTime + c.duration)?.toFixed(2)}`,
+        }))
+      );
+    }
+    return result;
   }, [clips, pb.currentTime]);
 
   // ---- Clip mutations (push to undo stack) ----
@@ -934,6 +980,7 @@ const VideoEditor = () => {
   const redo = useCallback(() => tlDispatch({ type: "REDO" }), []);
 
   const updateClip = useCallback((id, u) => setClips(p => p.map(c => c.id === id ? { ...c, ...u } : c)), [setClips]);
+  const updateAllCaptions = useCallback((updates) => setClips(p => p.map(c => c.isCaption ? { ...c, ...updates } : c)), [setClips]);
   const deleteClip = useCallback((id) => { setClips(p => p.filter(c => c.id !== id)); if (selectedClipId === id) setSelectedClipId(null); }, [setClips, selectedClipId]);
 
   const addToTimeline = useCallback((mi, startTime = null) => {
@@ -1893,10 +1940,10 @@ const VideoEditor = () => {
       {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
       <main aria-label="Editor workspace" style={{
-        flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : 1),
+        flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 0 55%' : '1 1 auto'),
         display: "flex",
         flexDirection: (isMobile && isLandscape) ? "row" : (isMobile ? "column" : "row"),
-        minWidth: 0, minHeight: 0, overflow: "hidden",
+        minWidth: 0, minHeight: isMobile ? 0 : '200px', overflow: "hidden",
       }}>
         {editorLayout !== 'compact' && !isMobile && (
           <>
@@ -1932,6 +1979,10 @@ const VideoEditor = () => {
                       onSetClips={setClips}
                       currentTime={pb.currentTime}
                       mediaItems={mediaItems}
+                      selectedClip={selectedClip}
+                      selectedClipId={selectedClipId}
+                      onSelectClip={setSelectedClipId}
+                      onClipUpdate={updateClip}
                     />
                   )}
                   {activeToolbar === 'stickers' && (
@@ -1945,6 +1996,7 @@ const VideoEditor = () => {
                       rightTab="video" onRightTabChange={setRightTab}
                       rightSubTab="basic" onRightSubTabChange={setRightSubTab}
                       selectedClip={selectedClip} onClipUpdate={updateClip}
+                      onAllCaptionsUpdate={updateAllCaptions} clips={clips}
                       bgMusic={bgMusic} onImportBgMusic={importBgMusic}
                       onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                       style={LEFT_COLUMN_FILL_STYLE}
@@ -1991,6 +2043,7 @@ const VideoEditor = () => {
                   rightTab={rightTab} onRightTabChange={setRightTab}
                   rightSubTab={rightSubTab} onRightSubTabChange={setRightSubTab}
                   selectedClip={selectedClip} onClipUpdate={updateClip}
+                  onAllCaptionsUpdate={updateAllCaptions} clips={clips}
                   bgMusic={bgMusic} onImportBgMusic={importBgMusic}
                   onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                   style={{ width: `${effectiveInspectorW}px` }}
@@ -2147,6 +2200,10 @@ const VideoEditor = () => {
                   <CaptionsPanel
                     clips={clips} onAddClip={addClip} onSetClips={setClips}
                     currentTime={pb.currentTime} mediaItems={mediaItems}
+                    selectedClip={selectedClip}
+                    selectedClipId={selectedClipId}
+                    onSelectClip={setSelectedClipId}
+                    onClipUpdate={updateClip}
                   />
                 )}
                 {mobileActiveTab === 'stickers' && (

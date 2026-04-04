@@ -1,5 +1,6 @@
 import { memo, useState, useCallback } from 'react';
 import Icon from './Icon';
+import { useMobile } from '../../hooks/useMobile';
 import {
   CAPTION_STYLES,
   generateCaptionClips,
@@ -12,13 +13,33 @@ const WORKER_URL = typeof import.meta !== 'undefined'
   ? import.meta.env?.VITE_TRANSCRIPT_WORKER_URL || ''
   : '';
 
+/** Same idea as previewSrc: timeline “video” clips are anything that is not audio/text (see TimelineClip). */
+function isTranscribableTimelineClip(c) {
+  if (!c || c.isCaption) return false;
+  if (c.type === 'audio' || c.type === 'text') return false;
+  if (c.type === 'sticker') return false;
+  return !!(c.file || c.blobUrl);
+}
+
+const formatStartTime = (t) => {
+  const s = Math.max(0, t || 0);
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+};
+
 const CaptionsPanel = memo(function CaptionsPanel({
   clips,
   onAddClip,
   onSetClips,
   currentTime,
   mediaItems,
+  selectedClip,
+  selectedClipId,
+  onSelectClip,
+  onClipUpdate,
 }) {
+  const isMobile = useMobile();
   const [selectedStyle, setSelectedStyle] = useState('classic');
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState({ stage: '', pct: 0, detail: null });
@@ -29,10 +50,15 @@ const CaptionsPanel = memo(function CaptionsPanel({
   const captionClipCount = clips.filter(c => c.isCaption).length;
   const hasWorker = !!WORKER_URL;
 
-  // Prefer a real File; blob URL alone still works for FFmpeg + transcription (e.g. after project restore)
-  const videoMedia = mediaItems?.find(m => m.type === 'video' && (m.file || m.blobUrl));
-  const videoDuration = videoMedia?.duration || 0;
-  const videoSource = videoMedia && (videoMedia.file || videoMedia.blobUrl);
+  // Prefer media library; else selected timeline clip; else first transcribable clip (must match preview — type may be omitted on older clips)
+  const videoFromMedia = mediaItems?.find(m => m.type === 'video' && (m.file || m.blobUrl));
+  const videoFromClip = (selectedClip && isTranscribableTimelineClip(selectedClip))
+    ? selectedClip
+    : clips?.find(isTranscribableTimelineClip);
+  const videoSourceEntry = videoFromMedia || videoFromClip;
+  const videoDuration = videoSourceEntry?.duration || 0;
+  const videoSource = videoSourceEntry && (videoSourceEntry.file || videoSourceEntry.blobUrl);
+  const buttonDisabled = isGenerating || !videoSource;
 
   const handleCancel = useCallback(() => {
     if (abortController) {
@@ -76,10 +102,8 @@ const CaptionsPanel = memo(function CaptionsPanel({
 
       if (ac.signal.aborted) return;
 
-      console.log('[Captions] Adding', captionClips.length, 'clips to timeline');
-      for (const clip of captionClips) {
-        onAddClip(clip);
-      }
+      console.log('[Captions] Adding', captionClips.length, 'clips to timeline (batched)');
+      onSetClips(prev => [...prev, ...captionClips]);
       if (captionClips.length === 0) {
         setError('No captions were generated. The video may have no detectable speech.');
       }
@@ -90,14 +114,10 @@ const CaptionsPanel = memo(function CaptionsPanel({
       let msg;
       if (e?.message === 'TRANSCRIPTION_FAILED') {
         msg = e.detail || 'Transcription failed for all audio chunks. Check your internet connection and worker URL.';
-      } else if (e?.message?.includes('timed out')) {
-        msg = 'Audio extraction timed out (2 min limit). Try a shorter video or check your connection.';
-      } else if (e?.message?.includes('no audio track')) {
-        msg = 'This video has no audio track. Use the manual transcript option below.';
+      } else if (e?.message?.includes('no audio track') || e?.message?.includes('unsupported codec')) {
+        msg = 'This video has no audio track or uses an unsupported format. Use the manual transcript option below.';
       } else if (e?.message?.includes('blob URL') || e?.message?.includes('re-importing')) {
         msg = 'Failed to read the video file. Try re-importing the video.';
-      } else if (e?.message?.includes('Failed to load') || e?.message?.includes('FFmpeg')) {
-        msg = 'Failed to load FFmpeg. Try refreshing the page.';
       } else if (e?.message?.includes('No speech detected')) {
         msg = 'No speech detected in the video. Use the manual transcript option below.';
       } else {
@@ -108,18 +128,16 @@ const CaptionsPanel = memo(function CaptionsPanel({
       setIsGenerating(false);
       setAbortController(null);
     }
-  }, [videoSource, hasWorker, selectedStyle, onAddClip]);
+  }, [videoSource, hasWorker, selectedStyle, onSetClips, videoFromMedia, videoFromClip]);
 
   const handleManualGenerate = useCallback(() => {
     if (!manualText.trim()) return;
     setError('');
     const dur = videoDuration || 30; // fallback 30s if unknown
     const captionClips = parseManualTranscript(manualText, dur, selectedStyle);
-    for (const clip of captionClips) {
-      onAddClip(clip);
-    }
+    onSetClips(prev => [...prev, ...captionClips]);
     setManualText('');
-  }, [manualText, videoDuration, selectedStyle, onAddClip]);
+  }, [manualText, videoDuration, selectedStyle, onSetClips]);
 
   const handleClearCaptions = useCallback(() => {
     onSetClips(prev => prev.filter(c => !c.isCaption));
@@ -160,7 +178,11 @@ const CaptionsPanel = memo(function CaptionsPanel({
         <p style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 8px' }}>
           Caption Style
         </p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+        <div style={isMobile ? {
+          display: 'flex', gap: '8px', overflowX: 'auto',
+          WebkitOverflowScrolling: 'touch', paddingBottom: '4px',
+          scrollbarWidth: 'none',
+        } : { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
           {STYLE_KEYS.map(key => {
             const style = CAPTION_STYLES[key];
             const isActive = selectedStyle === key;
@@ -172,10 +194,11 @@ const CaptionsPanel = memo(function CaptionsPanel({
                   background: isActive ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
                   border: `1px solid ${isActive ? 'rgba(117,170,219,0.4)' : 'rgba(255,255,255,0.06)'}`,
                   borderRadius: '8px',
-                  padding: '10px 8px',
+                  padding: isMobile ? '8px 12px' : '10px 8px',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'all 0.15s ease',
+                  ...(isMobile ? { flex: '0 0 auto', minWidth: '120px' } : {}),
                 }}
               >
                 {/* Style preview */}
@@ -217,19 +240,20 @@ const CaptionsPanel = memo(function CaptionsPanel({
       {hasWorker && (
         <button
           onClick={handleAutoGenerate}
-          disabled={isGenerating || !videoSource}
+          disabled={buttonDisabled}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
             background: isGenerating ? 'rgba(117,170,219,0.1)' : 'linear-gradient(135deg, #75aadb 0%, #5a8fc0 100%)',
             color: '#fff',
             border: 'none',
-            borderRadius: '8px',
-            padding: '10px 16px',
-            fontSize: '12px',
+            borderRadius: isMobile ? '12px' : '8px',
+            padding: isMobile ? '14px 16px' : '10px 16px',
+            fontSize: isMobile ? '14px' : '12px',
             fontWeight: 600,
-            cursor: isGenerating || !videoSource ? 'not-allowed' : 'pointer',
-            opacity: isGenerating || !videoSource ? 0.6 : 1,
+            cursor: buttonDisabled ? 'not-allowed' : 'pointer',
+            opacity: buttonDisabled ? 0.6 : 1,
             transition: 'all 0.15s ease',
+            width: isMobile ? '100%' : undefined,
           }}
         >
           <Icon i={isGenerating ? "hourglass_empty" : "auto_awesome"} s={16} c="#fff" />
@@ -391,9 +415,112 @@ const CaptionsPanel = memo(function CaptionsPanel({
         </div>
       )}
 
+      {/* Mobile: Compact editor when a caption is selected */}
+      {isMobile && selectedClip?.isCaption && onClipUpdate && (
+        <div style={{
+          background: 'rgba(117,170,219,0.06)', borderRadius: '8px',
+          border: '1px solid rgba(117,170,219,0.12)', padding: '10px',
+          display: 'flex', flexDirection: 'column', gap: '8px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: '#75aadb' }}>Edit Caption</span>
+            <button onClick={() => onSelectClip?.(null)} style={{
+              background: 'none', border: 'none', color: '#64748b', fontSize: '10px', cursor: 'pointer',
+            }}>Done</button>
+          </div>
+          <textarea
+            value={selectedClip.text || ''}
+            onChange={(e) => onClipUpdate(selectedClip.id, { text: e.target.value })}
+            rows={2}
+            style={{
+              width: '100%', padding: '8px', borderRadius: '6px',
+              background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+              color: '#e2e8f0', fontSize: '13px', fontFamily: "'Spline Sans', sans-serif",
+              outline: 'none', resize: 'none',
+            }}
+          />
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input type="color" value={selectedClip.textColor || '#ffffff'}
+              onChange={(e) => onClipUpdate(selectedClip.id, { textColor: e.target.value })}
+              style={{ width: '36px', height: '36px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer', flexShrink: 0 }}
+            />
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '9px', color: '#64748b' }}>Size: {selectedClip.textSize || 36}</span>
+              <input type="range" min={16} max={120} value={selectedClip.textSize || 36}
+                onChange={(e) => onClipUpdate(selectedClip.id, { textSize: Number(e.target.value) })}
+                style={{ width: '100%', accentColor: '#75aadb' }}
+              />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: '9px', color: '#64748b' }}>Start (s)</span>
+              <input type="number" step="0.1" min="0"
+                value={(selectedClip.startTime ?? 0).toFixed(1)}
+                onChange={(e) => onClipUpdate(selectedClip.id, { startTime: Math.max(0, parseFloat(e.target.value) || 0) })}
+                style={{
+                  width: '100%', padding: '6px', borderRadius: '4px', marginTop: '2px',
+                  background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#e2e8f0', fontSize: '12px', outline: 'none',
+                }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontSize: '9px', color: '#64748b' }}>End (s)</span>
+              <input type="number" step="0.1" min="0"
+                value={((selectedClip.startTime || 0) + (selectedClip.duration || 0)).toFixed(1)}
+                onChange={(e) => {
+                  const end = Math.max(0, parseFloat(e.target.value) || 0);
+                  onClipUpdate(selectedClip.id, { duration: Math.max(0.1, end - (selectedClip.startTime || 0)) });
+                }}
+                style={{
+                  width: '100%', padding: '6px', borderRadius: '4px', marginTop: '2px',
+                  background: 'rgba(30,41,59,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+                  color: '#e2e8f0', fontSize: '12px', outline: 'none',
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: Tappable caption list */}
+      {isMobile && captionClipCount > 0 && onSelectClip && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <p style={{ fontSize: '10px', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', margin: '0 0 4px' }}>
+            Captions ({captionClipCount})
+          </p>
+          <div style={{ maxHeight: '120px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {clips.filter(c => c.isCaption).map(cap => (
+              <button
+                key={cap.id}
+                onClick={() => onSelectClip(cap.id)}
+                style={{
+                  background: selectedClipId === cap.id ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${selectedClipId === cap.id ? 'rgba(117,170,219,0.4)' : 'rgba(255,255,255,0.06)'}`,
+                  borderRadius: '8px', padding: '8px 10px',
+                  textAlign: 'left', cursor: 'pointer',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}
+              >
+                <span style={{ fontSize: '11px', color: '#e2e8f0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                  {cap.text}
+                </span>
+                <span style={{ fontSize: '9px', color: '#64748b', flexShrink: 0, marginLeft: '8px' }}>
+                  {formatStartTime(cap.startTime)}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Tip */}
       <p style={{ fontSize: '9px', color: '#3d4a5c', margin: '4px 0 0', lineHeight: 1.5 }}>
-        Captions appear as text clips on track V3. Select any caption on the timeline to edit its text, timing, or style in the inspector.
+        {isMobile
+          ? 'Tap a caption above to edit. Captions appear on track V2.'
+          : 'Captions appear as text clips on track V2. Select any caption on the timeline to edit its text, timing, or style in the inspector.'
+        }
       </p>
     </div>
   );
