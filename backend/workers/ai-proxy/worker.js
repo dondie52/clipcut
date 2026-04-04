@@ -18,8 +18,11 @@ function jsonResponse(data, status = 200) {
   return Response.json(data, { status, headers: CORS_HEADERS });
 }
 
+const WHISPER_UPSTREAM = 'https://abstracts-feb-impacts-oldest.trycloudflare.com/transcribe';
+const UPSTREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — long videos on CPU
+
 /* ─── Route: POST /transcribe ──────────────────────────────── */
-async function handleTranscribe(request, env) {
+async function handleTranscribe(request) {
   const audioData = await request.arrayBuffer();
   const byteLength = audioData.byteLength;
 
@@ -27,23 +30,45 @@ async function handleTranscribe(request, env) {
     return jsonResponse({ error: 'Empty audio data' }, 400);
   }
 
-  console.log(`[transcribe] Received ${byteLength} bytes (${(byteLength / 1024).toFixed(1)} KB)`);
+  console.log(`[transcribe] Proxying ${byteLength} bytes (${(byteLength / 1024).toFixed(1)} KB) to upstream Whisper`);
 
   try {
-    // Chunks are now 10s (~320 KB) so the spread array stays manageable.
-    // Previous 25s chunks (~800 KB) caused OOM/timeout on Workers AI.
-    const result = await env.AI.run('@cf/openai/whisper', {
-      audio: [...new Uint8Array(audioData)],
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), UPSTREAM_TIMEOUT_MS);
+
+    const upstream = await fetch(WHISPER_UPSTREAM, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: audioData,
+      signal: ac.signal,
     });
 
-    console.log('[transcribe] Whisper OK, words:', result?.words?.length ?? 0,
-      ', vtt length:', result?.vtt?.length ?? 0);
-    return jsonResponse({ result });
+    clearTimeout(timer);
+
+    if (!upstream.ok) {
+      const errBody = await upstream.text().catch(() => '');
+      console.error(`[transcribe] Upstream returned ${upstream.status}:`, errBody);
+      return jsonResponse(
+        { error: `Upstream Whisper error (${upstream.status})`, detail: errBody },
+        upstream.status >= 500 ? 502 : upstream.status
+      );
+    }
+
+    const data = await upstream.json();
+    console.log('[transcribe] Upstream OK, keys:', Object.keys(data));
+
+    // Flask server already returns { result: { text, words, language } }
+    // so pass through directly — no extra wrapping needed
+    return jsonResponse(data);
   } catch (err) {
-    console.error(`[transcribe] Whisper failed (${byteLength} bytes):`, err.message, err.stack);
+    if (err.name === 'AbortError') {
+      console.error(`[transcribe] Upstream timed out after ${UPSTREAM_TIMEOUT_MS / 1000}s`);
+      return jsonResponse({ error: 'Upstream Whisper server timed out' }, 504);
+    }
+    console.error(`[transcribe] Proxy failed:`, err.message);
     return jsonResponse(
-      { error: `Whisper inference failed: ${err.message}`, audioSize: byteLength },
-      500
+      { error: `Failed to reach Whisper server: ${err.message}` },
+      502
     );
   }
 }
@@ -134,7 +159,7 @@ export default {
 
       switch (path) {
         case '/transcribe':
-          return await handleTranscribe(request, env);
+          return await handleTranscribe(request);
         case '/score':
           return await handleScore(request, env);
         default:

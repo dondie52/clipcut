@@ -13,7 +13,7 @@ import { DEFAULT_CLIP_PROPERTIES } from '../components/VideoEditor/constants';
 const MAX_WORDS_PER_CAPTION = 5;
 const MAX_CHARS_PER_CAPTION = 40;
 const MIN_CAPTION_DURATION = 0.8;   // seconds
-const CAPTION_TRACK = 2;            // V3 — keep separate from user text clips
+const CAPTION_TRACK = 1;            // V2 — same track as manual text overlays
 
 let _idCounter = 0;
 const captionId = () => `caption-${Date.now()}-${_idCounter++}`;

@@ -675,15 +675,41 @@ const Dashboard = () => {
   }, [projects]);
 
   // Load projects from cloud or localStorage
+  /** Derive a project name from clip data when the project is still "Untitled Project". */
+  const deriveProjectName = useCallback((p) => {
+    if (p.name && p.name !== "Untitled Project") return p.name;
+    const clips = p.project_data?.clips || [];
+    const firstVideo = clips.find(c => c.type === "video" && c.name);
+    if (firstVideo?.name) {
+      return firstVideo.name.replace(/\.[^.]+$/, "").trim() || p.name;
+    }
+    return p.name;
+  }, []);
+
   const loadProjects = useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
       const cloudProjects = await listCloudProjects(user?.id);
+
+      // Auto-fix "Untitled Project" names from clip data and persist to DB
+      const renamePromises = [];
+      for (const p of cloudProjects) {
+        const derived = deriveProjectName(p);
+        if (derived !== p.name) {
+          p.name = derived;
+          renamePromises.push(
+            updateCloudProject(p.id, user?.id, { name: derived }).catch(() => {})
+          );
+        }
+      }
+      // Fire-and-forget: update names in background
+      if (renamePromises.length > 0) Promise.all(renamePromises);
+
       const formattedProjects = cloudProjects.map(p => ({
         id: p.id,
         name: p.name,
-        thumbnail: p.thumbnail_url,
+        thumbnail: p.thumbnail_url || p.project_data?.thumbnailDataUrl || null,
         duration: p.duration_seconds > 0
           ? `${Math.floor(p.duration_seconds / 60)}:${String(Math.floor(p.duration_seconds % 60)).padStart(2, "0")}`
           : "0:00",
@@ -699,7 +725,7 @@ const Dashboard = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.id]);
+  }, [user?.id, deriveProjectName]);
 
   useEffect(() => {
     loadProjects();
@@ -1000,16 +1026,17 @@ const Dashboard = () => {
                           <img
                             src={project.thumbnail}
                             alt={project.name}
-                            onError={(e) => { e.target.style.display = 'none'; e.target.nextSibling.style.display = 'flex'; }}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
                           />
                         ) : null}
                         <div style={{
                           display: project.thumbnail ? 'none' : 'flex',
                           alignItems: 'center', justifyContent: 'center',
                           width: '100%', height: '100%', position: 'absolute', inset: 0,
-                          background: '#111820',
+                          background: 'linear-gradient(135deg, #111820, #0e1218)',
                         }}>
-                          <I i="movie" s={32} c="rgba(255,255,255,0.1)" />
+                          <I i="movie" s={32} c="rgba(117,170,219,0.2)" />
                         </div>
                         <button
                           className="del-btn"

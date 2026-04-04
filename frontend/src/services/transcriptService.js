@@ -2,7 +2,7 @@
  * Transcript-based clip scoring pipeline for Long to Shorts
  *
  * Pipeline:
- *  1. Extract audio from video  (FFmpeg.wasm → 16 kHz mono WAV)
+ *  1. Extract audio from video  (Web Audio API → 16 kHz mono WAV)
  *  2. Chunk WAV + transcribe     (Cloudflare Workers AI Whisper)
  *  3. Build sentences             (punctuation + pause detection)
  *  4. Generate candidate segments (sliding window at sentence boundaries)
@@ -13,18 +13,6 @@
  *  - If Whisper returns no words → parse VTT for segment-level timestamps
  *  - If no speech detected → throws 'NO_SPEECH' so caller can use frame analysis
  */
-
-import {
-  loadFFmpeg,
-  writeFile,
-  readFile,
-  cleanup,
-  exec,
-  terminateFFmpeg,
-  formatTime,
-  setProgressCallback,
-  clearProgressCallback,
-} from './ffmpeg';
 
 // ─── Constants ────────────────────────────────────────────────
 const SAMPLE_RATE = 16000;
@@ -38,127 +26,186 @@ const TRANSCRIBE_CONCURRENCY = 3;  // parallel Whisper requests (small 10s chunk
 const SENTENCE_ENDINGS = /[.!?]$/;
 
 // ═══════════════════════════════════════════════════════════════
-//  SECTION 1 — Audio extraction
+//  SECTION 1 — Audio extraction (Web Audio API — no FFmpeg needed)
 // ═══════════════════════════════════════════════════════════════
 
+const MAX_EXTRACT_DURATION = 600; // 10 min safety cap (in seconds)
+
 /**
- * Resolve a video source (File, Blob, or blob URL string) into a
- * Uint8Array suitable for FFmpeg's writeFile.  Blob URLs from IndexedDB
- * restore can be revoked between sessions, so we fetch them explicitly
- * and validate the result before handing it to FFmpeg.
+ * Resolve a video source (File, Blob, or blob URL string) into an
+ * ArrayBuffer for Web Audio API decoding.
  */
-async function resolveVideoSource(videoFile) {
-  // Already a File or Blob — just confirm it has data
+async function resolveToArrayBuffer(videoFile) {
   if (videoFile instanceof File || videoFile instanceof Blob) {
-    console.log('[Captions] resolveVideoSource: File/Blob',
+    console.log('[Captions] resolveToArrayBuffer: File/Blob',
       { size: videoFile.size, name: videoFile.name || '(blob)', type: videoFile.type });
     if (videoFile.size === 0) throw new Error('Video file is empty (0 bytes)');
-    return videoFile;
+    return videoFile.arrayBuffer();
   }
 
-  // String — assumed to be a blob URL or object URL
   if (typeof videoFile === 'string') {
-    console.log('[Captions] resolveVideoSource: fetching blob URL', videoFile.slice(0, 80));
-    try {
-      const res = await fetch(videoFile);
-      if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
-      const buf = await res.arrayBuffer();
-      console.log('[Captions] resolveVideoSource: fetched', buf.byteLength, 'bytes');
-      if (buf.byteLength === 0) throw new Error('Blob URL resolved to 0 bytes — it may have been revoked');
-      return new Uint8Array(buf);
-    } catch (err) {
-      throw new Error(`Failed to read video from blob URL: ${err.message}`);
-    }
+    console.log('[Captions] resolveToArrayBuffer: fetching blob URL', videoFile.slice(0, 80));
+    const res = await fetch(videoFile);
+    if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength === 0) throw new Error('Blob URL resolved to 0 bytes — it may have been revoked');
+    console.log('[Captions] resolveToArrayBuffer: fetched', buf.byteLength, 'bytes');
+    return buf;
   }
 
   throw new Error('Unsupported video source type: ' + typeof videoFile);
 }
 
-const EXTRACT_TIMEOUT_MS = 120_000; // 120 seconds — WASM is slow on long videos
-const MAX_EXTRACT_DURATION = 600;   // 10 min safety cap for extraction
+/**
+ * Build a WAV file (Uint8Array with 44-byte header + PCM data) from
+ * an Int16Array of samples.  Output format matches what downstream
+ * chunkWav() and computeRmsPerSecond() expect.
+ */
+function buildWav(pcmSamples) {
+  const pcmBytes = new Uint8Array(pcmSamples.buffer, pcmSamples.byteOffset, pcmSamples.byteLength);
+  const header = createWavHeader(pcmBytes.length);
+  const wav = new Uint8Array(header.length + pcmBytes.length);
+  wav.set(header, 0);
+  wav.set(pcmBytes, header.length);
+  return wav;
+}
 
+/**
+ * Extract audio from a video file using the native Web Audio API.
+ * Returns a Uint8Array in 16 kHz mono 16-bit WAV format (same layout
+ * that downstream chunkWav / computeRmsPerSecond expect).
+ *
+ * @param {File|Blob|string} videoFile — video file, blob, or blob URL
+ * @param {Function} onExtractionProgress — optional (pct: number) => void
+ * @returns {Promise<Uint8Array>} WAV data
+ */
 export async function extractAudio(videoFile, onExtractionProgress) {
-  // Wrap the entire pipeline in a timeout.  FFmpeg WASM is single-threaded:
-  // if exec() hangs, every subsequent FS operation (cleanup, deleteFile) also
-  // blocks because they queue behind the running command.  A top-level timeout
-  // avoids this deadlock — on timeout we terminate the FFmpeg instance entirely
-  // so the next attempt starts fresh.
-  let timedOut = false;
-  let timerId;
+  // 1. Read the video into an ArrayBuffer
+  console.log('[Captions] Step 1/3: Reading video file...');
+  if (onExtractionProgress) onExtractionProgress(5);
 
-  const work = async () => {
-    // 1. Resolve source
-    console.log('[Captions] Step 1/4: Resolving video source...');
-    const resolvedFile = await resolveVideoSource(videoFile);
+  let arrayBuffer;
+  try {
+    arrayBuffer = await resolveToArrayBuffer(videoFile);
+  } catch (err) {
+    throw new Error(`Failed to read video file: ${err.message}`);
+  }
+  console.log('[Captions] Video loaded:', Math.round(arrayBuffer.byteLength / 1024), 'KB');
+  if (onExtractionProgress) onExtractionProgress(20);
 
-    // 2. Load FFmpeg
-    console.log('[Captions] Step 2/4: Loading FFmpeg...');
-    await loadFFmpeg();
-    console.log('[Captions] FFmpeg loaded');
+  // 2. Decode audio — try Web Audio API first, fall back to FFmpeg WASM
+  //    (Firefox/Zen can't decodeAudioData from MP4 video containers)
+  console.log('[Captions] Step 2/3: Decoding audio (Web Audio API)...');
+  let audioBuffer;
+  let useFFmpegFallback = false;
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
+      sampleRate: SAMPLE_RATE,
+    });
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    await audioCtx.close();
+  } catch (err) {
+    console.warn('[Captions] Web Audio API failed:', err.name, err.message, '— trying FFmpeg fallback');
+    useFFmpegFallback = true;
+  }
 
-    const inputName = 'input_transcript.mp4';
-    const outputName = 'transcript_audio.wav';
+  if (useFFmpegFallback) {
+    return await extractAudioViaFFmpeg(videoFile, onExtractionProgress);
+  }
 
-    // 3. Write input to virtual FS
-    console.log('[Captions] Step 3/4: Writing video to FFmpeg virtual FS...');
-    await writeFile(inputName, resolvedFile);
-    console.log('[Captions] Video written to virtual FS');
+  console.log('[Captions] Decoded:', audioBuffer.duration.toFixed(1) + 's,',
+    audioBuffer.numberOfChannels, 'ch,', audioBuffer.sampleRate, 'Hz');
+  if (onExtractionProgress) onExtractionProgress(60);
 
-    // 4. Extract audio (with progress reporting and safety cap)
-    console.log('[Captions] Step 4/4: Running FFmpeg audio extraction...');
-    if (onExtractionProgress) {
-      setProgressCallback(({ progress }) => {
-        onExtractionProgress(Math.min(progress, 100));
-      });
-    }
-    try {
-      await exec([
-        '-i', inputName,
-        '-vn',                   // drop video
-        '-acodec', 'pcm_s16le', // 16-bit PCM
-        '-ar', String(SAMPLE_RATE),
-        '-ac', String(CHANNELS),
-        '-t', String(MAX_EXTRACT_DURATION), // safety cap: 10 min max
-        outputName,
-      ]);
-    } finally {
-      clearProgressCallback();
-    }
-    console.log('[Captions] FFmpeg extraction completed');
+  // 3. Convert to 16-bit PCM mono WAV
+  console.log('[Captions] Step 3/3: Converting to 16-bit PCM WAV...');
 
-    const wav = await readFile(outputName); // Uint8Array (WAV)
-    console.log('[Captions] Audio extracted:', Math.round(wav.length / 1024) + ' KB WAV');
+  // Get first channel (mono) and cap at MAX_EXTRACT_DURATION
+  const maxSamples = MAX_EXTRACT_DURATION * SAMPLE_RATE;
+  const channelData = audioBuffer.getChannelData(0);
+  const sampleCount = Math.min(channelData.length, maxSamples);
 
-    // Cleanup virtual FS (safe here because exec finished normally)
-    cleanup([inputName, outputName]).catch(() => {});
+  const pcm = new Int16Array(sampleCount);
+  for (let i = 0; i < sampleCount; i++) {
+    // Clamp float32 [-1, 1] → int16 [-32768, 32767]
+    const s = Math.max(-1, Math.min(1, channelData[i]));
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  if (onExtractionProgress) onExtractionProgress(80);
 
-    if (!wav || wav.length <= WAV_HEADER_SIZE) {
-      throw new Error('FFmpeg produced an empty audio file — the video may have no audio track');
-    }
+  const wav = buildWav(pcm);
+  console.log('[Captions] Audio extracted:', Math.round(wav.length / 1024), 'KB WAV',
+    '(' + (sampleCount / SAMPLE_RATE).toFixed(1) + 's)');
 
-    return wav;
-  };
+  if (wav.length <= WAV_HEADER_SIZE) {
+    throw new Error('Audio decoding produced no samples — the video may have no audio track');
+  }
+  if (onExtractionProgress) onExtractionProgress(100);
 
-  const timeoutPromise = new Promise((_, reject) => {
-    timerId = setTimeout(() => {
-      timedOut = true;
-      reject(new Error('FFmpeg audio extraction timed out after 2 minutes'));
-    }, EXTRACT_TIMEOUT_MS);
-  });
+  return wav;
+}
+
+/**
+ * FFmpeg WASM fallback for audio extraction.
+ * Used when Web Audio API can't decode the video container (e.g. Firefox/Zen + MP4).
+ */
+async function extractAudioViaFFmpeg(videoFile, onExtractionProgress) {
+  console.log('[Captions] FFmpeg fallback: loading FFmpeg WASM...');
+  if (onExtractionProgress) onExtractionProgress(25);
+
+  const {
+    loadFFmpeg, writeFile, readFile, cleanup,
+    exec: ffmpegExec,
+    setProgressCallback, clearProgressCallback,
+  } = await import('./ffmpeg');
+
+  await loadFFmpeg();
+  console.log('[Captions] FFmpeg loaded');
+  if (onExtractionProgress) onExtractionProgress(35);
+
+  const inputName = 'caption_input.mp4';
+  const outputName = 'caption_audio.wav';
+
+  // Resolve source to something FFmpeg can consume
+  let source = videoFile;
+  if (typeof videoFile === 'string') {
+    const res = await fetch(videoFile);
+    if (!res.ok) throw new Error(`Failed to fetch video from blob URL (${res.status})`);
+    source = new Uint8Array(await res.arrayBuffer());
+  }
+
+  await writeFile(inputName, source);
+  console.log('[Captions] FFmpeg fallback: extracting audio...');
+
+  if (onExtractionProgress) {
+    setProgressCallback(({ progress }) => {
+      onExtractionProgress(35 + Math.min(progress, 100) * 0.55);
+    });
+  }
 
   try {
-    const result = await Promise.race([work(), timeoutPromise]);
-    return result;
-  } catch (err) {
-    if (timedOut) {
-      // FFmpeg is stuck — terminate the instance so it doesn't block future ops.
-      // The next call to loadFFmpeg() will create a fresh instance.
-      console.error('[Captions] Timeout — terminating hung FFmpeg instance');
-      await terminateFFmpeg();
+    await ffmpegExec([
+      '-i', inputName,
+      '-vn',
+      '-acodec', 'pcm_s16le',
+      '-ar', String(SAMPLE_RATE),
+      '-ac', String(CHANNELS),
+      '-t', String(MAX_EXTRACT_DURATION),
+      outputName,
+    ]);
+
+    const wavData = await readFile(outputName);
+    console.log('[Captions] FFmpeg fallback: extracted', Math.round(wavData.length / 1024), 'KB WAV');
+
+    if (wavData.length <= WAV_HEADER_SIZE) {
+      throw new Error('Audio decoding produced no samples — the video may have no audio track');
     }
-    throw err;
+
+    if (onExtractionProgress) onExtractionProgress(100);
+    return wavData instanceof Uint8Array ? wavData : new Uint8Array(wavData);
   } finally {
-    clearTimeout(timerId);
+    clearProgressCallback();
+    await cleanup().catch(() => {});
   }
 }
 
@@ -240,23 +287,43 @@ export function computeRmsPerSecond(wavData) {
 //  SECTION 3 — Transcription (Whisper via worker)
 // ═══════════════════════════════════════════════════════════════
 
-async function transcribeChunk(chunkData, workerUrl) {
-  const res = await fetch(`${workerUrl}/transcribe`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/octet-stream' },
-    body: chunkData,
-  });
+const RETRY_STATUSES = new Set([502, 503]);
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 2000;
 
-  if (!res.ok) {
+async function transcribeChunk(chunkData, workerUrl) {
+  let lastErr;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.warn(`[Captions] Retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`);
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+    }
+
+    const res = await fetch(`${workerUrl}/transcribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: chunkData,
+    });
+
+    if (res.ok) {
+      const json = await res.json();
+      console.log('[Captions] Chunk response keys:', Object.keys(json),
+        json.result ? 'result keys: ' + Object.keys(json.result) : 'NO result field');
+      return json.result;
+    }
+
     const status = res.status;
     const body = await res.text().catch(() => '');
-    throw Object.assign(new Error(`Transcription failed (${status})`), { status, body });
+    lastErr = Object.assign(new Error(`Transcription failed (${status})`), { status, body });
+
+    if (!RETRY_STATUSES.has(status)) {
+      throw lastErr; // Non-retryable status — fail immediately
+    }
+    console.warn(`[Captions] Chunk got ${status}, will retry (attempt ${attempt + 1}/${MAX_RETRIES})`);
   }
 
-  const json = await res.json();
-  console.log('[Captions] Chunk response keys:', Object.keys(json),
-    json.result ? 'result keys: ' + Object.keys(json.result) : 'NO result field');
-  return json.result;
+  throw lastErr;
 }
 
 /** Parse a WebVTT string into approximate word objects. */
@@ -312,13 +379,13 @@ export async function transcribeVideo(videoFile, workerUrl, onProgress) {
     });
   } catch (err) {
     console.error('[Captions] Audio extraction failed:', err.message);
-    if (err.message.includes('timed out')) {
-      throw new Error('Failed to extract audio — FFmpeg timed out. Try a shorter or smaller video.');
+    if (err.message.includes('no audio track') || err.message.includes('unsupported audio codec')) {
+      throw new Error('This video has no audio track or uses an unsupported codec. Use the manual transcript option instead.');
     }
-    if (err.message.includes('empty audio')) {
+    if (err.message.includes('no samples')) {
       throw new Error('This video has no audio track. Use the manual transcript option instead.');
     }
-    if (err.message.includes('blob URL')) {
+    if (err.message.includes('blob URL') || err.message.includes('revoked')) {
       throw new Error('Failed to read the video file. Try re-importing the video.');
     }
     throw new Error(`Failed to extract audio from video: ${err.message}`);

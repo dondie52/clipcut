@@ -431,7 +431,7 @@ DraggableTextOverlay.displayName = 'DraggableTextOverlay';
 const TextOverlaysLayer = memo(({ textOverlays, selectedClipId, onSelect, onUpdate, containerRef }) => {
   if (!textOverlays || textOverlays.length === 0) return null;
   return (
-    <div style={{ position: 'absolute', inset: 0, zIndex: 15, pointerEvents: 'none' }}>
+    <div style={{ position: 'absolute', inset: 0, zIndex: 50, pointerEvents: 'none' }}>
       {textOverlays.map(clip => (
         <DraggableTextOverlay
           key={clip.id}
@@ -975,9 +975,9 @@ const Player = ({
                         bgColor={clipProperties.textBgColor || ''}
                       />
                     )}
-                    {/* Center play/pause overlay */}
+                    {/* Center play/pause overlay — keep below TextOverlaysLayer (z-50) so caption/text clips stay visible */}
                     <div className={`overlay-controls ${!isPlaying ? "paused" : ""}`} style={{
-                      position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                      position: "absolute", inset: 0, zIndex: 4, display: "flex", alignItems: "center", justifyContent: "center",
                       background: isMobile
                         ? (isPlaying ? "none" : "rgba(0,0,0,0.3)")
                         : "radial-gradient(circle at center, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.15) 70%)",

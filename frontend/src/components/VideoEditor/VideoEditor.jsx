@@ -11,7 +11,7 @@ import { saveProject, loadProject, getProjectMediaUrl, uploadProjectMedia } from
 import { isSupabaseConfigured } from '../../supabase/supabaseClient';
 import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
-import { storeMedia, loadMedia } from '../../utils/mediaStore';
+import { storeMedia, loadMedia, rekeyProjectMedia, listAllMedia } from '../../utils/mediaStore';
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
@@ -152,12 +152,14 @@ const DEFAULT_TIMELINE_H = 280;
 const DEFAULT_MEDIA_W = 280;
 const DEFAULT_INSPECTOR_W = 320;
 
-/** Caps for resizable side panels — scale with viewport on tablet / narrow desktop */
+/** Caps for resizable side panels — combined panels must never exceed 55% of viewport
+ *  so the preview always keeps at least 45% (minus resize handles). */
+const MIN_PREVIEW_W = 360; // absolute minimum preview width in px
 function maxMediaPanelCap(vw) {
-  return Math.max(200, Math.min(400, Math.floor(vw * 0.36)));
+  return Math.max(200, Math.min(400, Math.floor(vw * 0.25)));
 }
 function maxInspectorPanelCap(vw) {
-  return Math.max(220, Math.min(450, Math.floor(vw * 0.32)));
+  return Math.max(220, Math.min(400, Math.floor(vw * 0.25)));
 }
 
 const LEFT_COLUMN_FILL_STYLE = { width: '100%', minWidth: 0, minHeight: 0, alignSelf: 'stretch' };
@@ -488,6 +490,19 @@ const useAutoSave = (
       return o;
     };
 
+    /** Serialize a media panel item for persistence (strip runtime-only fields). */
+    const serializeMediaItem = (m) => {
+      const o = {};
+      for (const [k, v] of Object.entries(m)) {
+        if (!SKIP_KEYS.has(k)) o[k] = v;
+      }
+      if (m.id && projectIdRef.current) {
+        o.idbKey = `idb://${projectIdRef.current}:${m.id}`;
+      }
+      if (o.blobUrl) delete o.blobUrl;
+      return o;
+    };
+
     const doSave = async () => {
       if (isSavingRef.current) return;
       // Exponential backoff: after consecutive failures, skip ticks to avoid spamming
@@ -506,6 +521,7 @@ const useAutoSave = (
 
       try {
         const currentClips = clipsRef.current;
+        const currentMedia = mediaItemsRef.current;
         const currentName = projectNameRef.current;
         const currentBg = bgMusicRef.current;
 
@@ -513,6 +529,7 @@ const useAutoSave = (
           id: projectIdRef.current,
           name: currentName,
           clips: currentClips.map(serializeClip),
+          mediaItems: currentMedia.map(serializeMediaItem),
           duration: totalDurationRef.current,
           resolution: resolutionRef.current || "1080p",
         };
@@ -526,22 +543,29 @@ const useAutoSave = (
           if (currentBg.mediaId) projectData.bgMusic.mediaId = currentBg.mediaId;
         }
 
-        // Generate thumbnail for both Supabase and localStorage saves
+        // Generate thumbnail for both Supabase and localStorage saves.
+        // We always generate a base64 data URL and embed it in project_data
+        // so the Dashboard can show it even if Supabase Storage URLs break.
         const firstVideoClip = currentClips.find((c) => c.type === "video" && c.file);
         const firstClipMediaId = firstVideoClip?.mediaId || null;
-        if (firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current) {
+        const needsNewThumb = firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current;
+        if (needsNewThumb) {
           try {
             const thumbBlob = await generateThumbnailFast(firstVideoClip.file, 1);
-            lastThumbnailClipIdRef.current = firstClipMediaId;
-            if (userId) {
-              projectData.thumbnail = thumbBlob;
+            // Validate that the blob is a real image, not a tiny fallback
+            if (thumbBlob && thumbBlob.size > 500) {
+              lastThumbnailClipIdRef.current = firstClipMediaId;
+              if (userId) {
+                projectData.thumbnail = thumbBlob;
+              }
+              // Produce a base64 data URL — stored in project_data JSONB as fallback
+              const dataUrl = await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result);
+                reader.readAsDataURL(thumbBlob);
+              });
+              projectData.thumbnailDataUrl = dataUrl;
             }
-            // Also produce a base64 data URL for localStorage persistence
-            projectData.thumbnailDataUrl = await new Promise((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result);
-              reader.readAsDataURL(thumbBlob);
-            });
           } catch (e) {
             console.warn("Auto-save thumbnail generation failed:", e);
           }
@@ -553,8 +577,17 @@ const useAutoSave = (
             baseDelay: 1000,
             maxDelay: 5000,
           });
-          if (!projectIdRef.current && saved?.id) {
+
+          // After first Supabase save: adopt the server-generated UUID and re-key IndexedDB
+          const oldPid = projectIdRef.current;
+          if (saved?.id && saved.id !== oldPid) {
             projectIdRef.current = saved.id;
+            // Re-key IndexedDB entries from draft/local ID to real UUID
+            if (oldPid) {
+              rekeyProjectMedia(oldPid, saved.id).catch((e) =>
+                console.warn('[autosave] IndexedDB re-key failed:', e)
+              );
+            }
           }
 
           const pid = projectIdRef.current;
@@ -574,6 +607,7 @@ const useAutoSave = (
                 id: pid,
                 name: projectNameRef.current,
                 clips: uploadResult.clips.map(serializeClip),
+                mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                 duration: totalDurationRef.current,
                 resolution: resolutionRef.current || "1080p",
               };
@@ -596,6 +630,7 @@ const useAutoSave = (
                   id: pid,
                   name: projectNameRef.current,
                   clips: clipsRef.current.map(serializeClip),
+                  mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                   duration: totalDurationRef.current,
                   resolution: resolutionRef.current || "1080p",
                   bgMusic: { storagePath: path, name: bg.name, volume: bg.volume ?? 0.3 },
@@ -636,20 +671,23 @@ const useAutoSave = (
         }
         try {
           const name = projectNameRef.current;
-          const SKIP_KEYS_FB = new Set(["file", "blobUrl", "thumbnail", "isProcessing"]);
-          const fbClips = clipsRef.current.map((c) => {
-            const s = {};
-            for (const [k, v] of Object.entries(c)) {
-              if (!SKIP_KEYS_FB.has(k)) s[k] = v;
-            }
-            return s;
-          });
+          const pid = projectIdRef.current;
           const fb = {
+            id: pid,
             projectName: name,
-            clips: fbClips,
+            clips: clipsRef.current.map(serializeClip),
+            mediaItems: mediaItemsRef.current.map(serializeMediaItem),
             savedAt: new Date().toISOString(),
           };
           localStorage.setItem(`clipcut_autosave_${name}`, JSON.stringify(fb));
+          // Ensure media is in IndexedDB for the fallback path too
+          if (pid) {
+            for (const m of mediaItemsRef.current) {
+              if (m.file) {
+                storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+              }
+            }
+          }
         } catch {
           /* localStorage full or unavailable */
         }
@@ -817,13 +855,20 @@ const VideoEditor = () => {
     setTimelineHeight(clamped);
   }, []);
   const clampMpW = useCallback((w) => {
-    const cap = maxMediaPanelCap(window.innerWidth);
-    setMediaPanelWidth(Math.max(200, Math.min(w, cap)));
-  }, []);
+    const vw = window.innerWidth;
+    const cap = maxMediaPanelCap(vw);
+    // Ensure preview keeps at least MIN_PREVIEW_W (account for inspector + resize handles)
+    const otherPanel = inspectorWidth ?? DEFAULT_INSPECTOR_W;
+    const maxForPreview = vw - MIN_PREVIEW_W - otherPanel - 24; // 24 = resize handles + buffer
+    setMediaPanelWidth(Math.max(200, Math.min(w, cap, maxForPreview)));
+  }, [inspectorWidth]);
   const clampIpW = useCallback((w) => {
-    const cap = maxInspectorPanelCap(window.innerWidth);
-    setInspectorWidth(Math.max(220, Math.min(w, cap)));
-  }, []);
+    const vw = window.innerWidth;
+    const cap = maxInspectorPanelCap(vw);
+    const otherPanel = mediaPanelWidth ?? DEFAULT_MEDIA_W;
+    const maxForPreview = vw - MIN_PREVIEW_W - otherPanel - 24;
+    setInspectorWidth(Math.max(220, Math.min(w, cap, maxForPreview)));
+  }, [mediaPanelWidth]);
 
   useEffect(() => {
     let timeout;
@@ -970,8 +1015,10 @@ const VideoEditor = () => {
     setBgMusic
   );
 
+  // Sync the server-generated project ID back to React state.
+  // This fires when the autosave hook creates a new Supabase row (draft → UUID).
   useEffect(() => {
-    if (savedProjectId && !projectId) {
+    if (savedProjectId && savedProjectId !== projectId) {
       setProjectId(savedProjectId);
     }
   }, [savedProjectId, projectId]);
@@ -1009,6 +1056,13 @@ const VideoEditor = () => {
       if (!pid) {
         pid = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         setProjectId(pid);
+      }
+
+      // Auto-name the project from the first imported video filename
+      if (files.length > 0 && projectName === 'Untitled Project') {
+        const firstVideo = files.find(f => f.type.startsWith('video/')) || files[0];
+        const baseName = firstVideo.name.replace(/\.[^.]+$/, '').trim();
+        if (baseName) setProjectName(baseName);
       }
 
       // No FFmpeg init needed — browser-native APIs handle import
@@ -1092,7 +1146,7 @@ const VideoEditor = () => {
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
     } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [notify, projectId]);
+  }, [notify, projectId, projectName]);
 
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
@@ -1695,22 +1749,41 @@ const VideoEditor = () => {
     const resolveMedia = async (clipData) => {
       let file = null, blobUrl = null;
 
+      console.log('[restore] resolveMedia called for:', {
+        name: clipData.name, type: clipData.type, mediaId: clipData.mediaId,
+        idbKey: clipData.idbKey, storagePath: clipData.storagePath,
+      });
+
       // 1. Try IndexedDB first (fast, local — works for all users)
       const parsed = parseIdbKey(clipData.idbKey);
       if (parsed) {
         try {
+          console.log('[restore] Trying IndexedDB:', parsed.idbProjectId, parsed.idbMediaId);
           const stored = await loadMedia(parsed.idbProjectId, parsed.idbMediaId);
-          if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+          if (stored) {
+            file = stored.file; blobUrl = stored.blobUrl;
+            console.log('[restore] IndexedDB HIT:', clipData.name, 'size:', stored.file?.size);
+          } else {
+            console.warn('[restore] IndexedDB MISS (null):', clipData.idbKey);
+          }
         } catch (e) {
           console.warn('[restore] IndexedDB load failed:', clipData.idbKey, e);
         }
+      } else {
+        console.log('[restore] No idbKey for clip:', clipData.name, clipData.type);
       }
 
       // Also try with the current projectId as key (for older saves without idbKey)
       if (!blobUrl && clipData.mediaId) {
         try {
+          console.log('[restore] Trying fallback IndexedDB with projectId:', projectId, 'mediaId:', clipData.mediaId);
           const stored = await loadMedia(projectId, clipData.mediaId);
-          if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+          if (stored) {
+            file = stored.file; blobUrl = stored.blobUrl;
+            console.log('[restore] Fallback IndexedDB HIT:', clipData.name);
+          } else {
+            console.warn('[restore] Fallback IndexedDB MISS:', projectId, clipData.mediaId);
+          }
         } catch (e) {
           console.warn('[restore] IndexedDB fallback load failed:', clipData.mediaId, e);
         }
@@ -1719,16 +1792,22 @@ const VideoEditor = () => {
       // 2. If IndexedDB miss and user is authenticated, fetch from Supabase Storage
       if (!blobUrl && clipData.storagePath && isSupabaseConfigured() && !clipData.storagePath.startsWith('blob:')) {
         try {
+          console.log('[restore] Trying Supabase Storage:', clipData.storagePath);
           const url = await getProjectMediaUrl(clipData.storagePath);
           const response = await fetch(url);
           if (response.ok) {
             const blob = await response.blob();
             file = new File([blob], clipData.name || 'media', { type: blob.type });
             blobUrl = URL.createObjectURL(blob);
+            console.log('[restore] Supabase Storage HIT:', clipData.name);
           }
         } catch (e) {
           console.warn('[restore] Supabase download failed:', clipData.storagePath, e);
         }
+      }
+
+      if (!blobUrl && clipData.type !== 'text') {
+        console.error('[restore] FAILED to resolve media for:', clipData.name, clipData.type, '— all sources exhausted');
       }
 
       return { file, blobUrl };
@@ -1760,7 +1839,25 @@ const VideoEditor = () => {
         if (pData.resolution) setProjectResolution(pData.resolution);
 
         const savedClips = pData.project_data?.clips || pData.clips || [];
-        if (savedClips.length === 0) {
+        const savedMediaItems = pData.project_data?.mediaItems || [];
+
+        // Dump IndexedDB for debugging
+        try {
+          const allMedia = await listAllMedia();
+          console.log('[restore] IndexedDB entries:', allMedia);
+        } catch (e) {
+          console.warn('[restore] Could not list IndexedDB:', e);
+        }
+
+        console.log('[restore] Project data:', {
+          projectId,
+          clipsCount: savedClips.length,
+          mediaItemsCount: savedMediaItems.length,
+          clipTypes: savedClips.map(c => ({ name: c.name, type: c.type, mediaId: c.mediaId, idbKey: c.idbKey, storagePath: c.storagePath })),
+          mediaItemIds: savedMediaItems.map(m => ({ id: m.id, name: m.name, idbKey: m.idbKey })),
+        });
+
+        if (savedClips.length === 0 && savedMediaItems.length === 0) {
           await restoreBgMusic(pData);
           notify("info", `Loaded project "${pName}" (no clips)`);
           return;
@@ -1768,13 +1865,26 @@ const VideoEditor = () => {
 
         setLoadMsg("Restoring media...");
 
-        const mediaMap = new Map();
-        const restoredClips = [];
-        let loadedCount = 0;
+        // 1. Resolve media files: first restore saved mediaItems, then fill from clips
+        const mediaMap = new Map(); // mediaId → { blobUrl, file }
 
+        // Resolve saved media panel items first (includes files not yet on timeline)
+        let mediaCount = 0;
+        for (const mi of savedMediaItems) {
+          if (cancelled) return;
+          if (!mi.id || mediaMap.has(mi.id)) continue;
+          setLoadSub(`Restoring media ${++mediaCount} of ${savedMediaItems.length + savedClips.length}`);
+          const resolved = await resolveMedia(mi);
+          if (resolved.blobUrl) {
+            mediaMap.set(mi.id, { blobUrl: resolved.blobUrl, file: resolved.file, meta: mi });
+          }
+        }
+
+        // 2. Restore clips, resolving any media not already in mediaMap
+        const restoredClips = [];
         for (const clipData of savedClips) {
           if (cancelled) return;
-          setLoadSub(`Restoring clip ${++loadedCount} of ${savedClips.length}`);
+          setLoadSub(`Restoring clip ${++mediaCount} of ${savedMediaItems.length + savedClips.length}`);
 
           let blobUrl = null;
           let file = null;
@@ -1787,10 +1897,9 @@ const VideoEditor = () => {
             const resolved = await resolveMedia(clipData);
             file = resolved.file;
             blobUrl = resolved.blobUrl;
-          }
-
-          if (blobUrl && clipData.mediaId) {
-            mediaMap.set(clipData.mediaId, { blobUrl, file });
+            if (blobUrl && clipData.mediaId) {
+              mediaMap.set(clipData.mediaId, { blobUrl, file, meta: clipData });
+            }
           }
 
           const mediaUnavailable = !blobUrl && clipData.type !== 'text';
@@ -1804,26 +1913,23 @@ const VideoEditor = () => {
           });
         }
 
-        // Rebuild media panel items from all unique restored media
+        // 3. Build media panel from mediaMap (includes both timeline clips and standalone imports)
         const newMediaItems = [];
-        const seenMedia = new Set();
-        for (const clip of restoredClips) {
-          if (clip.mediaId && !seenMedia.has(clip.mediaId) && clip.blobUrl) {
-            seenMedia.add(clip.mediaId);
-            newMediaItems.push({
-              id: clip.mediaId,
-              name: clip.name,
-              file: clip.file,
-              blobUrl: clip.blobUrl,
-              thumbnail: null,
-              duration: clip.duration,
-              width: 0,
-              height: 0,
-              type: clip.type || "video",
-              isProcessing: false,
-              storagePath: clip.storagePath,
-            });
-          }
+        for (const [id, entry] of mediaMap) {
+          const meta = entry.meta || {};
+          newMediaItems.push({
+            id,
+            name: meta.name || 'media',
+            file: entry.file,
+            blobUrl: entry.blobUrl,
+            thumbnail: null,
+            duration: meta.duration || 0,
+            width: meta.width || 0,
+            height: meta.height || 0,
+            type: meta.type || 'video',
+            isProcessing: false,
+            storagePath: meta.storagePath,
+          });
         }
 
         // Filter out non-text clips that failed to download (no blobUrl)
@@ -2013,7 +2119,7 @@ const VideoEditor = () => {
             </div>
           </>
         )}
-        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <div style={isMobile && isLandscape ? { flex: '0 0 60%', display: 'flex', flexDirection: 'column', minWidth: 0 } : { flex: '1 1 0%', minWidth: `${MIN_PREVIEW_W}px`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <ErrorBoundary name="player" inline message="Video player encountered an error">
             <Suspense fallback={<PanelLoadingFallback width="auto" height="100%" />}>
               <Player
@@ -2033,7 +2139,7 @@ const VideoEditor = () => {
           </ErrorBoundary>
         </div>
         {editorLayout !== 'compact' && !isMobile && selectedClip && (
-          <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0 }}>
+          <div className="inspector-enter" style={{ display: 'flex', flexDirection: 'row', flexShrink: 0, maxWidth: `${effectiveInspectorW + 8}px`, overflow: 'hidden' }}>
             <div className="resize-handle resize-handle-v" onMouseDown={(e) => onInspectorDrag(e, effectiveInspectorW)} onDoubleClick={() => setInspectorWidth(null)}>
               <div className="resize-handle-dot resize-handle-dot-v" />
             </div>

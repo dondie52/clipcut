@@ -32,6 +32,60 @@ function checkRateLimit(limiter, operation) {
   limiter.recordAttempt();
 }
 
+/** DB CHECK: projects.resolution IN ('480p','720p','1080p') */
+function sanitizeResolution(res) {
+  const r = String(res || "1080p").trim().toLowerCase();
+  if (r === "480p" || r === "720p" || r === "1080p") return r;
+  return "1080p";
+}
+
+function safeDurationSeconds(duration) {
+  const n = Math.round(Number(duration) || 0);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+/** Recursively replace non-finite numbers / strip undefined so JSONB round-trips cleanly */
+function sanitizeForJsonb(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean" || typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(sanitizeForJsonb);
+  if (typeof value === "object") {
+    const o = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === undefined) continue;
+      o[k] = sanitizeForJsonb(v);
+    }
+    return o;
+  }
+  return value;
+}
+
+let _lastSaveErrorKey = '';
+let _saveErrorCount = 0;
+
+function logSaveProjectFailure(operation, err, payloadSummary) {
+  const key = `${operation}:${err?.code || ''}:${err?.message || ''}`;
+  if (key === _lastSaveErrorKey) {
+    _saveErrorCount++;
+    if (_saveErrorCount <= 2) {
+      console.warn(`[saveProject] Supabase ${operation} error repeated (${_saveErrorCount + 1}x) — suppressing further logs for this error`);
+    }
+    return;
+  }
+  _lastSaveErrorKey = key;
+  _saveErrorCount = 0;
+  console.error("[saveProject] Supabase error", {
+    operation,
+    message: err?.message,
+    code: err?.code,
+    details: err?.details,
+    hint: err?.hint,
+    status: err?.status,
+    ...payloadSummary,
+  });
+}
+
 /**
  * File upload security constants
  */
@@ -94,23 +148,30 @@ export async function saveProject(userId, projectData) {
 
   checkRateLimit(apiRateLimiter, 'save');
 
-  const { name, id, clips, duration, resolution, thumbnail, bgMusic } = projectData;
+  const { name, clips, duration, resolution, thumbnail, bgMusic } = projectData;
+  // Strip non-UUID IDs (draft-xxx, local_xxx) — Supabase needs a real UUID or no ID (INSERT)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const id = projectData.id && UUID_RE.test(projectData.id) ? projectData.id : undefined;
   
   // Sanitize project name before saving (max 100 chars, remove HTML, trim)
   const sanitizedName = sanitizeTextInput(name || "Untitled Project", { maxLength: 100 });
 
-  // Prepare project data for database — clips already come pre-serialized
-  // (binary fields stripped by caller), so store them as-is to preserve all effects
+  const projectDataPayload = sanitizeForJsonb({
+    clips: clips || [],
+    mediaItems: projectData.mediaItems || [],
+    savedAt: new Date().toISOString(),
+    ...(bgMusic ? { bgMusic } : {}),
+    // Embed thumbnail data URL in JSONB as fallback when Storage URLs break
+    ...(projectData.thumbnailDataUrl ? { thumbnailDataUrl: projectData.thumbnailDataUrl } : {}),
+  });
+
+  // Do not set updated_at here — the DB trigger update_projects_updated_at handles it; sending it can
+  // conflict with the trigger or PostgREST expectations on some deployments.
   const dbProjectData = {
     name: sanitizedName,
-    project_data: {
-      clips: clips,
-      savedAt: new Date().toISOString(),
-      ...(bgMusic ? { bgMusic } : {}),
-    },
-    duration_seconds: Math.round(duration || 0),
-    resolution: resolution || "1080p",
-    updated_at: new Date().toISOString(),
+    project_data: projectDataPayload,
+    duration_seconds: safeDurationSeconds(duration),
+    resolution: sanitizeResolution(resolution),
   };
 
   let savedProject;
@@ -127,7 +188,17 @@ export async function saveProject(userId, projectData) {
           .eq("user_id", userId)
           .select()
           .single();
-        if (result.error) throw result.error;
+        if (result.error) {
+          logSaveProjectFailure("update", result.error, {
+            projectId: id,
+            name: dbProjectData.name,
+            resolution: dbProjectData.resolution,
+            duration_seconds: dbProjectData.duration_seconds,
+            clipsCount: Array.isArray(clips) ? clips.length : 0,
+            projectDataBytes: JSON.stringify(dbProjectData.project_data || {}).length,
+          });
+          throw result.error;
+        }
         return result.data;
       },
       { operation: 'update', projectId: id }
@@ -142,7 +213,16 @@ export async function saveProject(userId, projectData) {
           .insert({ ...dbProjectData, user_id: userId })
           .select()
           .single();
-        if (result.error) throw result.error;
+        if (result.error) {
+          logSaveProjectFailure("insert", result.error, {
+            name: dbProjectData.name,
+            resolution: dbProjectData.resolution,
+            duration_seconds: dbProjectData.duration_seconds,
+            clipsCount: Array.isArray(clips) ? clips.length : 0,
+            projectDataBytes: JSON.stringify(dbProjectData.project_data || {}).length,
+          });
+          throw result.error;
+        }
         return result.data;
       },
       { operation: 'create' }
@@ -173,7 +253,30 @@ export async function saveProject(userId, projectData) {
       );
       savedProject.thumbnail_url = thumbnailUrl;
     } catch (e) {
-      console.warn("Thumbnail upload failed:", e);
+      console.warn("Thumbnail Storage upload failed, using data URL fallback:", e);
+      // Fallback: save the base64 data URL directly to thumbnail_url
+      if (projectData.thumbnailDataUrl) {
+        try {
+          await supabase
+            .from("projects")
+            .update({ thumbnail_url: projectData.thumbnailDataUrl })
+            .eq("id", savedProject.id);
+          savedProject.thumbnail_url = projectData.thumbnailDataUrl;
+        } catch (e2) {
+          console.warn("Thumbnail data URL fallback also failed:", e2);
+        }
+      }
+    }
+  } else if (!thumbnail && projectData.thumbnailDataUrl && savedProject.id) {
+    // No blob thumbnail but we have a data URL — save it directly
+    try {
+      const { error } = await supabase
+        .from("projects")
+        .update({ thumbnail_url: projectData.thumbnailDataUrl })
+        .eq("id", savedProject.id);
+      if (!error) savedProject.thumbnail_url = projectData.thumbnailDataUrl;
+    } catch (e) {
+      // Non-critical — ignore
     }
   }
 
@@ -251,7 +354,7 @@ export async function listProjects(userId, options = {}) {
       async () => {
         const result = await supabase
           .from("projects")
-          .select("id, name, thumbnail_url, duration_seconds, resolution, created_at, updated_at")
+          .select("id, name, thumbnail_url, project_data, duration_seconds, resolution, created_at, updated_at")
           .eq("user_id", userId)
           .order(orderBy, { ascending })
           .range(offset, offset + limit - 1);
@@ -504,6 +607,7 @@ function saveProjectToLocalStorage(projectData) {
     name: sanitizedName,
     project_data: {
       clips: projectData.clips,
+      mediaItems: projectData.mediaItems || [],
       savedAt: new Date().toISOString(),
       ...(projectData.bgMusic ? { bgMusic: projectData.bgMusic } : {}),
     },
@@ -553,7 +657,7 @@ function listProjectsFromLocalStorage() {
         projects.push({
           id: data.id || projectName,
           name: data.name || data.projectName || projectName,
-          thumbnail_url: data.thumbnail_url || null,
+          thumbnail_url: data.thumbnail_url || data.project_data?.thumbnailDataUrl || null,
           duration_seconds: data.duration_seconds || 0,
           resolution: data.resolution || "1080p",
           created_at: data.created_at || data.savedAt,
@@ -566,10 +670,17 @@ function listProjectsFromLocalStorage() {
     }
   }
 
-  // Sort by most recently updated
-  projects.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  // Deduplicate by project id — keep the most recently updated entry
+  const byId = new Map();
+  for (const p of projects) {
+    const existing = byId.get(p.id);
+    if (!existing || new Date(p.updated_at) > new Date(existing.updated_at)) {
+      byId.set(p.id, p);
+    }
+  }
 
-  return projects;
+  // Sort by most recently updated
+  return [...byId.values()].sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
 }
 
 /**
