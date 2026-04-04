@@ -95,6 +95,9 @@ async function handleScore(request, env) {
 const VALID_ACTION_TYPES = new Set([
   'add_captions', 'remove_silence', 'cut_clip', 'split_clip',
   'add_text', 'apply_filter', 'change_speed', 'add_music',
+  // Phase 2 — ML-powered actions
+  'remove_filler_words', 'detect_scenes', 'auto_highlight',
+  'smart_crop', 'beat_sync', 'zoom_to_speaker', 'remove_boring',
 ]);
 
 const EDIT_SYSTEM_PROMPT = `You are a video editing assistant. Parse the user's request into a JSON array of actions.
@@ -108,6 +111,13 @@ Each action has a "type" and "params" object. Valid types and their params:
 - apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
 - change_speed: speed (0.5|1|1.5|2|4)
 - add_music: genre (chill|epic|happy|sad|energetic)
+- remove_filler_words: fillers (optional array like ['um','uh','like','you know'])
+- detect_scenes: sensitivity (low|medium|high, default medium)
+- auto_highlight: duration (seconds, default 30)
+- smart_crop: aspect (9:16|1:1|4:5, default 9:16)
+- beat_sync: sensitivity (0.5-3.0, default 1.5)
+- zoom_to_speaker: zoomFactor (1.1-2.0, default 1.3)
+- remove_boring: threshold (1-10 engagement score, default 4)
 
 Context about the video will be provided. Use it to make smart defaults.
 Return ONLY a valid JSON array. No markdown fences, no explanation, no extra text.`;

@@ -117,6 +117,28 @@ async function executeAction(action, editor) {
     case 'add_music':
       return 'Background music (coming soon)';
 
+    // Phase 2 — ML-powered actions
+    case 'remove_filler_words':
+      return await executeRemoveFillerWords(action.params, editor);
+
+    case 'detect_scenes':
+      return await executeDetectScenes(action.params, editor);
+
+    case 'auto_highlight':
+      return await executeAutoHighlight(action.params, editor);
+
+    case 'smart_crop':
+      return await executeSmartCrop(action.params, editor);
+
+    case 'beat_sync':
+      return await executeBeatSync(action.params, editor);
+
+    case 'zoom_to_speaker':
+      return await executeZoomToSpeaker(action.params, editor);
+
+    case 'remove_boring':
+      return await executeRemoveBoring(action.params, editor);
+
     default:
       return null;
   }
@@ -420,4 +442,387 @@ function executeChangeSpeed(params, editor) {
   ));
 
   return `Set ${targetClips.length} clip${targetClips.length !== 1 ? 's' : ''} to ${speed}x speed`;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Phase 2 — ML-Powered Actions
+   ═══════════════════════════════════════════════════════════════ */
+
+/** Find the first video clip with a playable file. Throws if none found. */
+function findVideoClip(clips) {
+  const clip = clips.find(c =>
+    c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl)
+  );
+  if (!clip) throw new Error('No video clip found. Import a video first.');
+  return clip;
+}
+
+/** Get a File/Blob from a clip (resolves blobUrl if needed). */
+async function getClipFile(clip) {
+  if (clip.file) return clip.file;
+  if (clip.blobUrl) return fetch(clip.blobUrl).then(r => r.blob());
+  throw new Error('Cannot access clip file.');
+}
+
+/** Merge overlapping ranges (sorted by start). */
+function mergeRanges(ranges) {
+  if (ranges.length === 0) return [];
+  const sorted = [...ranges].sort((a, b) => a.start - b.start);
+  const merged = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = merged[merged.length - 1];
+    if (sorted[i].start <= prev.end) {
+      prev.end = Math.max(prev.end, sorted[i].end);
+    } else {
+      merged.push({ ...sorted[i] });
+    }
+  }
+  return merged;
+}
+
+/**
+ * Rebuild the clips array by removing time ranges and closing gaps.
+ * Reusable for filler removal, silence removal, boring removal, etc.
+ */
+function removeTimeRanges(clips, cutRanges, setClips) {
+  const videoClips = clips.filter(c =>
+    c.type !== 'text' && c.type !== 'sticker' && !c.isCaption
+  );
+  const nonVideoClips = clips.filter(c =>
+    c.type === 'text' || c.type === 'sticker' || c.isCaption
+  );
+
+  const newClips = [];
+  for (const clip of videoClips) {
+    // Map cut ranges to this clip's local time
+    const clipEnd = clip.startTime + clip.duration;
+    const localCuts = cutRanges
+      .filter(r => r.end > clip.startTime && r.start < clipEnd)
+      .map(r => ({
+        start: Math.max(r.start, clip.startTime),
+        end: Math.min(r.end, clipEnd),
+      }));
+
+    if (localCuts.length === 0) {
+      newClips.push(clip);
+      continue;
+    }
+
+    const keepSegs = getKeepSegments(clip.startTime, clipEnd, localCuts);
+    let offset = clip.startTime;
+    for (const seg of keepSegs) {
+      const segDur = seg.end - seg.start;
+      if (segDur < 0.1) continue;
+      newClips.push({
+        ...clip,
+        id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        startTime: offset,
+        duration: segDur,
+        trimStart: (clip.trimStart || 0) + (seg.start - clip.startTime),
+        trimEnd: 0,
+      });
+      offset += segDur;
+    }
+  }
+
+  setClips([...newClips, ...nonVideoClips]);
+}
+
+/* ─── Action: Remove Filler Words ───────────────────────────── */
+const DEFAULT_FILLERS = ['um', 'uh', 'uh-huh', 'hmm', 'like', 'you know', 'basically', 'actually', 'literally', 'right', 'so', 'i mean'];
+
+async function executeRemoveFillerWords(params, editor) {
+  const { clips, setClips } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const fillers = (params.fillers || DEFAULT_FILLERS).map(f => f.toLowerCase());
+  const padding = Math.max(0, Math.min(0.2, params.padding ?? 0.05));
+
+  if (!WORKER_URL) throw new Error('Filler word removal requires VITE_TRANSCRIPT_WORKER_URL.');
+
+  const { transcribeVideo } = await import('./transcriptService');
+  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+  const { words } = await transcribeVideo(file, baseUrl, () => {});
+
+  if (words.length === 0) throw new Error('No speech detected in video.');
+
+  // Single-word fillers
+  const singleFillers = fillers.filter(f => !f.includes(' '));
+  // Multi-word fillers (e.g., "you know", "i mean")
+  const multiFillers = fillers.filter(f => f.includes(' '));
+
+  const cutRanges = [];
+
+  // Match single-word fillers
+  for (const w of words) {
+    if (singleFillers.includes(w.word.toLowerCase().replace(/[.,!?]/g, ''))) {
+      cutRanges.push({
+        start: Math.max(0, w.start - padding) + clip.startTime,
+        end: w.end + padding + clip.startTime,
+      });
+    }
+  }
+
+  // Match multi-word fillers (consecutive word pairs/triples)
+  for (const filler of multiFillers) {
+    const parts = filler.split(' ');
+    for (let i = 0; i <= words.length - parts.length; i++) {
+      const matches = parts.every((p, j) =>
+        words[i + j].word.toLowerCase().replace(/[.,!?]/g, '') === p
+      );
+      if (matches) {
+        cutRanges.push({
+          start: Math.max(0, words[i].start - padding) + clip.startTime,
+          end: words[i + parts.length - 1].end + padding + clip.startTime,
+        });
+      }
+    }
+  }
+
+  if (cutRanges.length === 0) return 'No filler words found in transcript';
+
+  const merged = mergeRanges(cutRanges);
+  const totalCut = merged.reduce((s, r) => s + (r.end - r.start), 0);
+
+  removeTimeRanges(clips, merged, setClips);
+
+  return `Removed ${cutRanges.length} filler word${cutRanges.length !== 1 ? 's' : ''} (saved ${totalCut.toFixed(1)}s)`;
+}
+
+/* ─── Action: Auto Highlight ────────────────────────────────── */
+async function executeAutoHighlight(params, editor) {
+  const { clips, setClips } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const targetDuration = params.duration || 30;
+
+  if (!WORKER_URL) throw new Error('Auto highlight requires VITE_TRANSCRIPT_WORKER_URL.');
+
+  const { analyzeTranscript } = await import('./transcriptService');
+  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+
+  const segments = await analyzeTranscript(file, clip.duration, baseUrl, targetDuration, () => {});
+
+  if (!segments || segments.length === 0) {
+    throw new Error('Could not identify highlight segments. The video may not have enough speech.');
+  }
+
+  // Take the top segment (highest score — analyzeTranscript returns sorted chronologically,
+  // but we need to re-sort by score)
+  const byScore = [...segments].sort((a, b) => (b.score || 0) - (a.score || 0));
+  const best = byScore[0];
+
+  // Create a new clip from the highlight segment
+  const highlightClip = {
+    ...clip,
+    id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    startTime: 0,
+    duration: best.endSeconds - best.startSeconds,
+    trimStart: (clip.trimStart || 0) + best.startSeconds,
+    trimEnd: 0,
+  };
+
+  // Replace timeline with just the highlight (preserve non-video clips like captions)
+  const nonVideoClips = clips.filter(c => c.type === 'text' || c.type === 'sticker' || c.isCaption);
+  setClips([highlightClip, ...nonVideoClips]);
+
+  return `Extracted best ${Math.round(best.endSeconds - best.startSeconds)}s highlight`;
+}
+
+/* ─── Action: Remove Boring ─────────────────────────────────── */
+async function executeRemoveBoring(params, editor) {
+  const { clips, setClips } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const threshold = Math.max(1, Math.min(10, params.threshold ?? 4));
+
+  if (!WORKER_URL) throw new Error('Remove boring requires VITE_TRANSCRIPT_WORKER_URL.');
+
+  const { analyzeTranscript } = await import('./transcriptService');
+  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+
+  // Use 15s windows for granular scoring
+  const segments = await analyzeTranscript(file, clip.duration, baseUrl, 15, () => {});
+
+  if (!segments || segments.length === 0) {
+    throw new Error('Could not analyze video engagement. The video may not have enough speech.');
+  }
+
+  // Normalize scores to 1-10 scale
+  const maxScore = Math.max(...segments.map(s => s.score || 0), 1);
+  const normalizedThreshold = (threshold / 10) * maxScore;
+
+  // Build "interesting" time ranges from segments scoring above threshold
+  const interestingRanges = segments
+    .filter(s => (s.score || 0) >= normalizedThreshold)
+    .map(s => ({ start: s.startSeconds + clip.startTime, end: s.endSeconds + clip.startTime }));
+
+  if (interestingRanges.length === 0) {
+    throw new Error('All content scored below threshold. Try lowering the threshold.');
+  }
+
+  // Invert: "boring" = everything NOT in interesting ranges
+  const merged = mergeRanges(interestingRanges);
+  const boringRanges = getKeepSegments(clip.startTime, clip.startTime + clip.duration, merged)
+    .map(seg => seg); // these are the gaps — which are the boring parts
+
+  // Actually we need the inverse: getKeepSegments returns what's between the "interesting" ranges
+  // which IS the boring part. So boringRanges = gaps between interesting ranges.
+  // But we want to CUT the boring parts and KEEP the interesting parts.
+  // So we should removeTimeRanges with the boring parts.
+
+  if (boringRanges.length === 0) return 'No boring sections found — all content is engaging!';
+
+  const totalCut = boringRanges.reduce((s, r) => s + (r.end - r.start), 0);
+  removeTimeRanges(clips, boringRanges, setClips);
+
+  return `Removed ${totalCut.toFixed(1)}s of low-engagement content`;
+}
+
+/* ─── Action: Detect Scenes ─────────────────────────────────── */
+async function executeDetectScenes(params, editor) {
+  const { clips, splitClip } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+
+  // Map sensitivity name to threshold (higher threshold = fewer splits)
+  const sensitivityMap = { low: 0.5, medium: 0.35, high: 0.2 };
+  const threshold = sensitivityMap[params.sensitivity] || 0.35;
+
+  const { detectSceneChanges } = await import('./sceneDetector');
+  const timestamps = await detectSceneChanges(file, { threshold });
+
+  if (timestamps.length === 0) return 'No scene changes detected';
+
+  // Map to absolute timeline positions and split
+  let splitCount = 0;
+  for (const t of timestamps) {
+    const absTime = clip.startTime + t;
+    // Find the clip that contains this time (may have been split already)
+    const current = editor.clips.find(c =>
+      c.startTime <= absTime && (c.startTime + c.duration) > absTime
+    );
+    if (current) {
+      splitClip(current.id, absTime);
+      splitCount++;
+    }
+  }
+
+  return `Split into ${splitCount + 1} scene${splitCount > 0 ? 's' : ''}`;
+}
+
+/* ─── Action: Beat Sync ─────────────────────────────────────── */
+async function executeBeatSync(params, editor) {
+  const { clips, splitClip } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const sensitivity = Math.max(0.5, Math.min(3.0, params.sensitivity ?? 1.5));
+
+  const { detectBeats } = await import('./beatDetector');
+  const { beats, bpm } = await detectBeats(file, { sensitivity });
+
+  if (beats.length === 0) return 'No beats detected in audio';
+
+  let splitCount = 0;
+  for (const t of beats) {
+    const absTime = clip.startTime + t;
+    const current = editor.clips.find(c =>
+      c.startTime <= absTime && (c.startTime + c.duration) > absTime
+    );
+    if (current) {
+      splitClip(current.id, absTime);
+      splitCount++;
+    }
+  }
+
+  return `Synced ${splitCount} cut${splitCount !== 1 ? 's' : ''} to beats (${Math.round(bpm)} BPM)`;
+}
+
+/* ─── Action: Smart Crop ────────────────────────────────────── */
+async function executeSmartCrop(params, editor) {
+  const { clips, updateClip } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const aspect = params.aspect || '9:16';
+
+  const validAspects = ['9:16', '1:1', '4:5'];
+  if (!validAspects.includes(aspect)) {
+    throw new Error(`Invalid aspect ratio "${aspect}". Use: ${validAspects.join(', ')}`);
+  }
+
+  const { detectFaceKeyframes, buildCropFilter } = await import('./faceDetection');
+
+  // Try to get transcript for better speaker tracking
+  let words = null;
+  try {
+    if (WORKER_URL) {
+      const { transcribeVideo } = await import('./transcriptService');
+      const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+      const result = await transcribeVideo(file, baseUrl, () => {});
+      words = result.words;
+    }
+  } catch { /* proceed without transcript */ }
+
+  const result = await detectFaceKeyframes(file, 0, clip.duration, words);
+  const keyframes = result.keyframes || [];
+
+  // Get video dimensions (needed for crop calculation)
+  const video = document.createElement('video');
+  video.preload = 'metadata';
+  const dimensionPromise = new Promise((resolve) => {
+    video.onloadedmetadata = () => resolve({ width: video.videoWidth, height: video.videoHeight });
+    video.onerror = () => resolve({ width: 1920, height: 1080 }); // fallback
+  });
+  video.src = URL.createObjectURL(file);
+  const { width: srcW, height: srcH } = await dimensionPromise;
+  URL.revokeObjectURL(video.src);
+
+  // Build crop filter for 9:16 (existing function), or store metadata for other ratios
+  let cropFilter = null;
+  if (aspect === '9:16') {
+    cropFilter = buildCropFilter(keyframes, srcW, srcH, result.effectiveIntervals || []);
+  }
+
+  updateClip(clip.id, {
+    cropAspect: aspect,
+    cropKeyframes: keyframes,
+    cropFilter: cropFilter,
+  });
+
+  return `Applied ${aspect} smart crop with face tracking`;
+}
+
+/* ─── Action: Zoom to Speaker ───────────────────────────────── */
+async function executeZoomToSpeaker(params, editor) {
+  const { clips, updateClip } = editor;
+  const clip = findVideoClip(clips);
+  const file = await getClipFile(clip);
+  const zoomFactor = Math.max(1.1, Math.min(2.0, params.zoomFactor ?? 1.3));
+
+  const { detectFaceKeyframes } = await import('./faceDetection');
+
+  // Transcribe for speaker-aware tracking
+  let words = null;
+  try {
+    if (WORKER_URL) {
+      const { transcribeVideo } = await import('./transcriptService');
+      const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+      const result = await transcribeVideo(file, baseUrl, () => {});
+      words = result.words;
+    }
+  } catch { /* proceed without transcript */ }
+
+  const result = await detectFaceKeyframes(file, 0, clip.duration, words);
+  const keyframes = result.keyframes || [];
+
+  if (keyframes.length === 0) {
+    throw new Error('No faces detected in video for speaker zoom.');
+  }
+
+  updateClip(clip.id, {
+    zoomKeyframes: keyframes,
+    zoomFactor,
+  });
+
+  return `Added speaker zoom keyframes (${zoomFactor}x)`;
 }
