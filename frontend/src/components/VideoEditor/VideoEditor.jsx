@@ -580,13 +580,18 @@ const useAutoSave = (
 
           // After first Supabase save: adopt the server-generated UUID and re-key IndexedDB
           const oldPid = projectIdRef.current;
+          let rekeyed = false;
           if (saved?.id && saved.id !== oldPid) {
             projectIdRef.current = saved.id;
-            // Re-key IndexedDB entries from draft/local ID to real UUID
+            // Re-key IndexedDB entries from draft/local ID to real UUID — await to prevent races
             if (oldPid) {
-              rekeyProjectMedia(oldPid, saved.id).catch((e) =>
-                console.warn('[autosave] IndexedDB re-key failed:', e)
-              );
+              try {
+                await rekeyProjectMedia(oldPid, saved.id);
+                rekeyed = true;
+                console.log('[autosave] IndexedDB re-key OK:', oldPid, '→', saved.id);
+              } catch (e) {
+                console.warn('[autosave] IndexedDB re-key failed:', e);
+              }
             }
           }
 
@@ -603,10 +608,14 @@ const useAutoSave = (
             if (uploadResult.changed) {
               clipsRef.current = uploadResult.clips;
               mediaItemsRef.current = uploadResult.mediaItems;
+            }
+
+            // Always re-save project_data after rekey or upload to ensure idbKeys are current
+            if (uploadResult.changed || rekeyed) {
               const projectData2 = {
                 id: pid,
                 name: projectNameRef.current,
-                clips: uploadResult.clips.map(serializeClip),
+                clips: (uploadResult.changed ? uploadResult.clips : clipsRef.current).map(serializeClip),
                 mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                 duration: totalDurationRef.current,
                 resolution: resolutionRef.current || "1080p",
@@ -1789,7 +1798,22 @@ const VideoEditor = () => {
         }
       }
 
-      // 2. If IndexedDB miss and user is authenticated, fetch from Supabase Storage
+      // 2b. Broad scan: search all IndexedDB entries for matching mediaId
+      if (!blobUrl && clipData.mediaId) {
+        try {
+          const allEntries = await listAllMedia();
+          const match = allEntries.find(e => e.mediaId === clipData.mediaId);
+          if (match) {
+            console.log('[restore] IndexedDB SCAN HIT:', match.key);
+            const stored = await loadMedia(match.projectId, match.mediaId);
+            if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
+          }
+        } catch (e) {
+          console.warn('[restore] IndexedDB scan failed:', e);
+        }
+      }
+
+      // 3. If IndexedDB miss and user is authenticated, fetch from Supabase Storage
       if (!blobUrl && clipData.storagePath && isSupabaseConfigured() && !clipData.storagePath.startsWith('blob:')) {
         try {
           console.log('[restore] Trying Supabase Storage:', clipData.storagePath);
