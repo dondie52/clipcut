@@ -124,22 +124,39 @@ Return ONLY a valid JSON array. No markdown fences, no explanation, no extra tex
 
 async function handleEdit(request, env) {
   const body = await request.json();
-  const { prompt, context } = body;
+  const { prompt, context, history } = body;
 
   if (!prompt || typeof prompt !== 'string') {
     return jsonResponse({ error: 'Missing or invalid prompt' }, 400);
   }
 
-  const contextStr = context
-    ? `\nVideo context: duration=${context.duration}s, hasAudio=${context.hasAudio}, clips=${context.clipCount}, playhead=${context.currentTime}s`
-    : '';
+  // Build context-enriched system prompt
+  let systemPrompt = EDIT_SYSTEM_PROMPT;
+  if (context) {
+    const parts = [`duration=${context.duration}s`, `clips=${context.clipCount}`, `playhead=${context.currentTime}s`];
+    if (context.hasAudio) parts.push('hasAudio=true');
+    if (context.hasCaptions) parts.push('hasCaptions=true');
+    if (context.filters) parts.push(`filters=[${context.filters}]`);
+    if (context.tracks) parts.push(`tracks=${context.tracks}`);
+    systemPrompt += `\n\nCurrent timeline state: ${parts.join(', ')}`;
+  }
 
-  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
-    messages: [
-      { role: 'system', content: EDIT_SYSTEM_PROMPT },
-      { role: 'user', content: prompt + contextStr },
-    ],
-  });
+  // Build messages array with conversation history (last 10 turns max)
+  const messages = [{ role: 'system', content: systemPrompt }];
+
+  if (Array.isArray(history) && history.length > 0) {
+    // Include last 10 messages (5 user + 5 assistant turns)
+    const recent = history.slice(-10);
+    for (const msg of recent) {
+      if (msg.role === 'user' || msg.role === 'assistant') {
+        messages.push({ role: msg.role, content: String(msg.content || '').slice(0, 500) });
+      }
+    }
+  }
+
+  messages.push({ role: 'user', content: prompt });
+
+  const result = await env.AI.run('@cf/meta/llama-3.1-8b-instruct', { messages });
 
   const raw = result?.response || '';
 

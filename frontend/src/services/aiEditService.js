@@ -30,59 +30,88 @@ const FILTER_NAME_MAP = {
  * Main entry point — parse prompt via Worker, then execute actions.
  *
  * @param {string} prompt - User's natural language prompt
- * @param {Object} context - Video context { duration, hasAudio, clipCount, currentTime }
+ * @param {Object} context - Video context { duration, hasAudio, clipCount, currentTime, ... }
  * @param {Object} editor - Editor state & functions
+ * @param {Object} [options]
+ * @param {Array} [options.history] - Conversation history for multi-turn context
  * @returns {Promise<{summary: string, actionLabels: string[]}>}
  */
-export async function executeAiEdit(prompt, context, editor) {
-  // Step 1: Parse intent via Cloudflare Worker
-  const actions = await parseIntent(prompt, context);
+export async function executeAiEdit(prompt, context, editor, options = {}) {
+  const { history } = options;
 
-  // Step 2: Execute each action sequentially
+  // Step 1: Parse intent via Cloudflare Worker (with conversation history)
+  const actions = await parseIntent(prompt, context, history);
+
+  // Step 2: Execute each action sequentially; collect successes and failures
   const labels = [];
+  const errors = [];
   for (const action of actions) {
-    const label = await executeAction(action, editor);
-    if (label) labels.push(label);
+    try {
+      const label = await executeAction(action, editor);
+      if (label) labels.push(label);
+    } catch (err) {
+      errors.push(`${action.type}: ${err.message}`);
+    }
   }
 
   // Step 3: Build summary
-  const summary = labels.length > 0
-    ? `Done! ${labels.join(', ')}.`
-    : 'No actions were applied.';
+  let summary;
+  if (labels.length > 0 && errors.length === 0) {
+    summary = `Done! ${labels.join(', ')}.`;
+  } else if (labels.length > 0 && errors.length > 0) {
+    summary = `Partially done: ${labels.join(', ')}. Failed: ${errors.join('; ')}`;
+  } else if (errors.length > 0) {
+    summary = `Failed: ${errors.join('; ')}`;
+  } else {
+    summary = 'No actions were applied.';
+  }
 
   return { summary, actionLabels: labels };
 }
 
 /**
  * Send prompt to the /edit Worker endpoint and get structured actions back.
+ * Retries once on invalid JSON (spec requirement).
  */
-async function parseIntent(prompt, context) {
+async function parseIntent(prompt, context, history) {
   if (!WORKER_URL) {
     throw new Error('AI proxy not configured. Set VITE_TRANSCRIPT_WORKER_URL in your .env file.');
   }
 
-  // The Worker base URL is the transcript worker URL minus the /transcribe path
   const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
   const editUrl = `${baseUrl}/edit`;
 
-  const res = await fetch(editUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, context }),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    throw new Error(err.error || `AI proxy returned ${res.status}`);
+  const payload = { prompt, context };
+  if (Array.isArray(history) && history.length > 0) {
+    payload.history = history;
   }
 
-  const data = await res.json();
+  // Try up to 2 times (retry once on invalid JSON)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(editUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
 
-  if (!data.actions || !Array.isArray(data.actions) || data.actions.length === 0) {
-    throw new Error(data.error || "I couldn't understand that request. Try something like 'add captions' or 'remove silence'.");
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      // On 422 (invalid JSON) and first attempt, retry
+      if (res.status === 422 && attempt === 0) continue;
+      throw new Error(err.error || `AI proxy returned ${res.status}`);
+    }
+
+    const data = await res.json();
+
+    if (!data.actions || !Array.isArray(data.actions) || data.actions.length === 0) {
+      if (attempt === 0) continue; // retry once
+      throw new Error(data.error || "I didn't understand that. Try rephrasing your request.");
+    }
+
+    return data.actions;
   }
 
-  return data.actions;
+  throw new Error("I didn't understand that. Try rephrasing your request.");
 }
 
 /**

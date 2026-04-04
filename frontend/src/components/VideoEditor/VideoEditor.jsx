@@ -845,7 +845,9 @@ const VideoEditor = () => {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiMessages, setAiMessages] = useState([]);
   const [aiThinking, setAiThinking] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState([]);
   const aiUndoStackRef = useRef([]);
+  const aiRateLimitRef = useRef([]); // timestamps of recent prompts for rate limiting
 
   // Resizable panel sizes
   const [timelineHeight, setTimelineHeight] = useState(null); // null = use default
@@ -1164,6 +1166,24 @@ const VideoEditor = () => {
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
   }, [notify, projectId, projectName]);
 
+  // ---- Auto-analyze imported video for AI suggestions ----
+  const lastAnalyzedClipRef = useRef(null);
+  useEffect(() => {
+    const videoClip = clips.find(c =>
+      c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl)
+    );
+    if (!videoClip || videoClip.id === lastAnalyzedClipRef.current) return;
+    lastAnalyzedClipRef.current = videoClip.id;
+
+    // Run analysis in background (non-blocking)
+    import('../../services/videoAnalyzer').then(({ analyzeVideo }) => {
+      const hasCaptions = clips.some(c => c.isCaption);
+      analyzeVideo(videoClip, { hasCaptions }).then(suggestions => {
+        if (suggestions.length > 0) setAiSuggestions(suggestions);
+      }).catch(() => {}); // silently ignore analysis errors
+    });
+  }, [clips]);
+
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
     if (!file || !file.type.startsWith('audio/')) {
@@ -1369,21 +1389,40 @@ const VideoEditor = () => {
 
   // ---- AI Edit handlers ----
   const handleAiSendMessage = useCallback(async (text) => {
-    const userMsg = { id: `u-${Date.now()}`, role: 'user', text };
+    // Rate limit: max 10 prompts per minute
+    const now = Date.now();
+    aiRateLimitRef.current = aiRateLimitRef.current.filter(t => now - t < 60000);
+    if (aiRateLimitRef.current.length >= 10) {
+      setAiMessages(prev => [...prev, { id: `e-${now}`, role: 'assistant', text: 'Rate limit reached. Please wait a moment before sending more prompts.' }]);
+      return;
+    }
+    aiRateLimitRef.current.push(now);
+
+    const userMsg = { id: `u-${now}`, role: 'user', text };
     setAiMessages(prev => [...prev, userMsg]);
     setAiThinking(true);
 
     try {
-      // Import dynamically to keep bundle small until first use
       const { executeAiEdit } = await import('../../services/aiEditService');
 
-      // Build context from current editor state
+      // Build richer context from current editor state
       const context = {
         duration: totalDuration,
         hasAudio: clips.some(c => c.type === 'audio' || (c.type === 'video' && c.file)),
         clipCount: clips.length,
         currentTime: pb.currentTime,
+        hasCaptions: clips.some(c => c.isCaption),
+        filters: [...new Set(clips.filter(c => c.filterName).map(c => c.filterName))].join(',') || undefined,
+        tracks: clips.reduce((max, c) => Math.max(max, (c.track || 0) + 1), 0),
       };
+
+      // Build conversation history for multi-turn context (last 10 messages)
+      const history = aiMessages.slice(-10).map(m => ({
+        role: m.role,
+        content: m.role === 'assistant'
+          ? (m.actions?.length ? `[Actions: ${m.actions.join(', ')}] ${m.text}` : m.text)
+          : m.text,
+      }));
 
       // Snapshot clips for undo before AI modifies anything
       const snapshot = JSON.parse(JSON.stringify(clips.map(c => {
@@ -1397,7 +1436,7 @@ const VideoEditor = () => {
           setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
         },
         splitClip, selectedClipId, mediaItems,
-      });
+      }, { history });
 
       // Store undo snapshot
       const undoId = `ai-${Date.now()}`;
@@ -1409,7 +1448,6 @@ const VideoEditor = () => {
         actions: result.actionLabels || [],
         canUndo: true,
         onUndo: () => {
-          // Restore clips from snapshot
           const entry = aiUndoStackRef.current.find(e => e.id === undoId);
           if (entry) {
             const restored = entry.snapshot.map(c => {
@@ -1418,7 +1456,6 @@ const VideoEditor = () => {
             });
             setClips(restored);
             aiUndoStackRef.current = aiUndoStackRef.current.filter(e => e.id !== undoId);
-            // Mark undo button as used
             setAiMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, canUndo: false } : m));
             notify('info', 'AI edit undone');
           }
@@ -1431,7 +1468,12 @@ const VideoEditor = () => {
     } finally {
       setAiThinking(false);
     }
-  }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime]);
+  }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime, aiMessages]);
+
+  // Apply a suggestion card (same as sending a prompt but with known action)
+  const handleAiSuggestion = useCallback((suggestion) => {
+    handleAiSendMessage(suggestion.title);
+  }, [handleAiSendMessage]);
 
   const toggleAiPanel = useCallback(() => {
     setAiPanelOpen(prev => !prev);
@@ -2096,8 +2138,30 @@ const VideoEditor = () => {
   // ---- Global shortcuts ----
   useEffect(() => {
     const h = (e) => {
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       const mod = e.ctrlKey || e.metaKey;
+
+      // Ctrl+Shift+E — toggle AI panel (works even from inputs)
+      if (mod && e.shiftKey && e.key === 'E') {
+        e.preventDefault();
+        toggleAiPanel();
+        return;
+      }
+
+      // Escape — close AI panel if open
+      if (e.key === 'Escape' && aiPanelOpen) {
+        setAiPanelOpen(false);
+        return;
+      }
+
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+
+      // / key — focus AI input when panel is open
+      if (e.key === '/' && aiPanelOpen) {
+        e.preventDefault();
+        document.querySelector('.ai-input-box')?.focus();
+        return;
+      }
+
       if (mod && e.key === "s") { e.preventDefault(); }
       if (mod && e.key === "e") { e.preventDefault(); clips.length > 0 && handleExport("1080p"); }
       if (mod && e.key === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -2105,7 +2169,7 @@ const VideoEditor = () => {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [handleExport, undo, redo, clips.length, pb]);
+  }, [handleExport, undo, redo, clips.length, pb, aiPanelOpen, toggleAiPanel]);
 
   // ---- Keep refs current for cleanup ----
   const mediaItemsRef = useRef(mediaItems);
@@ -2276,6 +2340,8 @@ const VideoEditor = () => {
                 messages={aiMessages}
                 isThinking={aiThinking}
                 onSendMessage={handleAiSendMessage}
+                suggestions={aiSuggestions}
+                onApplySuggestion={handleAiSuggestion}
               />
             </Suspense>
           </ErrorBoundary>
@@ -2450,6 +2516,8 @@ const VideoEditor = () => {
                     messages={aiMessages}
                     isThinking={aiThinking}
                     onSendMessage={handleAiSendMessage}
+                    suggestions={aiSuggestions}
+                    onApplySuggestion={handleAiSuggestion}
                     isMobile={true}
                   />
                 )}

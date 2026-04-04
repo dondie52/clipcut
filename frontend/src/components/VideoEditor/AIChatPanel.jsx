@@ -1,6 +1,6 @@
 import { memo, useState, useRef, useEffect, useCallback } from 'react';
 import Icon from './Icon';
-import { COLORS, FONTS, RADIUS, SHADOWS, Z_INDEX } from '../../constants/theme';
+import { COLORS, FONTS, RADIUS } from '../../constants/theme';
 
 /* ========== CSS ========== */
 const AI_CHAT_CSS = `
@@ -15,6 +15,10 @@ const AI_CHAT_CSS = `
   @keyframes aiSlideOut {
     from { transform: translateX(0); }
     to   { transform: translateX(100%); }
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+    50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
   }
   .ai-chat-panel { animation: aiSlideIn 0.25s cubic-bezier(0.32, 0.72, 0, 1); }
   .ai-chat-panel.closing { animation: aiSlideOut 0.2s ease forwards; }
@@ -56,7 +60,27 @@ const AI_CHAT_CSS = `
     background: rgba(239,68,68,0.15) !important;
     border-color: ${COLORS.ERROR} !important;
   }
+  .ai-mic-btn.listening {
+    animation: micPulse 1.5s ease-in-out infinite;
+    background: rgba(239,68,68,0.15) !important;
+  }
+  .ai-quick-chip:hover {
+    background: rgba(117,170,219,0.18) !important;
+    border-color: rgba(117,170,219,0.4) !important;
+  }
+  .ai-suggestion-card:hover {
+    background: rgba(117,170,219,0.08) !important;
+    border-color: rgba(117,170,219,0.25) !important;
+  }
 `;
+
+const QUICK_ACTIONS = [
+  { label: 'Auto-edit', prompt: 'add captions, remove silence, and apply cinematic filter' },
+  { label: 'Captions', prompt: 'add captions' },
+  { label: 'Remove silence', prompt: 'remove silence' },
+  { label: 'Make vertical', prompt: 'make it vertical for TikTok' },
+  { label: 'Highlights', prompt: 'find the best 60 seconds' },
+];
 
 /* ========== Message Component ========== */
 const ChatMessage = memo(function ChatMessage({ msg }) {
@@ -67,7 +91,6 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
       <div className={`ai-msg-bubble ${isUser ? 'ai-msg-user' : 'ai-msg-assistant'}`}>
         {msg.text}
       </div>
-      {/* Action summary badges */}
       {msg.actions && msg.actions.length > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, padding: '0 4px' }}>
           {msg.actions.map((a, i) => (
@@ -81,7 +104,6 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
           ))}
         </div>
       )}
-      {/* Undo button after AI actions */}
       {msg.canUndo && msg.onUndo && (
         <button
           className="ai-undo-btn"
@@ -90,7 +112,7 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
             display: 'flex', alignItems: 'center', gap: 4,
             padding: '4px 10px', marginTop: 2,
             background: 'rgba(239,68,68,0.08)',
-            border: `1px solid rgba(239,68,68,0.3)`,
+            border: '1px solid rgba(239,68,68,0.3)',
             borderRadius: 8, cursor: 'pointer',
             color: COLORS.ERROR, fontSize: 11,
             fontFamily: FONTS.PRIMARY, transition: 'all 0.15s ease',
@@ -118,6 +140,41 @@ const ThinkingIndicator = memo(function ThinkingIndicator() {
   );
 });
 
+/* ========== Suggestion Card ========== */
+const SuggestionCard = memo(function SuggestionCard({ suggestion, onApply }) {
+  return (
+    <button
+      className="ai-suggestion-card"
+      onClick={() => onApply(suggestion)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        width: '100%', padding: '10px 12px', textAlign: 'left',
+        background: 'rgba(117,170,219,0.04)',
+        border: '1px solid rgba(117,170,219,0.12)',
+        borderRadius: 10, cursor: 'pointer',
+        transition: 'all 0.15s ease',
+      }}
+    >
+      <div style={{
+        width: 32, height: 32, borderRadius: 8, flexShrink: 0,
+        background: 'rgba(117,170,219,0.1)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon i={suggestion.icon} s={16} c={COLORS.PRIMARY_BLUE} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.TEXT_PRIMARY, fontFamily: FONTS.PRIMARY }}>
+          {suggestion.title}
+        </div>
+        <div style={{ fontSize: 11, color: COLORS.TEXT_MUTED, fontFamily: FONTS.PRIMARY, marginTop: 1 }}>
+          {suggestion.description}
+        </div>
+      </div>
+      <Icon i="arrow_forward" s={14} c={COLORS.TEXT_MUTED} />
+    </button>
+  );
+});
+
 /* ========== Main Panel ========== */
 const AIChatPanel = memo(function AIChatPanel({
   isOpen,
@@ -125,11 +182,15 @@ const AIChatPanel = memo(function AIChatPanel({
   messages,
   isThinking,
   onSendMessage,
+  suggestions = [],
+  onApplySuggestion,
   isMobile = false,
 }) {
   const [input, setInput] = useState('');
+  const [isListening, setIsListening] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -146,11 +207,23 @@ const AIChatPanel = memo(function AIChatPanel({
     }
   }, [isOpen]);
 
+  // Cleanup speech recognition on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.abort();
+        recognitionRef.current = null;
+      }
+    };
+  }, []);
+
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
     onSendMessage(trimmed);
     setInput('');
+    // Reset textarea height
+    if (inputRef.current) inputRef.current.style.height = 'auto';
   }, [input, isThinking, onSendMessage]);
 
   const handleKeyDown = useCallback((e) => {
@@ -160,8 +233,68 @@ const AIChatPanel = memo(function AIChatPanel({
     }
   }, [handleSend]);
 
+  // Voice input via Web Speech API
+  const toggleVoice = useCallback(() => {
+    if (isListening) {
+      recognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return; // Not supported
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(r => r[0].transcript)
+        .join('');
+      setInput(transcript);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+    setIsListening(true);
+
+    // Auto-stop after 5 seconds of silence
+    setTimeout(() => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    }, 8000);
+  }, [isListening]);
+
+  const handleQuickAction = useCallback((prompt) => {
+    if (isThinking) return;
+    onSendMessage(prompt);
+  }, [isThinking, onSendMessage]);
+
+  const handleSuggestionApply = useCallback((suggestion) => {
+    if (onApplySuggestion) {
+      onApplySuggestion(suggestion);
+    } else {
+      // Fallback: send as a prompt
+      onSendMessage(suggestion.title);
+    }
+  }, [onApplySuggestion, onSendMessage]);
+
   if (!isOpen) return null;
 
+  const hasSpeechAPI = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
   const panelWidth = isMobile ? '100%' : '360px';
 
   const content = (
@@ -202,7 +335,20 @@ const AIChatPanel = memo(function AIChatPanel({
         padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 12,
         minHeight: 0,
       }} className="cs">
-        {messages.length === 0 && !isThinking && (
+        {/* Suggestions section (shown when there are suggestions and few messages) */}
+        {suggestions.length > 0 && messages.length < 2 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.TEXT_MUTED, fontFamily: FONTS.PRIMARY, textTransform: 'uppercase', letterSpacing: '0.5px', padding: '0 4px' }}>
+              Suggestions
+            </span>
+            {suggestions.map(s => (
+              <SuggestionCard key={s.id} suggestion={s} onApply={handleSuggestionApply} />
+            ))}
+          </div>
+        )}
+
+        {/* Empty state — only when no messages AND no suggestions */}
+        {messages.length === 0 && !isThinking && suggestions.length === 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: '40px 16px', textAlign: 'center' }}>
             <Icon i="auto_awesome" s={40} c="rgba(117,170,219,0.25)" />
             <span style={{ fontSize: 14, color: COLORS.TEXT_MUTED, fontFamily: FONTS.PRIMARY, lineHeight: 1.6 }}>
@@ -214,7 +360,7 @@ const AIChatPanel = memo(function AIChatPanel({
                   key={hint}
                   onClick={() => { setInput(hint); inputRef.current?.focus(); }}
                   style={{
-                    background: 'rgba(117,170,219,0.08)', border: `1px solid rgba(117,170,219,0.15)`,
+                    background: 'rgba(117,170,219,0.08)', border: '1px solid rgba(117,170,219,0.15)',
                     borderRadius: 20, padding: '6px 14px', cursor: 'pointer',
                     color: COLORS.PRIMARY_BLUE, fontSize: 12, fontFamily: FONTS.PRIMARY,
                     transition: 'all 0.15s ease',
@@ -235,22 +381,70 @@ const AIChatPanel = memo(function AIChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Quick action chips */}
+      <div style={{
+        padding: '6px 12px 0', flexShrink: 0,
+        display: 'flex', gap: 6, overflowX: 'auto', overflowY: 'hidden',
+        scrollbarWidth: 'none',
+      }}>
+        {QUICK_ACTIONS.map(qa => (
+          <button
+            key={qa.label}
+            className="ai-quick-chip"
+            onClick={() => handleQuickAction(qa.prompt)}
+            disabled={isThinking}
+            style={{
+              whiteSpace: 'nowrap', flexShrink: 0,
+              padding: '4px 10px', borderRadius: 14,
+              background: 'rgba(117,170,219,0.06)',
+              border: '1px solid rgba(117,170,219,0.15)',
+              color: COLORS.PRIMARY_BLUE, fontSize: 11, fontFamily: FONTS.PRIMARY,
+              cursor: isThinking ? 'not-allowed' : 'pointer',
+              opacity: isThinking ? 0.5 : 1,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            {qa.label}
+          </button>
+        ))}
+      </div>
+
       {/* Input area */}
       <div style={{
-        padding: '12px', borderTop: `1px solid ${COLORS.BORDER_LIGHT}`,
-        flexShrink: 0, display: 'flex', gap: 8, alignItems: 'flex-end',
+        padding: '8px 12px 12px', borderTop: `1px solid ${COLORS.BORDER_LIGHT}`,
+        flexShrink: 0, display: 'flex', gap: 6, alignItems: 'flex-end',
+        marginTop: 4,
       }}>
+        {/* Voice input button */}
+        {hasSpeechAPI && (
+          <button
+            className={`ai-mic-btn${isListening ? ' listening' : ''}`}
+            onClick={toggleVoice}
+            style={{
+              width: isMobile ? 44 : 32, height: isMobile ? 44 : 32,
+              minWidth: isMobile ? 44 : 32, minHeight: isMobile ? 44 : 32,
+              borderRadius: RADIUS.MD, border: 'none', cursor: 'pointer',
+              background: isListening ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.04)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              transition: 'all 0.15s ease', flexShrink: 0,
+            }}
+            aria-label={isListening ? 'Stop listening' : 'Voice input'}
+            title={isListening ? 'Stop listening' : 'Voice input'}
+          >
+            <Icon i={isListening ? 'mic' : 'mic_none'} s={isMobile ? 22 : 16} c={isListening ? COLORS.ERROR : COLORS.TEXT_MUTED} />
+          </button>
+        )}
         <textarea
           ref={inputRef}
           className="ai-input-box"
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask AI to edit your video..."
+          placeholder={isListening ? 'Listening...' : 'Ask AI to edit your video...'}
           rows={1}
           style={{
             flex: 1, resize: 'none', background: COLORS.BG_PANEL,
-            border: `1px solid ${COLORS.BORDER_MEDIUM}`,
+            border: `1px solid ${isListening ? COLORS.ERROR : COLORS.BORDER_MEDIUM}`,
             borderRadius: 12, padding: '10px 14px',
             color: COLORS.TEXT_PRIMARY, fontSize: 13,
             fontFamily: FONTS.PRIMARY, lineHeight: 1.4,
@@ -258,7 +452,6 @@ const AIChatPanel = memo(function AIChatPanel({
             transition: 'border-color 0.15s ease',
           }}
           onInput={e => {
-            // Auto-resize textarea
             e.target.style.height = 'auto';
             e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
           }}
