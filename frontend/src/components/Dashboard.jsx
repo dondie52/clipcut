@@ -644,6 +644,7 @@ const Dashboard = () => {
   const [loadError, setLoadError] = useState(null);
   const [renamingId, setRenamingId] = useState(null);
   const [renameValue, setRenameValue] = useState("");
+  const [failedThumbs, setFailedThumbs] = useState(new Set());
   const [advisorDismissed, setAdvisorDismissed] = useState(() => {
     try {
       return typeof window !== "undefined" && localStorage.getItem(ADVISOR_DISMISSED_KEY) === "1";
@@ -1022,22 +1023,22 @@ const Dashboard = () => {
                       onContextMenu={(e) => handleContextMenu(e, project)}
                     >
                       <div className="project-thumb">
-                        {project.thumbnail ? (
+                        {project.thumbnail && !failedThumbs.has(project.id) ? (
                           <img
                             src={project.thumbnail}
                             alt={project.name}
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            onError={(e) => { e.target.style.display = 'none'; if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex'; }}
+                            onError={() => setFailedThumbs(prev => new Set(prev).add(project.id))}
                           />
-                        ) : null}
-                        <div style={{
-                          display: project.thumbnail ? 'none' : 'flex',
-                          alignItems: 'center', justifyContent: 'center',
-                          width: '100%', height: '100%', position: 'absolute', inset: 0,
-                          background: 'linear-gradient(135deg, #111820, #0e1218)',
-                        }}>
-                          <I i="movie" s={32} c="rgba(117,170,219,0.2)" />
-                        </div>
+                        ) : (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: '100%', height: '100%', position: 'absolute', inset: 0,
+                            background: 'linear-gradient(135deg, #111820, #0e1218)',
+                          }}>
+                            <I i="movie" s={32} c="rgba(117,170,219,0.2)" />
+                          </div>
+                        )}
                         <button
                           className="del-btn"
                           onClick={(e) => handleDeleteProject(e, project.id)}
@@ -1067,13 +1068,27 @@ const Dashboard = () => {
                             }}
                           />
                         ) : (
-                          <p
-                            className="name"
-                            onDoubleClick={(e) => handleStartRename(e, project)}
-                            title="Double-click to rename"
-                          >
-                            {project.name}
-                          </p>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+                            <p
+                              className="name"
+                              onClick={(e) => handleStartRename(e, project)}
+                              title="Click to rename"
+                              style={{ cursor: 'text', flex: 1, minWidth: 0 }}
+                            >
+                              {project.name}
+                            </p>
+                            <button
+                              onClick={(e) => handleStartRename(e, project)}
+                              style={{
+                                background: 'none', border: 'none', cursor: 'pointer', padding: '2px',
+                                opacity: 0.4, flexShrink: 0, display: 'flex', alignItems: 'center',
+                              }}
+                              title="Rename"
+                              aria-label={`Rename ${project.name}`}
+                            >
+                              <I i="edit" s={12} c="rgba(255,255,255,0.5)" />
+                            </button>
+                          </div>
                         )}
                         <p className="meta">
                           {project.resolution} · {formatEditTime(project.savedAt)}
