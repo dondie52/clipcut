@@ -27,6 +27,59 @@ const FILTER_NAME_MAP = {
 };
 
 /**
+ * Local intent parser — matches common editing commands to structured actions
+ * without requiring a network call. Returns null if the prompt is ambiguous
+ * and should be forwarded to the Worker.
+ */
+function parseIntentLocally(prompt) {
+  const p = prompt.toLowerCase().trim();
+
+  // Pattern table: [regex, action builder]
+  const patterns = [
+    [/\badd\s+(auto[- ]?)?captions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
+    [/\bcaptions?\b(?!.*remove)/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
+    [/\bremove\s+silence\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
+    [/\bremove\s+filler\b/, () => [{ type: 'remove_filler_words', params: {} }]],
+    [/\bmake\s+(?:it\s+)?vertical\b|tiktok|9[:\s]16|reels?\b|shorts?\b/, () => [{ type: 'smart_crop', params: { aspect: '9:16' } }]],
+    [/\bmake\s+(?:it\s+)?square\b|1[:\s]1/, () => [{ type: 'smart_crop', params: { aspect: '1:1' } }]],
+    [/\bhighlight|best\s+(\d+)\s*(?:sec|s\b|seconds?)/, (m) => [{ type: 'auto_highlight', params: { duration: parseInt(m[1]) || 60 } }]],
+    [/\bfind\s+(?:the\s+)?best\b/, () => [{ type: 'auto_highlight', params: { duration: 60 } }]],
+    [/\bdetect\s+scenes?\b|scene\s+split/, () => [{ type: 'detect_scenes', params: { sensitivity: 'medium' } }]],
+    [/\bbeat\s+sync\b|sync\s+(?:to\s+)?beats?\b/, () => [{ type: 'beat_sync', params: { sensitivity: 1.5 } }]],
+    [/\bzoom\s+(?:to\s+|in\s+(?:on\s+)?)?speaker\b/, () => [{ type: 'zoom_to_speaker', params: { zoomFactor: 1.3 } }]],
+    [/\bremove\s+boring\b/, () => [{ type: 'remove_boring', params: { threshold: 4 } }]],
+    [/\bspeed\s+(?:up\s+)?(\d+(?:\.\d+)?)x?\b|(\d+(?:\.\d+)?)x\s+speed/, (m) => {
+      const speed = parseFloat(m[1] || m[2]);
+      return [{ type: 'change_speed', params: { speed } }];
+    }],
+    [/\bsplit\s+(?:at\s+)?(\d+)\b/, (m) => [{ type: 'split_clip', params: { at: parseFloat(m[1]) } }]],
+    [/\bcut\s+(?:from\s+)?(\d+)\s*(?:to|-)\s*(\d+)/, (m) => [{ type: 'cut_clip', params: { from: parseFloat(m[1]), to: parseFloat(m[2]) } }]],
+    [/\b(?:apply\s+)?(?:a\s+)?(cinematic|vintage|bw|b&w|black\s+and\s+white|warm|cool|90s|sepia)\s*filter\b/, (m) => {
+      return [{ type: 'apply_filter', params: { name: m[1].replace(/\s+/g, ' ') } }];
+    }],
+    [/\bapply\s+(cinematic|vintage|bw|b&w|warm|cool|90s|sepia)\b/, (m) => {
+      return [{ type: 'apply_filter', params: { name: m[1] } }];
+    }],
+  ];
+
+  // Compound: "add captions, remove silence, and apply cinematic filter" (auto-edit)
+  if (/\bcaptions?\b/.test(p) && /\bremove\s+silence\b/.test(p) && /\bcinematic|filter\b/.test(p)) {
+    return [
+      { type: 'add_captions', params: { style: 'classic' } },
+      { type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } },
+      { type: 'apply_filter', params: { name: 'cinematic' } },
+    ];
+  }
+
+  for (const [regex, builder] of patterns) {
+    const match = p.match(regex);
+    if (match) return builder(match);
+  }
+
+  return null; // ambiguous — fall through to Worker
+}
+
+/**
  * Main entry point — parse prompt via Worker, then execute actions.
  *
  * @param {string} prompt - User's natural language prompt
@@ -70,10 +123,15 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
 }
 
 /**
- * Send prompt to the /edit Worker endpoint and get structured actions back.
- * Retries once on invalid JSON (spec requirement).
+ * Parse intent — tries local pattern matching first (instant, offline),
+ * falls back to the Worker /edit endpoint for ambiguous prompts.
  */
 async function parseIntent(prompt, context, history) {
+  // Try local parser first — handles all quick-action prompts instantly
+  const localActions = parseIntentLocally(prompt);
+  if (localActions) return localActions;
+
+  // Fall back to Worker for complex / conversational prompts
   if (!WORKER_URL) {
     throw new Error('AI proxy not configured. Set VITE_TRANSCRIPT_WORKER_URL in your .env file.');
   }
@@ -88,27 +146,50 @@ async function parseIntent(prompt, context, history) {
 
   // Try up to 2 times (retry once on invalid JSON)
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(editUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let res;
+    try {
+      res = await fetch(editUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.name === 'AbortError') {
+        throw new Error('AI service took too long to respond. Try a simpler command like "add captions" or "remove silence".');
+      }
+      throw err;
+    }
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-      // On 422 (invalid JSON) and first attempt, retry
       if (res.status === 422 && attempt === 0) continue;
       throw new Error(err.error || `AI proxy returned ${res.status}`);
     }
 
     const data = await res.json();
 
-    if (!data.actions || !Array.isArray(data.actions) || data.actions.length === 0) {
-      if (attempt === 0) continue; // retry once
-      throw new Error(data.error || "I didn't understand that. Try rephrasing your request.");
+    // Handle structured actions (expected format)
+    if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+      return data.actions;
     }
 
-    return data.actions;
+    // Handle Worker returning a text response instead of structured actions
+    // Re-parse the text response through local intent parser
+    const workerText = data.result?.response || data.response || data.message;
+    if (workerText && attempt === 0) {
+      const reparsed = parseIntentLocally(workerText);
+      if (reparsed) return reparsed;
+      continue; // retry once
+    }
+
+    if (attempt === 0) continue;
+    throw new Error(data.error || "I didn't understand that. Try rephrasing your request.");
   }
 
   throw new Error("I didn't understand that. Try rephrasing your request.");

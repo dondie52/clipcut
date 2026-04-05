@@ -528,6 +528,11 @@ const Player = ({
   const videoCanvasRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
   const [dDur, setDDur] = useState(duration);
+
+  // Sync display duration with timeline-computed duration prop
+  useEffect(() => {
+    if (duration > 0) setDDur(duration);
+  }, [duration]);
   const [fitMode, setFitMode] = useState("fit");
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
@@ -742,8 +747,10 @@ const Player = ({
 
   const handleMeta = useCallback(() => {
     const v = videoRef.current; if (!v) return;
-    setDDur(v.duration); onDurationChange?.(v.duration);
-  }, [onDurationChange]);
+    // Only use native video duration if no timeline duration was provided
+    if (!duration) setDDur(v.duration);
+    onDurationChange?.(v.duration);
+  }, [onDurationChange, duration]);
 
   const handleEnded = useCallback(() => onEnded?.(), [onEnded]);
 
@@ -792,12 +799,67 @@ const Player = ({
     );
   }, [clipProperties]);
 
+  // ---- Crop aspect ratio from AI smart-crop ----
+  const cropAspect = clipProperties?.cropAspect || null;
+  const containerAspect = useMemo(() => {
+    if (!cropAspect) return '16/9';
+    const map = { '9:16': '9/16', '1:1': '1/1', '4:5': '4/5' };
+    return map[cropAspect] || '16/9';
+  }, [cropAspect]);
+
+  // Compute crop transform: scale video to fill the crop window, then translate based on keyframes
+  const cropTransform = useMemo(() => {
+    if (!cropAspect || cropAspect === '16:9') return null;
+    // Scale factor: how much wider the source (16:9) is compared to the crop window
+    const [cw, ch] = cropAspect.split(':').map(Number);
+    const cropRatio = cw / ch; // e.g. 9/16 = 0.5625
+    const srcRatio = 16 / 9;   // 1.777
+    // To fill the crop window height, scale = srcRatio / cropRatio
+    const scale = srcRatio / cropRatio;
+
+    // Determine horizontal pan from keyframes at current time
+    let panX = 0.5; // default: center
+    const keyframes = clipProperties?.cropKeyframes;
+    if (keyframes && keyframes.length > 0 && typeof currentTime === 'number') {
+      const t = currentTime;
+      // Find the two keyframes surrounding current time
+      let before = keyframes[0], after = keyframes[keyframes.length - 1];
+      for (let i = 0; i < keyframes.length - 1; i++) {
+        if (keyframes[i].time <= t && keyframes[i + 1].time >= t) {
+          before = keyframes[i];
+          after = keyframes[i + 1];
+          break;
+        }
+      }
+      // Interpolate x position (0..1 normalized)
+      if (before.time === after.time) {
+        panX = before.x ?? 0.5;
+      } else {
+        const progress = (t - before.time) / (after.time - before.time);
+        panX = (before.x ?? 0.5) + progress * ((after.x ?? 0.5) - (before.x ?? 0.5));
+      }
+    }
+
+    // Convert panX (0..1) to translateX percentage
+    // At panX=0.5, translateX=0 (centered). Range: -(scale-1)/2 .. +(scale-1)/2
+    const maxShift = (scale - 1) / 2;
+    const translateXPct = -(panX - 0.5) * 2 * maxShift * 100;
+
+    return { scale, translateX: translateXPct };
+  }, [cropAspect, clipProperties?.cropKeyframes, currentTime]);
+
   // ---- CSS live preview from clip properties ----
   const videoPreviewStyle = useMemo(() => {
     if (!clipProperties) return {};
     const transforms = [];
     const filters = [];
     const style = {};
+
+    // Crop transform (smart crop — scale + pan)
+    if (cropTransform) {
+      transforms.push(`scale(${cropTransform.scale})`);
+      transforms.push(`translateX(${cropTransform.translateX}%)`);
+    }
 
     // Transform properties
     if (clipProperties.rotation) transforms.push(`rotate(${clipProperties.rotation}deg)`);
@@ -823,7 +885,6 @@ const Player = ({
           filters.push(preset.css.replace(/\(([^)]+)\)/g, (match, val) => {
             const num = parseFloat(val);
             if (isNaN(num)) return match;
-            // Interpolate toward identity (1.0 for most filters, 0 for effects like sepia/grayscale)
             const isIdentity = val.includes('deg') ? 0 : 1;
             return `(${isIdentity + (num - isIdentity) * strength}${val.replace(/[\d.]+/, '')})`;
           }));
@@ -843,7 +904,7 @@ const Player = ({
     style.transition = 'transform 0.1s ease, filter 0.1s ease, opacity 0.1s ease';
 
     return style;
-  }, [clipProperties]);
+  }, [clipProperties, cropTransform]);
 
   // Apply clip speed to video element
   useEffect(() => {
@@ -915,7 +976,11 @@ const Player = ({
               userTogglePlayPause(e);
             }
           }} style={{
-            width: "100%", aspectRatio: "16/9", background: "#000",
+            width: containerAspect !== '16/9' ? 'auto' : '100%',
+            height: containerAspect !== '16/9' ? '100%' : 'auto',
+            aspectRatio: containerAspect, background: "#000",
+            margin: containerAspect !== '16/9' ? '0 auto' : undefined,
+            transition: 'aspect-ratio 0.3s ease, width 0.3s ease',
             ...(isMobile ? {
               borderRadius: 0, border: "none", boxShadow: "none",
             } : {

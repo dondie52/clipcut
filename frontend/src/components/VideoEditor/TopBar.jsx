@@ -125,8 +125,8 @@ const QUALITY_PRESETS = [
 ];
 
 const FORMAT_OPTIONS = [
-  { key: 'mp4', label: 'MP4' },
   { key: 'webm', label: 'WebM' },
+  { key: 'mp4', label: 'MP4 (via server)' },
 ];
 
 const FPS_OPTIONS = [24, 30, 60];
@@ -152,6 +152,7 @@ const ExportModal = memo(({
   isExporting,
   progress,
   operationLabel = 'Processing',
+  subMessage = '',
   resolutions,
   exportPresets = {},
   onCancel,
@@ -163,7 +164,7 @@ const ExportModal = memo(({
   const [selectedResolution, setSelectedResolution] = useState('1080p');
   const [exportTab, setExportTab] = useState('resolution'); // 'resolution' | 'platform'
   const [selectedPreset, setSelectedPreset] = useState('youtube-1080p');
-  const [exportFormat, setExportFormat] = useState('mp4');
+  const [exportFormat, setExportFormat] = useState('webm');
   const [exportQuality, setExportQuality] = useState('high');
   const [exportFps, setExportFps] = useState(30);
   const [exportFilename, setExportFilename] = useState('');
@@ -294,7 +295,15 @@ const ExportModal = memo(({
         border: '1px solid rgba(117,170,219,0.1)',
       }}>
         <Icon i="info" s={14} c="#5a8cbf" />
-        <span style={{ fontSize: '11px', color: '#75aadb', fontWeight: 500 }}>{summaryLine}</span>
+        <div>
+          <span style={{ fontSize: '11px', color: '#75aadb', fontWeight: 500 }}>{summaryLine}</span>
+          {exportFormat === 'webm' && (
+            <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '2px' }}>WebM is supported by all major platforms. Export runs in real-time.</div>
+          )}
+          {exportFormat === 'mp4' && (
+            <div style={{ fontSize: '9px', color: '#ef4444', marginTop: '2px' }}>MP4 requires server (unavailable). Will export as WebM.</div>
+          )}
+        </div>
       </div>
 
       {/* Export + Cancel buttons */}
@@ -327,7 +336,8 @@ const ExportModal = memo(({
       <div style={{ height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden', marginBottom: '12px' }}>
         <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg, #75aadb, #5a8cbf)', borderRadius: '4px', transition: 'width 0.3s ease' }} />
       </div>
-      <p style={{ color: '#75aadb', fontSize: '18px', fontWeight: 700, margin: '0 0 20px', fontFamily: 'monospace' }}>{Math.round(progress)}%</p>
+      <p style={{ color: '#75aadb', fontSize: '18px', fontWeight: 700, margin: '0 0 6px', fontFamily: 'monospace' }}>{Math.round(progress)}%</p>
+      {subMessage && <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 20px', fontFamily: 'monospace' }}>{subMessage}</p>}
       {onCancel && (
         <button onClick={onCancel} style={{
           background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px',
@@ -594,6 +604,7 @@ const TopBar = ({
   onUndo,
   onRedo,
   onCancelExport,
+  exportSubMessage = '',
   onNewProject,
   onSave,
   onSettings,
@@ -935,7 +946,8 @@ const TopBar = ({
         onExport={handleExport}
         isExporting={isExporting}
         progress={exportProgress}
-        operationLabel={currentOperation ? `${currentOperation}...` : 'Exporting video...'}
+        operationLabel={currentOperation || 'Exporting video...'}
+        subMessage={exportSubMessage}
         resolutions={resolutions}
         exportPresets={exportPresets}
         onCancel={isExporting ? onCancelExport : undefined}

@@ -20,7 +20,7 @@ let ffmpegInstance = null;
 let loadingPromise = null;
 let moduleLoadingPromise = null;
 
-const DEFAULT_FFMPEG_CORE_BASE_URL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+const DEFAULT_FFMPEG_CORE_BASE_URL = '/ffmpeg';
 const FFMPEG_CORE_BASE_URL = (import.meta.env?.VITE_FFMPEG_CORE_BASE_URL || DEFAULT_FFMPEG_CORE_BASE_URL).replace(/\/+$/, '');
 
 /**

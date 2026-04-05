@@ -15,6 +15,8 @@ import { storeMedia, loadMedia, rekeyProjectMedia, listAllMedia } from '../../ut
 import { sanitizeTextInput } from '../../utils/validation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
+import { canvasExport } from '../../services/canvasExport';
+import { RESOLUTIONS, EXPORT_PRESETS } from '../../services/videoOperations';
 import ErrorBoundary from '../ErrorBoundary';
 import {
   MAX_UNDO_HISTORY,
@@ -826,11 +828,28 @@ const VideoEditor = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  // Project state
-  const [projectId, setProjectId] = useState(null);
+  // Project state — initialise from URL query param so reloads can restore
+  const [projectId, setProjectId] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('project') || null;
+  });
   const [projectName, setProjectName] = useState("Untitled Project");
   const [projectResolution, setProjectResolution] = useState("1080p");
-  
+  const hasRestoredRef = useRef(false);
+
+  // Keep URL in sync with projectId so page reloads can restore the project
+  useEffect(() => {
+    const url = new URL(window.location);
+    if (projectId) {
+      url.searchParams.set('project', projectId);
+    } else {
+      url.searchParams.delete('project');
+    }
+    if (url.toString() !== window.location.href) {
+      window.history.replaceState(window.history.state, '', url);
+    }
+  }, [projectId]);
+
   // UI state
   const [activeToolbar, setActiveToolbar] = useState("media");
   const [rightTab, setRightTab] = useState("video");
@@ -949,7 +968,9 @@ const VideoEditor = () => {
   // Processing
   const [isImporting, setIsImporting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [exportQueue, setExportQueue] = useState([]); // [{resolution, id}]
+  const exportAbortRef = useRef(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadMsg, setLoadMsg] = useState("");
   const [loadSub, setLoadSub] = useState("");
@@ -1372,6 +1393,7 @@ const VideoEditor = () => {
     setClips([]);
     setProjectName('Untitled Project');
     setProjectId(null);
+    hasRestoredRef.current = false;
     setMediaItems([]);
     setSelectedClipId(null);
     setSelectedMediaId(null);
@@ -1484,81 +1506,28 @@ const VideoEditor = () => {
   }, [isMobile]);
 
   // ---- Download helper ----
-  const downloadBlob = useCallback((blob, res) => {
+  const downloadBlob = useCallback((blob, filename, format) => {
+    const ext = format === 'mp4' ? 'mp4' : 'webm';
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${projectName.replace(/[^a-z0-9]/gi, "_")}_${res}.mp4`;
+    a.download = `${(filename || projectName).replace(/[^a-z0-9_\- ]/gi, "_")}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }, [projectName]);
 
-  // ---- WASM export pipeline (client-side fallback) ----
-  const wasmExport = useCallback(async (vClips, res) => {
-    if (!ffmpeg.isReady) {
-      const initialized = await ffmpeg.initialize();
-      if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
+  // ---- Cancel export ----
+  const cancelExport = useCallback(() => {
+    if (exportAbortRef.current) {
+      exportAbortRef.current.abort();
+      exportAbortRef.current = null;
     }
+  }, []);
 
-    // Apply effects to each clip
-    const processedFiles = [];
-    for (let i = 0; i < vClips.length; i++) {
-      setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
-      const processed = await applyClipEffects(vClips[i], i, vClips.length);
-      processedFiles.push(processed);
-    }
-    setLoadSub("");
-
-    let videoFile;
-    if (processedFiles.length === 1) {
-      videoFile = processedFiles[0];
-    } else {
-      // Merge clips, applying transitions between adjacent clips that have them
-      setLoadMsg(`Merging ${processedFiles.length} clips...`);
-      videoFile = processedFiles[0];
-      for (let i = 1; i < processedFiles.length; i++) {
-        const prevClip = vClips[i - 1];
-        if (prevClip.transition) {
-          setLoadSub(`Adding ${prevClip.transition} transition...`);
-          videoFile = await ffmpeg.addTransition(
-            videoFile, processedFiles[i],
-            prevClip.transition,
-            prevClip.transitionDuration || 1
-          );
-        } else {
-          // No transition — simple merge of the two
-          videoFile = await ffmpeg.mergeClips([videoFile, processedFiles[i]]);
-        }
-      }
-      setLoadSub("");
-    }
-
-    // Mix background music if set
-    if (bgMusic?.file) {
-      setLoadMsg("Mixing background music...");
-      videoFile = await ffmpeg.mixAudio(videoFile, bgMusic.file, bgMusic.volume ?? 0.3);
-    }
-
-    // Export: use platform preset or resolution
-    if (res.startsWith('preset:')) {
-      const presetKey = res.slice(7);
-      const preset = ffmpeg.exportPresets?.[presetKey];
-      setLoadMsg(`Exporting for ${preset?.label || presetKey}...`);
-      const blob = await ffmpeg.exportWithPreset(videoFile, presetKey);
-      if (!blob || blob.size === 0) throw new Error("Export produced an empty file.");
-      return blob;
-    }
-    setLoadMsg(`Exporting at ${res}...`);
-    const blob = await ffmpeg.exportVideo(videoFile, res);
-    if (!blob || blob.size === 0) throw new Error("Export produced an empty file.");
-    return blob;
-  }, [ffmpeg, applyClipEffects, bgMusic]);
-
-  // ---- Export (tries server first, falls back to WASM) ----
-  // Supports queue: if already exporting, queue the resolution for later
-  const handleExport = useCallback(async (res) => {
+  // ---- Export via Canvas + MediaRecorder (no FFmpeg) ----
+  const handleExport = useCallback(async (res, settings = {}) => {
     if (clips.length === 0) {
       notify("warning", "No clips to export. Add media to the timeline first.");
       return;
@@ -1580,107 +1549,62 @@ const VideoEditor = () => {
     if (pb.isPlaying) pb.setIsPlaying(false);
 
     setIsExporting(true);
+    setExportProgress(0);
     setLoadMsg("Preparing export...");
+    setLoadSub("");
+
+    // Resolve resolution for platform presets
+    let exportResolution = res;
+    if (res.startsWith('preset:')) {
+      const presetKey = res.slice(7);
+      const preset = EXPORT_PRESETS[presetKey];
+      if (preset) {
+        // Find matching resolution or default to 1080p
+        if (preset.width <= 854) exportResolution = '480p';
+        else if (preset.width <= 1280) exportResolution = '720p';
+        else exportResolution = '1080p';
+      }
+    }
+
+    const abort = new AbortController();
+    exportAbortRef.current = abort;
 
     try {
-      // Check memory and warn/clear if near limit
-      const memInfo = ffmpeg.getMemoryInfo();
-      if (memInfo.limitExceeded) {
-        setLoadMsg("Clearing memory...");
-        await ffmpeg.clearMemory();
+      const result = await canvasExport({
+        clips: [...vClips, ...clips.filter(c => c.type === 'text')],
+        bgMusic,
+        totalDuration: Math.max(...vClips.map(c => c.startTime + c.duration)),
+        resolution: exportResolution,
+        settings,
+        onProgress: ({ percent, elapsed, eta, label }) => {
+          setExportProgress(percent);
+          setLoadMsg(label || 'Exporting...');
+          setLoadSub(`${percent}%  ·  Elapsed ${elapsed}  ·  ETA ${eta}`);
+        },
+        abortSignal: abort.signal,
+      });
+
+      if (!result.blob || result.blob.size === 0) {
+        throw new Error("Export produced an empty file.");
       }
 
-      // Check if server-side export is available (fast path)
-      const serverAvailable = await isServerExportAvailable();
-
-      if (serverAvailable) {
-        // Server export: process clips locally first, then send merged video to server
-        // for final resolution scaling (server's native FFmpeg is much faster)
-        setLoadMsg("Processing clips...");
-        setLoadSub("Server export (fast)");
-
-        if (!ffmpeg.isReady) {
-          const initialized = await ffmpeg.initialize();
-          if (!initialized) throw new Error("Failed to initialize FFmpeg. Please refresh the page and try again.");
-        }
-
-        // Apply effects and merge locally (still needed — effects are clip-specific)
-        const processedFiles = [];
-        for (let i = 0; i < vClips.length; i++) {
-          setLoadSub(`Processing clip ${i + 1} of ${vClips.length}`);
-          const processed = await applyClipEffects(vClips[i], i, vClips.length);
-          processedFiles.push(processed);
-        }
-        setLoadSub("");
-
-        let mergedBlob;
-        if (processedFiles.length === 1) {
-          mergedBlob = processedFiles[0] instanceof Blob ? processedFiles[0] : new Blob([processedFiles[0]], { type: 'video/mp4' });
-        } else {
-          setLoadMsg("Merging clips...");
-          mergedBlob = await ffmpeg.mergeClips(processedFiles);
-        }
-
-        // Ensure we have a Blob
-        if (!(mergedBlob instanceof Blob)) {
-          mergedBlob = new Blob([mergedBlob], { type: 'video/mp4' });
-        }
-
-        setLoadMsg("Uploading to server for fast export...");
-
-        // Collect text overlay info from first clip that has text (for server-side rendering)
-        const textClip = vClips.find(c => c.text?.trim());
-        const options = {};
-        if (bgMusic?.file) {
-          options.audioFile = bgMusic.file;
-          options.audioVolume = bgMusic.volume ?? 0.3;
-        }
-        if (textClip) {
-          options.text = textClip.text;
-          options.textPosition = textClip.textPosition;
-          options.textSize = textClip.textSize;
-          options.textColor = textClip.textColor;
-          options.textBgColor = textClip.textBgColor;
-        }
-
-        try {
-          const blob = await serverExport(mergedBlob, res, options, (pct) => {
-            setLoadMsg(pct < 50 ? "Uploading to server..." : "Server processing...");
-            setLoadSub(`${pct}%`);
-          });
-          setLoadSub("");
-
-          if (!blob || blob.size === 0) throw new Error("Server export returned empty file.");
-          downloadBlob(blob, res);
-          notify("success", `Exported at ${res} (server)`);
-        } catch (serverErr) {
-          // Server failed — fall back to WASM
-          console.warn("Server export failed, falling back to WASM:", serverErr);
-          setLoadMsg("Server unavailable, exporting locally...");
-          setLoadSub("WASM fallback");
-          const blob = await wasmExport(vClips, res);
-          downloadBlob(blob, res);
-          notify("success", `Exported at ${res} (local)`);
-        }
-      } else {
-        // WASM-only export (server unreachable)
-        setLoadSub("Local export");
-        const blob = await wasmExport(vClips, res);
-        downloadBlob(blob, res);
-        notify("success", `Exported at ${res}`);
-      }
+      downloadBlob(result.blob, settings.filename || projectName, settings.format || 'webm');
+      notify("success", `Exported at ${exportResolution} (${(result.size / (1024 * 1024)).toFixed(1)} MB)`);
     } catch (e) {
-      console.error("Export error:", e);
-      notify("error", getUserFriendlyMessage(e, 'ffmpeg'));
+      if (e.message === 'Export cancelled.') {
+        notify("info", "Export cancelled.");
+      } else {
+        console.error("Export error:", e);
+        notify("error", e.message || "Export failed. Please try again.");
+      }
     } finally {
       setIsExporting(false);
+      setExportProgress(0);
       setLoadMsg("");
       setLoadSub("");
-      ffmpeg.resetProgress();
-      // Auto-clear FFmpeg virtual FS to free memory after export
-      try { await ffmpeg.clearMemory(); } catch { /* ignore */ }
+      exportAbortRef.current = null;
     }
-  }, [clips, projectName, ffmpeg, pb, notify, applyClipEffects, bgMusic, wasmExport, downloadBlob, isExporting, exportQueue]);
+  }, [clips, projectName, pb, notify, bgMusic, downloadBlob, isExporting, exportQueue, totalDuration]);
 
   // ---- Process export queue ----
   useEffect(() => {
@@ -1812,12 +1736,18 @@ const VideoEditor = () => {
     }
   }, [location.state?.filesToImport, importMedia]);
 
-  // ---- Load project from dashboard (wait for auth when using Supabase) ----
+  // ---- Load project from dashboard OR URL query param (page reload) ----
   useEffect(() => {
-    const projectId = location.state?.projectId;
+    const stateProjectId = location.state?.projectId;
     const projectData = location.state?.projectData;
     const projectName = location.state?.projectName;
+    // Use location.state projectId (from dashboard nav) or fall back to URL query param (page reload)
+    const urlProjectId = new URLSearchParams(window.location.search).get('project');
+    const projectId = stateProjectId || urlProjectId || null;
     if (!projectId) return;
+    // Prevent double-restore (dashboard nav sets state, URL param persists)
+    if (hasRestoredRef.current === projectId) return;
+    hasRestoredRef.current = projectId;
 
     if (isSupabaseConfigured() && !user?.id) {
       return;
@@ -1877,6 +1807,10 @@ const VideoEditor = () => {
       return { idbProjectId: payload.slice(0, colonIdx), idbMediaId: payload.slice(colonIdx + 1) };
     };
 
+    /** Race a promise against a timeout (ms). Returns fallback on timeout. */
+    const withTimeout = (promise, ms, fallback = null) =>
+      Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(fallback), ms))]);
+
     /** Try loading media from IndexedDB, then Supabase, returning { file, blobUrl } or nulls. */
     const resolveMedia = async (clipData) => {
       let file = null, blobUrl = null;
@@ -1891,7 +1825,7 @@ const VideoEditor = () => {
       if (parsed) {
         try {
           console.log('[restore] Trying IndexedDB:', parsed.idbProjectId, parsed.idbMediaId);
-          const stored = await loadMedia(parsed.idbProjectId, parsed.idbMediaId);
+          const stored = await withTimeout(loadMedia(parsed.idbProjectId, parsed.idbMediaId), 5000);
           if (stored) {
             file = stored.file; blobUrl = stored.blobUrl;
             console.log('[restore] IndexedDB HIT:', clipData.name, 'size:', stored.file?.size);
@@ -1909,7 +1843,7 @@ const VideoEditor = () => {
       if (!blobUrl && clipData.mediaId) {
         try {
           console.log('[restore] Trying fallback IndexedDB with projectId:', projectId, 'mediaId:', clipData.mediaId);
-          const stored = await loadMedia(projectId, clipData.mediaId);
+          const stored = await withTimeout(loadMedia(projectId, clipData.mediaId), 5000);
           if (stored) {
             file = stored.file; blobUrl = stored.blobUrl;
             console.log('[restore] Fallback IndexedDB HIT:', clipData.name);
@@ -1924,7 +1858,7 @@ const VideoEditor = () => {
       // 2b. Broad scan: search all IndexedDB entries for matching mediaId
       if (!blobUrl && clipData.mediaId) {
         try {
-          const allEntries = await listAllMedia();
+          const allEntries = await withTimeout(listAllMedia(), 5000, []);
           const match = allEntries.find(e => e.mediaId === clipData.mediaId);
           if (match) {
             console.log('[restore] IndexedDB SCAN HIT:', match.key);
@@ -1940,8 +1874,12 @@ const VideoEditor = () => {
       if (!blobUrl && clipData.storagePath && isSupabaseConfigured() && !clipData.storagePath.startsWith('blob:')) {
         try {
           console.log('[restore] Trying Supabase Storage:', clipData.storagePath);
-          const url = await getProjectMediaUrl(clipData.storagePath);
-          const response = await fetch(url);
+          const url = await withTimeout(getProjectMediaUrl(clipData.storagePath), 5000);
+          if (!url) throw new Error('Supabase URL timed out');
+          const fetchCtrl = new AbortController();
+          const fetchTimer = setTimeout(() => fetchCtrl.abort(), 15000);
+          const response = await fetch(url, { signal: fetchCtrl.signal });
+          clearTimeout(fetchTimer);
           if (response.ok) {
             const blob = await response.blob();
             file = new File([blob], clipData.name || 'media', { type: blob.type });
@@ -1990,7 +1928,7 @@ const VideoEditor = () => {
 
         // Dump IndexedDB for debugging
         try {
-          const allMedia = await listAllMedia();
+          const allMedia = await withTimeout(listAllMedia(), 3000, []);
           console.log('[restore] IndexedDB entries:', allMedia);
         } catch (e) {
           console.warn('[restore] Could not list IndexedDB:', e);
@@ -2021,7 +1959,7 @@ const VideoEditor = () => {
           if (cancelled) return;
           if (!mi.id || mediaMap.has(mi.id)) continue;
           setLoadSub(`Restoring media ${++mediaCount} of ${savedMediaItems.length + savedClips.length}`);
-          const resolved = await resolveMedia(mi);
+          const resolved = await withTimeout(resolveMedia(mi), 20000, { file: null, blobUrl: null });
           if (resolved.blobUrl) {
             mediaMap.set(mi.id, { blobUrl: resolved.blobUrl, file: resolved.file, meta: mi });
           }
@@ -2041,7 +1979,7 @@ const VideoEditor = () => {
             blobUrl = cached.blobUrl;
             file = cached.file;
           } else {
-            const resolved = await resolveMedia(clipData);
+            const resolved = await withTimeout(resolveMedia(clipData), 20000, { file: null, blobUrl: null });
             file = resolved.file;
             blobUrl = resolved.blobUrl;
             if (blobUrl && clipData.mediaId) {
@@ -2199,15 +2137,15 @@ const VideoEditor = () => {
 
       {/* ARIA live region for status announcements */}
       <div role="status" aria-live="polite" aria-atomic="true" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clip: 'rect(0,0,0,0)' }}>
-        {isExporting ? `Exporting video... ${ffmpeg.progress}%` : loadMsg || ''}
+        {isExporting ? `Exporting video... ${exportProgress}%` : loadMsg || ''}
       </div>
 
       <TopBar
         projectName={projectName} onProjectNameChange={setProjectName}
-        onExport={handleExport} isExporting={isExporting} exportProgress={ffmpeg.progress} currentOperation={ffmpeg.currentOperation}
-        hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={ffmpeg.resolutions} exportPresets={ffmpeg.exportPresets}
+        onExport={handleExport} isExporting={isExporting} exportProgress={exportProgress} currentOperation={loadMsg}
+        hasMediaToExport={clips.filter(c => c.type !== "audio" && c.file).length > 0} resolutions={RESOLUTIONS} exportPresets={EXPORT_PRESETS} exportSubMessage={loadSub}
         lastSaved={lastSaved} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
-        onCancelExport={ffmpeg.cancelOperation}
+        onCancelExport={cancelExport}
         onNewProject={handleNewProject} onSave={handleSave} onSettings={handleSettings}
         editorLayout={editorLayout} onLayoutChange={setEditorLayout}
         forceOpenExport={forceExport > 0} onExportModalClosed={() => setForceExport(0)}
@@ -2297,6 +2235,7 @@ const VideoEditor = () => {
               <Player
                 isPlaying={pb.isPlaying} onPlayPause={pb.togglePlay}
                 videoSrc={previewSrc} currentTime={pb.clipOffset}
+                duration={totalDuration}
                 onTimeUpdate={onTimeUpdate} onSeek={onSeek} onEnded={onEnded}
                 onVideoError={handleVideoFormatError}
                 clipProperties={pb.currentClip || selectedClip}

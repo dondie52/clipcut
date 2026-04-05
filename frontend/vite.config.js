@@ -17,7 +17,7 @@ const securityHeaders = {
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co http://185.215.166.46:*; media-src 'self' blob: https://*.supabase.co http://185.215.166.46:*; connect-src 'self' blob: https://cdn.jsdelivr.net https://*.supabase.co wss://*.supabase.co https://www.google-analytics.com https://*.sentry.io https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com https://*.workers.dev http://localhost:* http://185.215.166.46:* https://tfhub.dev https://storage.googleapis.com; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://www.googletagmanager.com https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.supabase.co http://185.215.166.46:*; media-src 'self' blob: https://*.supabase.co http://185.215.166.46:*; connect-src 'self' blob: https://*.supabase.co wss://*.supabase.co https://www.google-analytics.com https://*.sentry.io https://unpkg.com https://generativelanguage.googleapis.com https://api.cloudflare.com https://*.workers.dev http://localhost:* http://185.215.166.46:* https://tfhub.dev https://storage.googleapis.com; worker-src 'self' blob:; child-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
 }
 
 /**
@@ -108,21 +108,6 @@ export default defineConfig({
               expiration: {
                 maxEntries: 30,
                 maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
-              },
-            },
-          },
-          {
-            // Cache FFmpeg WASM files (large, cache for longer)
-            urlPattern: /^https:\/\/(unpkg\.com|cdn\.jsdelivr\.net)\/@ffmpeg\/core.*\.(js|wasm)$/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'ffmpeg-wasm',
-              expiration: {
-                maxEntries: 5,
-                maxAgeSeconds: 60 * 60 * 24 * 90, // 90 days
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
               },
             },
           },

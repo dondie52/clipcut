@@ -730,9 +730,18 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadProjects();
-    const handleFocus = () => loadProjects();
+    // Debounce focus-triggered reloads: ignore if last load was < 30s ago
+    let lastLoadTime = Date.now();
+    const handleFocus = () => {
+      if (Date.now() - lastLoadTime < 30000) return;
+      lastLoadTime = Date.now();
+      loadProjects();
+    };
     window.addEventListener("focus", handleFocus);
-    const handleStorageChange = () => loadProjects();
+    const handleStorageChange = () => {
+      lastLoadTime = Date.now();
+      loadProjects();
+    };
     window.addEventListener("storage", handleStorageChange);
     return () => {
       window.removeEventListener("focus", handleFocus);

@@ -26,9 +26,6 @@ const OnboardingStep3 = lazy(() => import('./components/OnboardingStep3.jsx'))
 const Dashboard = lazy(() => import('./components/Dashboard.jsx'))
 const VideoEditor = lazy(() => import('./components/VideoEditor/VideoEditor.jsx'))
 const LongToShorts = lazy(() => import('./components/LongToShorts/LongToShorts.jsx'))
-const FeedbackForm = lazy(() => import('./components/FeedbackForm.jsx'))
-const BugReport = lazy(() => import('./components/BugReport.jsx'))
-
 const RouteLoadingFallback = () => (
   <div style={{
     display: 'flex',
@@ -125,74 +122,6 @@ const SessionTimeoutBanner = () => {
       </div>
     </div>
   )
-}
-
-const HelpFab = () => {
-  const [open, setOpen] = useState(false)
-  const [showFeedback, setShowFeedback] = useState(false)
-  const [showBugReport, setShowBugReport] = useState(false)
-
-  return (
-    <>
-      {/* FAB menu */}
-      {open && (
-        <div style={{
-          position: 'fixed', bottom: '80px', right: '20px', zIndex: 9998,
-          display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'flex-end',
-        }}>
-          <button onClick={() => { setShowFeedback(true); setOpen(false); }} style={fabItemStyle}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>rate_review</span>
-            Send Feedback
-          </button>
-          <button onClick={() => { setShowBugReport(true); setOpen(false); }} style={fabItemStyle}>
-            <span className="material-symbols-outlined" style={{ fontSize: '18px' }}>bug_report</span>
-            Report Bug
-          </button>
-        </div>
-      )}
-
-      {/* FAB button */}
-      <button
-        onClick={() => setOpen(!open)}
-        aria-label="Help and feedback"
-        style={{
-          position: 'fixed', bottom: '20px', right: '20px', zIndex: 9998,
-          width: '48px', height: '48px', borderRadius: '50%',
-          background: '#75AADB', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 4px 16px rgba(117,170,219,0.3)',
-          transition: 'transform 0.2s ease',
-          transform: open ? 'rotate(45deg)' : 'none',
-        }}
-      >
-        <span className="material-symbols-outlined" style={{ fontSize: '24px', color: '#0a0a0a' }}>
-          {open ? 'close' : 'help'}
-        </span>
-      </button>
-
-      {/* Modals */}
-      {showFeedback && (
-        <Suspense fallback={null}>
-          <FeedbackForm onClose={() => setShowFeedback(false)} />
-        </Suspense>
-      )}
-      {showBugReport && (
-        <Suspense fallback={null}>
-          <BugReport onClose={() => setShowBugReport(false)} />
-        </Suspense>
-      )}
-    </>
-  )
-}
-
-const fabItemStyle = {
-  display: 'flex', alignItems: 'center', gap: '8px',
-  padding: '10px 16px', borderRadius: '8px',
-  background: '#1a2332', border: '1px solid rgba(255,255,255,0.1)',
-  color: 'white', fontSize: '13px', fontWeight: 600,
-  cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-  boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
-  whiteSpace: 'nowrap',
 }
 
 const AppContent = () => {
@@ -368,7 +297,6 @@ const AppContent = () => {
           />
         </Routes>
       </Suspense>
-      <HelpFab />
     </>
   )
 }
