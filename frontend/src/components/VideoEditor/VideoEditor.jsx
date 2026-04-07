@@ -1812,7 +1812,7 @@ const VideoEditor = () => {
       Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(fallback), ms))]);
 
     /** Try loading media from IndexedDB, then Supabase, returning { file, blobUrl } or nulls. */
-    const resolveMedia = async (clipData) => {
+    const resolveMedia = async (clipData, cachedIdbEntries = []) => {
       let file = null, blobUrl = null;
 
       console.log('[restore] resolveMedia called for:', {
@@ -1825,7 +1825,7 @@ const VideoEditor = () => {
       if (parsed) {
         try {
           console.log('[restore] Trying IndexedDB:', parsed.idbProjectId, parsed.idbMediaId);
-          const stored = await withTimeout(loadMedia(parsed.idbProjectId, parsed.idbMediaId), 5000);
+          const stored = await withTimeout(loadMedia(parsed.idbProjectId, parsed.idbMediaId), 2000);
           if (stored) {
             file = stored.file; blobUrl = stored.blobUrl;
             console.log('[restore] IndexedDB HIT:', clipData.name, 'size:', stored.file?.size);
@@ -1843,7 +1843,7 @@ const VideoEditor = () => {
       if (!blobUrl && clipData.mediaId) {
         try {
           console.log('[restore] Trying fallback IndexedDB with projectId:', projectId, 'mediaId:', clipData.mediaId);
-          const stored = await withTimeout(loadMedia(projectId, clipData.mediaId), 5000);
+          const stored = await withTimeout(loadMedia(projectId, clipData.mediaId), 2000);
           if (stored) {
             file = stored.file; blobUrl = stored.blobUrl;
             console.log('[restore] Fallback IndexedDB HIT:', clipData.name);
@@ -1855,14 +1855,13 @@ const VideoEditor = () => {
         }
       }
 
-      // 2b. Broad scan: search all IndexedDB entries for matching mediaId
+      // 2b. Broad scan: use pre-cached IndexedDB entries instead of fetching again
       if (!blobUrl && clipData.mediaId) {
         try {
-          const allEntries = await withTimeout(listAllMedia(), 5000, []);
-          const match = allEntries.find(e => e.mediaId === clipData.mediaId);
+          const match = cachedIdbEntries.find(e => e.mediaId === clipData.mediaId);
           if (match) {
             console.log('[restore] IndexedDB SCAN HIT:', match.key);
-            const stored = await loadMedia(match.projectId, match.mediaId);
+            const stored = await withTimeout(loadMedia(match.projectId, match.mediaId), 2000);
             if (stored) { file = stored.file; blobUrl = stored.blobUrl; }
           }
         } catch (e) {
@@ -1877,7 +1876,7 @@ const VideoEditor = () => {
           const url = await withTimeout(getProjectMediaUrl(clipData.storagePath), 5000);
           if (!url) throw new Error('Supabase URL timed out');
           const fetchCtrl = new AbortController();
-          const fetchTimer = setTimeout(() => fetchCtrl.abort(), 15000);
+          const fetchTimer = setTimeout(() => fetchCtrl.abort(), 8000);
           const response = await fetch(url, { signal: fetchCtrl.signal });
           clearTimeout(fetchTimer);
           if (response.ok) {
@@ -1950,27 +1949,46 @@ const VideoEditor = () => {
 
         setLoadMsg("Restoring media...");
 
-        // 1. Resolve media files: first restore saved mediaItems, then fill from clips
-        const mediaMap = new Map(); // mediaId → { blobUrl, file }
+        // Pre-cache all IndexedDB entries once (avoids repeated full scans)
+        const cachedIdbEntries = await withTimeout(listAllMedia(), 3000, []);
 
-        // Resolve saved media panel items first (includes files not yet on timeline)
-        let mediaCount = 0;
+        // 1. Collect all unique media that needs resolution
+        const mediaMap = new Map(); // mediaId → { blobUrl, file, meta }
+        const uniqueMedia = new Map(); // mediaId → clipData (deduplicated)
+
         for (const mi of savedMediaItems) {
-          if (cancelled) return;
-          if (!mi.id || mediaMap.has(mi.id)) continue;
-          setLoadSub(`Restoring media ${++mediaCount} of ${savedMediaItems.length + savedClips.length}`);
-          const resolved = await withTimeout(resolveMedia(mi), 20000, { file: null, blobUrl: null });
-          if (resolved.blobUrl) {
-            mediaMap.set(mi.id, { blobUrl: resolved.blobUrl, file: resolved.file, meta: mi });
+          if (mi.id && !uniqueMedia.has(mi.id)) {
+            uniqueMedia.set(mi.id, mi);
+          }
+        }
+        for (const clipData of savedClips) {
+          if (clipData.type !== 'text' && clipData.mediaId && !uniqueMedia.has(clipData.mediaId)) {
+            uniqueMedia.set(clipData.mediaId, clipData);
           }
         }
 
-        // 2. Restore clips, resolving any media not already in mediaMap
+        // 2. Resolve all unique media in parallel
+        setLoadSub(`Resolving ${uniqueMedia.size} media files...`);
+        const resolveResults = await Promise.all(
+          [...uniqueMedia.entries()].map(async ([mediaId, item]) => {
+            if (cancelled) return null;
+            const resolved = await withTimeout(resolveMedia(item, cachedIdbEntries), 8000, { file: null, blobUrl: null });
+            return { mediaId, resolved, meta: item };
+          })
+        );
+
+        // Build mediaMap from parallel results
+        for (const result of resolveResults) {
+          if (!result || cancelled) continue;
+          const { mediaId, resolved, meta } = result;
+          if (resolved.blobUrl) {
+            mediaMap.set(mediaId, { blobUrl: resolved.blobUrl, file: resolved.file, meta });
+          }
+        }
+
+        // 3. Assemble restored clips using the resolved mediaMap
         const restoredClips = [];
         for (const clipData of savedClips) {
-          if (cancelled) return;
-          setLoadSub(`Restoring clip ${++mediaCount} of ${savedMediaItems.length + savedClips.length}`);
-
           let blobUrl = null;
           let file = null;
 
@@ -1978,13 +1996,6 @@ const VideoEditor = () => {
             const cached = mediaMap.get(clipData.mediaId);
             blobUrl = cached.blobUrl;
             file = cached.file;
-          } else {
-            const resolved = await withTimeout(resolveMedia(clipData), 20000, { file: null, blobUrl: null });
-            file = resolved.file;
-            blobUrl = resolved.blobUrl;
-            if (blobUrl && clipData.mediaId) {
-              mediaMap.set(clipData.mediaId, { blobUrl, file, meta: clipData });
-            }
           }
 
           const mediaUnavailable = !blobUrl && clipData.type !== 'text';
