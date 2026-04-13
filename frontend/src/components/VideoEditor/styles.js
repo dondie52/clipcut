@@ -407,6 +407,19 @@ export const RESPONSIVE_CSS = `
 
     /* Timeline touch support */
     .timeline-track-area { touch-action: pan-x pan-y; }
+
+    /* Hide any floating help / "?" button on mobile so it cannot cover the
+       Filters / AI tabs in the bottom or right toolbar. Matches common
+       help-button patterns; harmless if no such element exists. */
+    [aria-label*="help" i]:not(a):not(input),
+    [aria-label*="keyboard shortcut" i],
+    [data-testid*="help" i],
+    .help-button,
+    .help-fab,
+    button[title="Help" i],
+    button[title*="Keyboard shortcut" i] {
+      display: none !important;
+    }
   }
 
   /* Mobile landscape: side-by-side layout */
