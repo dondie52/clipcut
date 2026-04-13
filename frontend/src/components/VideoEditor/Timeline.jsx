@@ -335,8 +335,9 @@ const TimelineClip = memo(({
   const left = clip.startTime * pixelsPerSecond;
   const isAudio = clip.type === "audio";
   const isText = clip.type === "text";
-  const accent = isText ? "#f59e0b" : isAudio ? "#34d399" : "#75aadb";
-  const accentRgba = isText ? "245,158,11" : isAudio ? "52,211,153" : "117,170,219";
+  const isSticker = clip.type === "sticker";
+  const accent = isSticker ? "#c084fc" : isText ? "#f59e0b" : isAudio ? "#34d399" : "#75aadb";
+  const accentRgba = isSticker ? "192,132,252" : isText ? "245,158,11" : isAudio ? "52,211,153" : "117,170,219";
 
   return (
     <div
@@ -352,7 +353,7 @@ const TimelineClip = memo(({
       aria-selected={isSelected}
       style={{
         position: "absolute", left: `${left}px`, width: `${width}px`,
-        height: isAudio ? "52px" : isText ? "52px" : "60px", top: "4px",
+        height: isAudio ? "52px" : (isText || isSticker) ? "52px" : "60px", top: "4px",
         background: isSelected
           ? `linear-gradient(180deg, rgba(${accentRgba},0.3) 0%, rgba(${accentRgba},0.15) 100%)`
           : `linear-gradient(180deg, rgba(${accentRgba},0.1) 0%, rgba(${accentRgba},0.04) 100%)`,
@@ -363,7 +364,7 @@ const TimelineClip = memo(({
         touchAction: "none",
       }}
     >
-      {/* Filmstrip, waveform, or text pattern background */}
+      {/* Filmstrip, waveform, sticker emoji, or text pattern background */}
       {isAudio ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 4px" }}>
           <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} audioFile={clip.file} />
@@ -375,6 +376,14 @@ const TimelineClip = memo(({
             ? `repeating-linear-gradient(90deg, rgba(${accentRgba},0.08) 0px, rgba(${accentRgba},0.08) 4px, transparent 4px, transparent 8px)`
             : `repeating-linear-gradient(90deg, rgba(${accentRgba},0.04) 0px, rgba(${accentRgba},0.04) 4px, transparent 4px, transparent 8px)`,
         }} />
+      ) : isSticker ? (
+        <div style={{
+          position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "24px", opacity: isSelected ? 0.85 : 0.55, pointerEvents: "none",
+          filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.4))",
+        }}>
+          {clip.text || "🙂"}
+        </div>
       ) : (
         <FilmstripThumbnails width={width} height={60} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
       )}
@@ -408,7 +417,7 @@ const TimelineClip = memo(({
           display: "flex", alignItems: "center", justifyContent: "center",
           border: `1px solid rgba(${accentRgba},${isSelected ? "0.4" : "0.15"})`,
         }}>
-          <Icon i={isText ? "text_fields" : isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
+          <Icon i={isSticker ? "emoji_emotions" : isText ? "text_fields" : isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
         </div>
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", gap: "1px" }}>
           <span style={{

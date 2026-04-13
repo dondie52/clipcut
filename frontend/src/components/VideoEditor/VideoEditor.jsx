@@ -996,12 +996,12 @@ const VideoEditor = () => {
     return first?.blobUrl || null;
   }, [pb.currentClip, selectedMediaId, mediaItems, clips]);
 
-  // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption)
+  // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption; stickers use type "sticker" with the emoji in clip.text)
   const textOverlays = useMemo(() => {
     const allCaptions = clips.filter(c => c.isCaption);
     const allText = clips.filter(c => c.type === 'text' && !c.isCaption);
     const result = clips.filter(c =>
-      (c.type === 'text' || c.isCaption) &&
+      (c.type === 'text' || c.type === 'sticker' || c.isCaption) &&
       c.type !== 'audio' &&
       pb.currentTime >= c.startTime &&
       pb.currentTime < c.startTime + c.duration
@@ -1571,7 +1571,7 @@ const VideoEditor = () => {
 
     try {
       const result = await canvasExport({
-        clips: [...vClips, ...clips.filter(c => c.type === 'text')],
+        clips: [...vClips, ...clips.filter(c => c.type === 'text' || c.type === 'sticker')],
         bgMusic,
         totalDuration: Math.max(...vClips.map(c => c.startTime + c.duration)),
         resolution: exportResolution,
@@ -2018,7 +2018,7 @@ const VideoEditor = () => {
         }
 
         // Filter out non-text clips that failed to download (no blobUrl)
-        const playableClips = restoredClips.filter(c => c.type === 'text' || c.blobUrl);
+        const playableClips = restoredClips.filter(c => c.type === 'text' || c.type === 'sticker' || c.blobUrl);
         const skippedCount = restoredClips.length - playableClips.length;
 
         setMediaItems(newMediaItems);
