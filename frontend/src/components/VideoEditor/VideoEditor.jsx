@@ -2465,18 +2465,20 @@ const VideoEditor = () => {
           </BottomSheet>
           <nav className="mobile-tab-bar" aria-label="Editor tools">
             {[
-              { id: 'media', icon: 'perm_media', label: 'Media' },
-              { id: 'text', icon: 'title', label: 'Text' },
-              { id: 'captions', icon: 'closed_caption', label: 'Captions' },
-              { id: 'audio', icon: 'music_note', label: 'Audio' },
-              { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers' },
-              { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
-              { id: 'filters', icon: 'filter_vintage', label: 'Filters' },
-              { id: 'ai', icon: 'auto_awesome', label: 'AI' },
+              { id: 'media', icon: 'perm_media', label: 'Media', tip: 'Import and browse media' },
+              { id: 'text', icon: 'title', label: 'Text', tip: 'Add manual text overlays' },
+              { id: 'captions', icon: 'closed_caption', label: 'Captions', tip: 'Auto-generate subtitles from speech' },
+              { id: 'audio', icon: 'music_note', label: 'Audio', tip: 'Background music and clip audio' },
+              { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers', tip: 'Drop emoji stickers on the preview' },
+              { id: 'effects', icon: 'auto_fix_high', label: 'Effects', tip: 'Apply video effects' },
+              { id: 'filters', icon: 'filter_vintage', label: 'Filters', tip: 'Apply colour filters' },
+              { id: 'ai', icon: 'auto_awesome', label: 'AI', tip: 'AI editing assistant' },
             ].map(tab => (
               <button
                 key={tab.id}
                 className={mobileActiveTab === tab.id && mobileDrawerOpen ? 'active' : ''}
+                title={tab.tip}
+                aria-label={tab.tip}
                 onClick={() => {
                   if (mobileActiveTab === tab.id) {
                     setMobileDrawerOpen(v => !v);

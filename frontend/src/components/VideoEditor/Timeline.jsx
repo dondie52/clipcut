@@ -341,7 +341,11 @@ const TimelineClip = memo(({
   return (
     <div
       data-clip-id={clip.id}
-      onMouseDown={(e) => { e.stopPropagation(); onPointerDown(e, clip); }}
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation();
+        onPointerDown(e, clip);
+      }}
       className={`timeline-clip ${isSelected ? "tl-selected" : ""}`}
       role="button" tabIndex={0}
       aria-label={`${clip.name}, ${formatDuration(clip.duration)}`}
@@ -356,6 +360,7 @@ const TimelineClip = memo(({
         border: isSelected ? `2px solid ${accent}` : `1px solid rgba(${accentRgba},0.25)`,
         overflow: "hidden", outline: "none",
         cursor: cutMode ? "crosshair" : "grab",
+        touchAction: "none",
       }}
     >
       {/* Filmstrip, waveform, or text pattern background */}
@@ -435,7 +440,12 @@ const TimelineClip = memo(({
         background: `linear-gradient(90deg, rgba(${accentRgba},0.8) 0%, transparent 100%)`,
         borderRadius: "5px 0 0 5px", pointerEvents: "auto",
         display: "flex", alignItems: "center", justifyContent: "center",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'left', e); }}>
+        touchAction: "none",
+      }} onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation(); e.preventDefault();
+        onResizeStart(clip.id, 'left', e);
+      }}>
         <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
       </div>
       <div className="clip-resize-handle" style={{
@@ -443,7 +453,12 @@ const TimelineClip = memo(({
         background: `linear-gradient(90deg, transparent 0%, rgba(${accentRgba},0.8) 100%)`,
         borderRadius: "0 5px 5px 0", pointerEvents: "auto",
         display: "flex", alignItems: "center", justifyContent: "center",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'right', e); }}>
+        touchAction: "none",
+      }} onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation(); e.preventDefault();
+        onResizeStart(clip.id, 'right', e);
+      }}>
         <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
       </div>
     </div>
@@ -692,6 +707,12 @@ const Timeline = ({
     // Select immediately
     onSelectClip?.(clip.id);
 
+    // Capture the pointer on the clip element so drag keeps working
+    // even if the finger / cursor leaves the clip's bounds.
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget?.setPointerCapture?.(pointerId); } catch { /* noop */ }
+
     // Prepare for potential drag
     const startX = e.clientX;
     let didDrag = false;
@@ -742,8 +763,10 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (didDrag) {
         if (clipEl) clipEl.classList.remove('tl-dragging');
@@ -758,8 +781,9 @@ const Timeline = ({
       ir.dragClipId = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }, [onSelectClip, onSplitClip, onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────
@@ -770,6 +794,11 @@ const Timeline = ({
     if (!clip) return;
     const trackType = clip.type === 'audio' ? 'audio' : 'video';
     if (trackLocksRef.current[trackType]) return;
+
+    // Capture the pointer on the handle so drag continues off-element.
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget?.setPointerCapture?.(pointerId); } catch { /* noop */ }
 
     const startX = e.clientX;
     const origStart = clip.startTime;
@@ -860,8 +889,10 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (clipEl) clipEl.classList.remove('tl-resizing');
       document.body.style.cursor = '';
@@ -880,8 +911,9 @@ const Timeline = ({
       ir.resizeClipId = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
   }, [onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────
