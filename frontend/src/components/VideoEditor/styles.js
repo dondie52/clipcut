@@ -422,26 +422,31 @@ export const RESPONSIVE_CSS = `
     }
   }
 
-  /* Mobile landscape: side-by-side layout */
+  /* Mobile landscape: side-by-side layout. Tab bar lives as a vertical
+     44px right-edge sidebar. With 8 tools we need every button to fit
+     without scrolling so Filters / AI never slide off-screen. Using
+     top: 44px to clear the top bar (instead of padding-top) + 36px
+     min-height per button + icon-only labels = 332px total, fits on
+     all common landscape viewports down to 360px tall. */
   @media (max-width: 768px) and (orientation: landscape) {
     .mobile-tab-bar {
-      position: fixed; right: 0; top: 0; bottom: 0;
+      position: fixed; right: 0; top: 44px; bottom: 0;
       left: auto;
       width: 44px; height: auto;
       flex-direction: column;
       justify-content: flex-start;
-      padding-top: 44px; /* below top bar */
+      padding-top: 0;
       padding-bottom: env(safe-area-inset-bottom, 0);
       border-top: none;
       border-left: 1px solid rgba(117,170,219,0.1);
       overflow-y: auto; overflow-x: hidden;
     }
     .mobile-tab-bar button {
-      min-width: 44px; min-height: 44px;
+      min-width: 44px; min-height: 36px;
       padding: 4px 2px;
     }
     .mobile-tab-bar button span:last-child {
-      font-size: 7px;
+      display: none; /* icon-only in landscape; aria-label keeps a11y */
     }
   }
 
