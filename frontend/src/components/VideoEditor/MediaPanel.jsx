@@ -266,25 +266,32 @@ const MediaItem = memo(({
             src={item.thumbnail}
             alt={item.name}
             loading="lazy"
+            draggable={false}
             style={{
+              position: 'absolute',
+              inset: 0,
               width: '100%',
               height: '100%',
+              maxWidth: '100%',
               objectFit: 'cover',
-              display: 'block'
+              display: 'block',
+              pointerEvents: 'none'
             }}
           />
         ) : item.isProcessing ? (
           <div 
             className="thumbnail-loading"
             style={{
+              position: 'absolute',
+              inset: 0,
               width: '100%',
               height: '100%'
             }}
           />
         ) : (
           <div style={{
-            width: '100%',
-            height: '100%',
+            position: 'absolute',
+            inset: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -299,6 +306,7 @@ const MediaItem = memo(({
           position: 'absolute',
           top: '4px',
           right: '4px',
+          zIndex: 2,
           background: 'rgba(0,0,0,0.8)',
           fontSize: '9px',
           padding: '2px 6px',
@@ -317,6 +325,7 @@ const MediaItem = memo(({
           style={{
             position: 'absolute',
             inset: 0,
+            zIndex: 1,
             background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%)',
             display: 'flex',
             alignItems: 'flex-end',
