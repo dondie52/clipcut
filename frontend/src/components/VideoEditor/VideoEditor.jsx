@@ -2127,12 +2127,26 @@ const VideoEditor = () => {
         return;
       }
 
-      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+      // Don't intercept keys while the user is typing in a text field
+      const ae = document.activeElement;
+      const inEditable = e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"
+        || ae?.tagName === "INPUT" || ae?.tagName === "TEXTAREA" || ae?.isContentEditable;
+      if (inEditable) return;
 
       // / key — focus AI input when panel is open
       if (e.key === '/' && aiPanelOpen) {
         e.preventDefault();
         document.querySelector('.ai-input-box')?.focus();
+        return;
+      }
+
+      // Delete / Backspace — remove selected clip (works for all clip types
+      // on any track, regardless of where focus currently sits — Timeline's
+      // own handler is scoped to timeline-focused elements and misses cases
+      // where the user clicked the preview or toolbar after selecting).
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedClipId) {
+        e.preventDefault();
+        deleteClip(selectedClipId);
         return;
       }
 
@@ -2143,7 +2157,7 @@ const VideoEditor = () => {
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [handleExport, undo, redo, clips.length, pb, aiPanelOpen, toggleAiPanel]);
+  }, [handleExport, undo, redo, clips.length, pb, aiPanelOpen, toggleAiPanel, selectedClipId, deleteClip]);
 
   // ---- Keep refs current for cleanup ----
   const mediaItemsRef = useRef(mediaItems);

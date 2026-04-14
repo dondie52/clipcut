@@ -329,8 +329,19 @@ const formatStartTime = (t) => {
 const TimelineClip = memo(({
   clip, isSelected, pixelsPerSecond,
   onPointerDown, onResizeStart,
+  onRequestMenu,
   cutMode = false,
 }) => {
+  // Long-press detection for touch devices: hold finger on a clip for 500ms
+  // to open a context menu. Cancelled if the user moves their finger
+  // (i.e. they're actually scrubbing or dragging the clip).
+  const longPressRef = useRef({ timer: null, startX: 0, startY: 0, fired: false });
+  const clearLongPress = useCallback(() => {
+    if (longPressRef.current.timer) {
+      clearTimeout(longPressRef.current.timer);
+      longPressRef.current.timer = null;
+    }
+  }, []);
   const width = Math.max(clip.duration * pixelsPerSecond, 40);
   const left = clip.startTime * pixelsPerSecond;
   const isAudio = clip.type === "audio";
@@ -347,6 +358,35 @@ const TimelineClip = memo(({
         e.stopPropagation();
         onPointerDown(e, clip);
       }}
+      onContextMenu={(e) => {
+        // Desktop right-click → open context menu at cursor
+        e.preventDefault();
+        e.stopPropagation();
+        onRequestMenu?.(clip, e.clientX, e.clientY);
+      }}
+      onTouchStart={(e) => {
+        // Start 500ms timer; if the user holds still long enough, fire menu
+        const t = e.touches[0];
+        if (!t) return;
+        longPressRef.current.startX = t.clientX;
+        longPressRef.current.startY = t.clientY;
+        longPressRef.current.fired = false;
+        clearLongPress();
+        longPressRef.current.timer = setTimeout(() => {
+          longPressRef.current.fired = true;
+          onRequestMenu?.(clip, longPressRef.current.startX, longPressRef.current.startY);
+        }, 500);
+      }}
+      onTouchMove={(e) => {
+        const t = e.touches[0];
+        if (!t) return;
+        const dx = t.clientX - longPressRef.current.startX;
+        const dy = t.clientY - longPressRef.current.startY;
+        // Moved more than 10px → user is dragging/scrubbing, not long-pressing
+        if (Math.hypot(dx, dy) > 10) clearLongPress();
+      }}
+      onTouchEnd={clearLongPress}
+      onTouchCancel={clearLongPress}
       className={`timeline-clip ${isSelected ? "tl-selected" : ""}`}
       role="button" tabIndex={0}
       aria-label={`${clip.name}, ${formatDuration(clip.duration)}`}
@@ -579,6 +619,13 @@ const Timeline = ({
   const [dragOverTrack, setDragOverTrack] = useState(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [activeTool, setActiveTool] = useState("select");
+  // Context menu state — opened by right-click (desktop) or long-press (mobile)
+  const [clipMenu, setClipMenu] = useState(null); // { clipId, x, y } | null
+  const openClipMenu = useCallback((clip, x, y) => {
+    onSelectClip?.(clip.id);
+    setClipMenu({ clipId: clip.id, x, y });
+  }, [onSelectClip]);
+  const closeClipMenu = useCallback(() => setClipMenu(null), []);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [showVolumePopover, setShowVolumePopover] = useState(false);
   const [showSpeedPopover, setShowSpeedPopover] = useState(false);
@@ -1159,10 +1206,13 @@ const Timeline = ({
     if (!clip) return;
     const gap = clip.duration;
     const clipEnd = clip.startTime + clip.duration;
-    // Delete the clip, then shift all later clips left to fill the gap
+    const sameTrack = (c) => (c.track ?? 0) === (clip.track ?? 0);
+    // Delete the clip, then shift clips that come AFTER it ON THE SAME TRACK
+    // left to close the gap. Shifting across tracks (e.g. deleting a text
+    // overlay on V2 and pulling V1 video clips left) corrupts the timeline.
     const updated = clips
       .filter(c => c.id !== selectedClipId)
-      .map(c => c.startTime >= clipEnd ? { ...c, startTime: Math.max(0, c.startTime - gap) } : c);
+      .map(c => (sameTrack(c) && c.startTime >= clipEnd) ? { ...c, startTime: Math.max(0, c.startTime - gap) } : c);
     onRippleDelete?.(updated);
   }, [selectedClipId, isProcessing, clips, onRippleDelete]);
 
@@ -1559,6 +1609,7 @@ const Timeline = ({
                   pixelsPerSecond={pxPerSec}
                   onPointerDown={handleClipPointerDown}
                   onResizeStart={handleResizeStart}
+                  onRequestMenu={openClipMenu}
                   cutMode={activeTool === "cut"}
                 />
               ))}
@@ -1582,6 +1633,7 @@ const Timeline = ({
                     pixelsPerSecond={pxPerSec}
                     onPointerDown={handleClipPointerDown}
                     onResizeStart={handleResizeStart}
+                    onRequestMenu={openClipMenu}
                     cutMode={activeTool === "cut"}
                   />
                 ))}
@@ -1611,6 +1663,7 @@ const Timeline = ({
                   pixelsPerSecond={pxPerSec}
                   onPointerDown={handleClipPointerDown}
                   onResizeStart={handleResizeStart}
+                  onRequestMenu={openClipMenu}
                   cutMode={activeTool === "cut"}
                 />
               ))}
@@ -1634,6 +1687,7 @@ const Timeline = ({
                     pixelsPerSecond={pxPerSec}
                     onPointerDown={handleClipPointerDown}
                     onResizeStart={handleResizeStart}
+                    onRequestMenu={openClipMenu}
                     cutMode={activeTool === "cut"}
                   />
                 ))}
@@ -1663,6 +1717,57 @@ const Timeline = ({
             <span style={{ color: "white", fontSize: "13px", fontWeight: 500 }}>Processing...</span>
           </div>
         </div>
+      )}
+
+      {/* Clip context menu — right-click (desktop) / long-press (mobile) */}
+      {clipMenu && (
+        <>
+          {/* Invisible backdrop to catch clicks outside the menu */}
+          <div
+            onClick={closeClipMenu}
+            onContextMenu={(e) => { e.preventDefault(); closeClipMenu(); }}
+            style={{ position: "fixed", inset: 0, zIndex: 9998 }}
+          />
+          <div
+            role="menu"
+            aria-label="Clip actions"
+            style={{
+              position: "fixed",
+              // Clamp inside viewport so the menu never opens off-screen
+              left: Math.min(clipMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 180),
+              top: Math.min(clipMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 80),
+              minWidth: "160px",
+              background: "rgba(26,35,50,0.98)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: "8px",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.5)",
+              padding: "4px",
+              zIndex: 9999,
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                const id = clipMenu.clipId;
+                closeClipMenu();
+                if (id) onDeleteClip?.(id);
+              }}
+              style={{
+                display: "flex", alignItems: "center", gap: "8px",
+                width: "100%", padding: "10px 12px",
+                background: "transparent", border: "none", borderRadius: "6px",
+                color: "#ef4444", fontSize: "13px", fontWeight: 500,
+                cursor: "pointer", textAlign: "left",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(239,68,68,0.1)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <Icon i="delete" s={16} c="#ef4444" />
+              Delete
+            </button>
+          </div>
+        </>
       )}
     </footer>
   );
