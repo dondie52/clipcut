@@ -6,6 +6,30 @@ import { sanitizeTextInput } from '../../utils/validation';
 import { KEYBOARD_SHORTCUTS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
 
+/** Slugify a project/filename for safe use as a download attribute. Falls back to a dated name. */
+function slugifyFilename(raw) {
+  const slug = String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  if (slug) return slug;
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `clipcut-export-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/** Detect iOS (iPhone/iPad/iPod), including iPadOS 13+ which reports as desktop Safari. */
+function isIOSDevice() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPad|iPhone|iPod/.test(ua)) return true;
+  // iPadOS 13+ reports as MacIntel with touch support
+  return navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1;
+}
+
 /* ========== CSS ANIMATIONS ========== */
 const TOP_BAR_CSS = `
   @keyframes fadeIn {
@@ -169,12 +193,14 @@ const ExportModal = memo(({
   const [exportFps, setExportFps] = useState(30);
   const [exportFilename, setExportFilename] = useState('');
 
-  // Sync filename with project name
+  // Sync filename with project name (slugified; dated fallback when empty)
   useEffect(() => {
     if (isOpen && !exportFilename) {
-      setExportFilename(projectName.replace(/[^a-z0-9_\- ]/gi, '_'));
+      setExportFilename(slugifyFilename(projectName));
     }
   }, [isOpen, projectName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isIOS = isIOSDevice();
 
   // Handle escape key to close modal
   useEffect(() => {
@@ -297,11 +323,18 @@ const ExportModal = memo(({
         <Icon i="info" s={14} c="#5a8cbf" />
         <div>
           <span style={{ fontSize: '11px', color: '#75aadb', fontWeight: 500 }}>{summaryLine}</span>
-          {exportFormat === 'webm' && (
-            <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '2px' }}>WebM is supported by all major platforms. Export runs in real-time.</div>
+          {exportFormat === 'webm' && !isIOS && (
+            <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '2px' }}>WebM plays on most devices. For iPhone Photos app compatibility, use MP4.</div>
+          )}
+          {exportFormat === 'webm' && isIOS && (
+            <div style={{ fontSize: '9px', color: '#f59e0b', marginTop: '2px' }}>
+              ⚠️ WebM may not play in iPhone Photos. Open the saved file in VLC or CapCut, or choose MP4 instead.
+            </div>
           )}
           {exportFormat === 'mp4' && (
-            <div style={{ fontSize: '9px', color: '#ef4444', marginTop: '2px' }}>MP4 requires server (unavailable). Will export as WebM.</div>
+            <div style={{ fontSize: '9px', color: '#f59e0b', marginTop: '2px' }}>
+              MP4 export requires a connection to our encoding server. That server isn't available right now — exporting as WebM instead. Plays on most devices; for iPhone Photos use MP4 when the server is back online.
+            </div>
           )}
         </div>
       </div>

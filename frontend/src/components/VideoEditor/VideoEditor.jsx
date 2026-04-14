@@ -422,6 +422,21 @@ function getVideoFileForThumbnail(clips, mediaItems) {
   return null;
 }
 
+/** Slugify a project/filename for safe use as a download attribute. Falls back to a dated name. */
+function slugifyFilename(raw) {
+  const slug = String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  if (slug) return slug;
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `clipcut-export-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Upload local media files to project storage; updates clips with storagePath for reload. */
 async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips, setMediaItems, setClips) {
   const uploaded = new Map();
@@ -1554,7 +1569,9 @@ const VideoEditor = () => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${(filename || projectName).replace(/[^a-z0-9_\- ]/gi, "_")}.${ext}`;
+    // Slugify + fallback: empty `download` attribute makes browsers use the blob
+    // URL's UUID as the filename, which is the exact UUID-filename bug we hit.
+    a.download = `${slugifyFilename(filename || projectName)}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
