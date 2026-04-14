@@ -31,7 +31,7 @@ const FILTER_NAME_MAP = {
  * without requiring a network call. Returns null if the prompt is ambiguous
  * and should be forwarded to the Worker.
  */
-function parseIntentLocally(prompt) {
+export function parseIntentLocally(prompt) {
   const p = prompt.toLowerCase().trim();
 
   // Pattern table: [regex, action builder]

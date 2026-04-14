@@ -104,6 +104,23 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
           ))}
         </div>
       )}
+      {msg.openMedia && (
+        <button
+          onClick={msg.openMedia}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 12px', marginTop: 4,
+            background: 'rgba(117,170,219,0.1)',
+            border: `1px solid ${COLORS.PRIMARY_BLUE}`,
+            borderRadius: 8, cursor: 'pointer',
+            color: COLORS.PRIMARY_BLUE, fontSize: 12,
+            fontFamily: FONTS.PRIMARY, transition: 'all 0.15s ease',
+          }}
+        >
+          <Icon i="perm_media" s={14} c={COLORS.PRIMARY_BLUE} />
+          Open Media
+        </button>
+      )}
       {msg.canUndo && msg.onUndo && (
         <button
           className="ai-undo-btn"

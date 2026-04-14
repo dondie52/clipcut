@@ -1422,6 +1422,26 @@ const VideoEditor = () => {
 
     const userMsg = { id: `u-${now}`, role: 'user', text };
     setAiMessages(prev => [...prev, userMsg]);
+
+    // Guard: block edit commands when no media is on the timeline
+    const hasMediaClips = clips.some(c => c.type === 'video' || c.type === 'audio' || c.type === 'image');
+    if (!hasMediaClips) {
+      const { parseIntentLocally } = await import('../../services/aiEditService');
+      const localActions = parseIntentLocally(text);
+      if (localActions) {
+        // Recognised edit command but nothing to edit — show helpful message with action
+        const openMedia = () => {
+          if (isMobile) { setMobileActiveTab('media'); setMobileDrawerOpen(true); }
+        };
+        setAiMessages(prev => [...prev, {
+          id: `g-${now}`, role: 'assistant',
+          text: 'Please import a video first to use AI editing.',
+          openMedia: isMobile ? openMedia : undefined,
+        }]);
+        return;
+      }
+    }
+
     setAiThinking(true);
 
     try {
