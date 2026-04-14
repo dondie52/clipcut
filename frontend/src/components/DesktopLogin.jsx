@@ -65,7 +65,8 @@ const LOGIN_CSS = `
   /* ——— LEFT: HERO ——— */
   .lg-hero {
     flex: 1; position: relative; display: flex; flex-direction: column;
-    justify-content: flex-end; padding: 56px; overflow: hidden; z-index: 1;
+    align-items: center; justify-content: center; padding: 56px;
+    overflow: hidden; z-index: 1;
   }
 
   .lg-hero-bg { position: absolute; inset: 0; z-index: 0; }
@@ -96,7 +97,7 @@ const LOGIN_CSS = `
   }
 
   .lg-hero-content {
-    position: relative; z-index: 3; max-width: 460px;
+    position: relative; z-index: 3; width: 100%; max-width: 460px;
     opacity: 0; animation: lgFadeUp 0.8s ease 0.2s forwards;
   }
 
