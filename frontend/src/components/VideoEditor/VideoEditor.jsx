@@ -996,12 +996,12 @@ const VideoEditor = () => {
     return first?.blobUrl || null;
   }, [pb.currentClip, selectedMediaId, mediaItems, clips]);
 
-  // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption)
+  // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption; stickers use type "sticker" with the emoji in clip.text)
   const textOverlays = useMemo(() => {
     const allCaptions = clips.filter(c => c.isCaption);
     const allText = clips.filter(c => c.type === 'text' && !c.isCaption);
     const result = clips.filter(c =>
-      (c.type === 'text' || c.isCaption) &&
+      (c.type === 'text' || c.type === 'sticker' || c.isCaption) &&
       c.type !== 'audio' &&
       pb.currentTime >= c.startTime &&
       pb.currentTime < c.startTime + c.duration
@@ -1571,7 +1571,7 @@ const VideoEditor = () => {
 
     try {
       const result = await canvasExport({
-        clips: [...vClips, ...clips.filter(c => c.type === 'text')],
+        clips: [...vClips, ...clips.filter(c => c.type === 'text' || c.type === 'sticker')],
         bgMusic,
         totalDuration: Math.max(...vClips.map(c => c.startTime + c.duration)),
         resolution: exportResolution,
@@ -2018,7 +2018,7 @@ const VideoEditor = () => {
         }
 
         // Filter out non-text clips that failed to download (no blobUrl)
-        const playableClips = restoredClips.filter(c => c.type === 'text' || c.blobUrl);
+        const playableClips = restoredClips.filter(c => c.type === 'text' || c.type === 'sticker' || c.blobUrl);
         const skippedCount = restoredClips.length - playableClips.length;
 
         setMediaItems(newMediaItems);
@@ -2465,18 +2465,20 @@ const VideoEditor = () => {
           </BottomSheet>
           <nav className="mobile-tab-bar" aria-label="Editor tools">
             {[
-              { id: 'media', icon: 'perm_media', label: 'Media' },
-              { id: 'text', icon: 'title', label: 'Text' },
-              { id: 'captions', icon: 'closed_caption', label: 'Captions' },
-              { id: 'audio', icon: 'music_note', label: 'Audio' },
-              { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers' },
-              { id: 'effects', icon: 'auto_fix_high', label: 'Effects' },
-              { id: 'filters', icon: 'filter_vintage', label: 'Filters' },
-              { id: 'ai', icon: 'auto_awesome', label: 'AI' },
+              { id: 'media', icon: 'perm_media', label: 'Media', tip: 'Import and browse media' },
+              { id: 'text', icon: 'title', label: 'Text', tip: 'Add manual text overlays' },
+              { id: 'captions', icon: 'closed_caption', label: 'Captions', tip: 'Auto-generate subtitles from speech' },
+              { id: 'audio', icon: 'music_note', label: 'Audio', tip: 'Background music and clip audio' },
+              { id: 'stickers', icon: 'emoji_emotions', label: 'Stickers', tip: 'Drop emoji stickers on the preview' },
+              { id: 'effects', icon: 'auto_fix_high', label: 'Effects', tip: 'Apply video effects' },
+              { id: 'filters', icon: 'filter_vintage', label: 'Filters', tip: 'Apply colour filters' },
+              { id: 'ai', icon: 'auto_awesome', label: 'AI', tip: 'AI editing assistant' },
             ].map(tab => (
               <button
                 key={tab.id}
                 className={mobileActiveTab === tab.id && mobileDrawerOpen ? 'active' : ''}
+                title={tab.tip}
+                aria-label={tab.tip}
                 onClick={() => {
                   if (mobileActiveTab === tab.id) {
                     setMobileDrawerOpen(v => !v);

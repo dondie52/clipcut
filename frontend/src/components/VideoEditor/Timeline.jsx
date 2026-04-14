@@ -335,20 +335,25 @@ const TimelineClip = memo(({
   const left = clip.startTime * pixelsPerSecond;
   const isAudio = clip.type === "audio";
   const isText = clip.type === "text";
-  const accent = isText ? "#f59e0b" : isAudio ? "#34d399" : "#75aadb";
-  const accentRgba = isText ? "245,158,11" : isAudio ? "52,211,153" : "117,170,219";
+  const isSticker = clip.type === "sticker";
+  const accent = isSticker ? "#c084fc" : isText ? "#f59e0b" : isAudio ? "#34d399" : "#75aadb";
+  const accentRgba = isSticker ? "192,132,252" : isText ? "245,158,11" : isAudio ? "52,211,153" : "117,170,219";
 
   return (
     <div
       data-clip-id={clip.id}
-      onMouseDown={(e) => { e.stopPropagation(); onPointerDown(e, clip); }}
+      onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation();
+        onPointerDown(e, clip);
+      }}
       className={`timeline-clip ${isSelected ? "tl-selected" : ""}`}
       role="button" tabIndex={0}
       aria-label={`${clip.name}, ${formatDuration(clip.duration)}`}
       aria-selected={isSelected}
       style={{
         position: "absolute", left: `${left}px`, width: `${width}px`,
-        height: isAudio ? "52px" : isText ? "52px" : "60px", top: "4px",
+        height: isAudio ? "52px" : (isText || isSticker) ? "52px" : "60px", top: "4px",
         background: isSelected
           ? `linear-gradient(180deg, rgba(${accentRgba},0.3) 0%, rgba(${accentRgba},0.15) 100%)`
           : `linear-gradient(180deg, rgba(${accentRgba},0.1) 0%, rgba(${accentRgba},0.04) 100%)`,
@@ -356,9 +361,10 @@ const TimelineClip = memo(({
         border: isSelected ? `2px solid ${accent}` : `1px solid rgba(${accentRgba},0.25)`,
         overflow: "hidden", outline: "none",
         cursor: cutMode ? "crosshair" : "grab",
+        touchAction: "none",
       }}
     >
-      {/* Filmstrip, waveform, or text pattern background */}
+      {/* Filmstrip, waveform, sticker emoji, or text pattern background */}
       {isAudio ? (
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", padding: "0 4px" }}>
           <WaveformCanvas width={Math.max(width - 8, 20)} height={44} color="#34d399" opacity={isSelected ? 0.5 : 0.3} audioFile={clip.file} />
@@ -370,6 +376,14 @@ const TimelineClip = memo(({
             ? `repeating-linear-gradient(90deg, rgba(${accentRgba},0.08) 0px, rgba(${accentRgba},0.08) 4px, transparent 4px, transparent 8px)`
             : `repeating-linear-gradient(90deg, rgba(${accentRgba},0.04) 0px, rgba(${accentRgba},0.04) 4px, transparent 4px, transparent 8px)`,
         }} />
+      ) : isSticker ? (
+        <div style={{
+          position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: "24px", opacity: isSelected ? 0.85 : 0.55, pointerEvents: "none",
+          filter: "drop-shadow(0 1px 2px rgba(0,0,0,0.4))",
+        }}>
+          {clip.text || "🙂"}
+        </div>
       ) : (
         <FilmstripThumbnails width={width} height={60} thumbnail={clip.thumbnail} opacity={isSelected ? 0.35 : 0.2} />
       )}
@@ -403,7 +417,7 @@ const TimelineClip = memo(({
           display: "flex", alignItems: "center", justifyContent: "center",
           border: `1px solid rgba(${accentRgba},${isSelected ? "0.4" : "0.15"})`,
         }}>
-          <Icon i={isText ? "text_fields" : isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
+          <Icon i={isSticker ? "emoji_emotions" : isText ? "text_fields" : isAudio ? "music_note" : "movie"} s={12} c={isSelected ? "white" : "#cbd5e1"} />
         </div>
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", gap: "1px" }}>
           <span style={{
@@ -435,7 +449,12 @@ const TimelineClip = memo(({
         background: `linear-gradient(90deg, rgba(${accentRgba},0.8) 0%, transparent 100%)`,
         borderRadius: "5px 0 0 5px", pointerEvents: "auto",
         display: "flex", alignItems: "center", justifyContent: "center",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'left', e); }}>
+        touchAction: "none",
+      }} onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation(); e.preventDefault();
+        onResizeStart(clip.id, 'left', e);
+      }}>
         <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
       </div>
       <div className="clip-resize-handle" style={{
@@ -443,7 +462,12 @@ const TimelineClip = memo(({
         background: `linear-gradient(90deg, transparent 0%, rgba(${accentRgba},0.8) 100%)`,
         borderRadius: "0 5px 5px 0", pointerEvents: "auto",
         display: "flex", alignItems: "center", justifyContent: "center",
-      }} onMouseDown={(e) => { e.stopPropagation(); e.preventDefault(); onResizeStart(clip.id, 'right', e); }}>
+        touchAction: "none",
+      }} onPointerDown={(e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.stopPropagation(); e.preventDefault();
+        onResizeStart(clip.id, 'right', e);
+      }}>
         <div style={{ width: "2px", height: "16px", background: `rgba(255,255,255,0.3)`, borderRadius: "1px" }} />
       </div>
     </div>
@@ -692,6 +716,12 @@ const Timeline = ({
     // Select immediately
     onSelectClip?.(clip.id);
 
+    // Capture the pointer on the clip element so drag keeps working
+    // even if the finger / cursor leaves the clip's bounds.
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget?.setPointerCapture?.(pointerId); } catch { /* noop */ }
+
     // Prepare for potential drag
     const startX = e.clientX;
     let didDrag = false;
@@ -742,8 +772,10 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      captureTarget?.removeEventListener('pointermove', onMove);
+      captureTarget?.removeEventListener('pointerup', onUp);
+      captureTarget?.removeEventListener('pointercancel', onUp);
+      try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (didDrag) {
         if (clipEl) clipEl.classList.remove('tl-dragging');
@@ -758,8 +790,9 @@ const Timeline = ({
       ir.dragClipId = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    captureTarget?.addEventListener('pointermove', onMove);
+    captureTarget?.addEventListener('pointerup', onUp);
+    captureTarget?.addEventListener('pointercancel', onUp);
   }, [onSelectClip, onSplitClip, onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────
@@ -770,6 +803,11 @@ const Timeline = ({
     if (!clip) return;
     const trackType = clip.type === 'audio' ? 'audio' : 'video';
     if (trackLocksRef.current[trackType]) return;
+
+    // Capture the pointer on the handle so drag continues off-element.
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget?.setPointerCapture?.(pointerId); } catch { /* noop */ }
 
     const startX = e.clientX;
     const origStart = clip.startTime;
@@ -860,8 +898,10 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+      captureTarget?.removeEventListener('pointermove', onMove);
+      captureTarget?.removeEventListener('pointerup', onUp);
+      captureTarget?.removeEventListener('pointercancel', onUp);
+      try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (clipEl) clipEl.classList.remove('tl-resizing');
       document.body.style.cursor = '';
@@ -880,8 +920,9 @@ const Timeline = ({
       ir.resizeClipId = null;
     };
 
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    captureTarget?.addEventListener('pointermove', onMove);
+    captureTarget?.addEventListener('pointerup', onUp);
+    captureTarget?.addEventListener('pointercancel', onUp);
   }, [onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────

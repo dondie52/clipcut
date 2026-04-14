@@ -286,11 +286,15 @@ const TEXT_POS_MAP = {
 };
 
 /* ========== SINGLE DRAGGABLE TEXT OVERLAY ========== */
-const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, containerRef }) => {
+const SNAP_THRESHOLD = 2; // percent
+const RESIZE_CORNERS = ['nw', 'ne', 'sw', 'se'];
+
+const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, containerRef, onSnapChange }) => {
   const elRef = useRef(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const dragStart = useRef({ x: 0, y: 0, startX: 0, startY: 0 });
+  const activePointerRef = useRef({ id: null, target: null });
 
   const pos = clip.textPosition || 'center';
   const hasCustomPos = clip.textX != null && clip.textY != null;
@@ -311,8 +315,18 @@ const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, conta
         return s;
       })();
 
-  const handleMouseDown = useCallback((e) => {
+  // Cleanup any captured pointer on unmount (handles clip-deleted-mid-drag).
+  useEffect(() => () => {
+    const { id, target } = activePointerRef.current;
+    if (target && id != null) {
+      try { target.releasePointerCapture(id); } catch { /* noop */ }
+    }
+    onSnapChange?.({ v: false, h: false });
+  }, [onSnapChange]);
+
+  const handlePointerDown = useCallback((e) => {
     if (isEditing) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
     onSelect(clip.id);
@@ -328,25 +342,83 @@ const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, conta
 
     dragStart.current = { x: e.clientX, y: e.clientY, startX: centerX, startY: centerY };
 
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget.setPointerCapture(pointerId); } catch { /* noop */ }
+    activePointerRef.current = { id: pointerId, target: captureTarget };
+
     const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       const dx = ((ev.clientX - dragStart.current.x) / rect.width) * 100;
       const dy = ((ev.clientY - dragStart.current.y) / rect.height) * 100;
-      const newX = Math.max(2, Math.min(98, dragStart.current.startX + dx));
-      const newY = Math.max(2, Math.min(98, dragStart.current.startY + dy));
+      let newX = Math.max(2, Math.min(98, dragStart.current.startX + dx));
+      let newY = Math.max(2, Math.min(98, dragStart.current.startY + dy));
+
+      // Centre snap
+      const snapV = Math.abs(newX - 50) < SNAP_THRESHOLD;
+      const snapH = Math.abs(newY - 50) < SNAP_THRESHOLD;
+      if (snapV) newX = 50;
+      if (snapH) newY = 50;
+      onSnapChange?.({ v: snapV, h: snapH });
+
       onUpdate(clip.id, { textX: newX, textY: newY });
     };
-    const onUp = () => {
+    const onUp = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       setIsDragging(false);
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
+      captureTarget.removeEventListener('pointermove', onMove);
+      captureTarget.removeEventListener('pointerup', onUp);
+      captureTarget.removeEventListener('pointercancel', onUp);
+      try { captureTarget.releasePointerCapture(pointerId); } catch { /* noop */ }
+      activePointerRef.current = { id: null, target: null };
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
+      onSnapChange?.({ v: false, h: false });
     };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
+    captureTarget.addEventListener('pointermove', onMove);
+    captureTarget.addEventListener('pointerup', onUp);
+    captureTarget.addEventListener('pointercancel', onUp);
     document.body.style.cursor = 'grabbing';
     document.body.style.userSelect = 'none';
-  }, [clip.id, isEditing, onSelect, onUpdate, containerRef]);
+  }, [clip.id, isEditing, onSelect, onUpdate, containerRef, onSnapChange]);
+
+  // Corner-handle resize: scale textSize proportional to diagonal distance from centre.
+  const handleResizePointerDown = useCallback((e) => {
+    if (isEditing) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+
+    const el = elRef.current;
+    if (!el) return;
+    const elRect = el.getBoundingClientRect();
+    const centreX = elRect.left + elRect.width / 2;
+    const centreY = elRect.top + elRect.height / 2;
+    const startDiag = Math.max(1, Math.hypot(e.clientX - centreX, e.clientY - centreY));
+    const startSize = clip.textSize || 48;
+
+    const captureTarget = e.currentTarget;
+    const pointerId = e.pointerId;
+    try { captureTarget.setPointerCapture(pointerId); } catch { /* noop */ }
+
+    const onMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      const diag = Math.max(1, Math.hypot(ev.clientX - centreX, ev.clientY - centreY));
+      const scale = diag / startDiag;
+      const newSize = Math.max(12, Math.min(200, Math.round(startSize * scale)));
+      onUpdate(clip.id, { textSize: newSize });
+    };
+    const onUp = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      captureTarget.removeEventListener('pointermove', onMove);
+      captureTarget.removeEventListener('pointerup', onUp);
+      captureTarget.removeEventListener('pointercancel', onUp);
+      try { captureTarget.releasePointerCapture(pointerId); } catch { /* noop */ }
+    };
+    captureTarget.addEventListener('pointermove', onMove);
+    captureTarget.addEventListener('pointerup', onUp);
+    captureTarget.addEventListener('pointercancel', onUp);
+  }, [clip.id, clip.textSize, isEditing, onUpdate]);
 
   const handleDoubleClick = useCallback((e) => {
     e.stopPropagation();
@@ -384,12 +456,27 @@ const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, conta
   const fontFamily = `'${clip.textFontFamily || 'Spline Sans'}', sans-serif`;
   const textAlign = clip.textAlign || (TEXT_POS_MAP[pos]?.textAlign) || 'center';
 
+  const cornerStyle = (corner) => {
+    const base = {
+      position: 'absolute', width: '14px', height: '14px',
+      background: '#75aadb', border: '2px solid #fff',
+      borderRadius: '3px', zIndex: 20,
+      touchAction: 'none', pointerEvents: 'auto',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+    };
+    const offset = '-7px';
+    if (corner === 'nw') return { ...base, top: offset, left: offset, cursor: 'nwse-resize' };
+    if (corner === 'ne') return { ...base, top: offset, right: offset, cursor: 'nesw-resize' };
+    if (corner === 'sw') return { ...base, bottom: offset, left: offset, cursor: 'nesw-resize' };
+    return { ...base, bottom: offset, right: offset, cursor: 'nwse-resize' };
+  };
+
   return (
     <div
       ref={elRef}
       contentEditable={isEditing}
       suppressContentEditableWarning
-      onMouseDown={handleMouseDown}
+      onPointerDown={handlePointerDown}
       onDoubleClick={handleDoubleClick}
       onBlur={handleBlur}
       onKeyDown={isEditing ? handleKeyDown : undefined}
@@ -419,9 +506,18 @@ const DraggableTextOverlay = memo(({ clip, isSelected, onSelect, onUpdate, conta
         lineHeight: 1.2,
         userSelect: isEditing ? 'text' : 'none',
         pointerEvents: 'auto',
+        touchAction: isEditing ? 'auto' : 'none',
       }}
     >
       {clip.text || 'Your Text'}
+      {isSelected && !isEditing && RESIZE_CORNERS.map(corner => (
+        <div
+          key={corner}
+          aria-label={`Resize ${corner}`}
+          onPointerDown={handleResizePointerDown}
+          style={cornerStyle(corner)}
+        />
+      ))}
     </div>
   );
 });
@@ -429,6 +525,11 @@ DraggableTextOverlay.displayName = 'DraggableTextOverlay';
 
 /* ========== TEXT OVERLAYS LAYER ========== */
 const TextOverlaysLayer = memo(({ textOverlays, selectedClipId, onSelect, onUpdate, containerRef }) => {
+  const [snap, setSnap] = useState({ v: false, h: false });
+  const handleSnapChange = useCallback((next) => {
+    setSnap(prev => (prev.v === next.v && prev.h === next.h ? prev : next));
+  }, []);
+
   if (!textOverlays || textOverlays.length === 0) return null;
   return (
     <div style={{ position: 'absolute', inset: 0, zIndex: 50, pointerEvents: 'none' }}>
@@ -440,8 +541,22 @@ const TextOverlaysLayer = memo(({ textOverlays, selectedClipId, onSelect, onUpda
           onSelect={onSelect}
           onUpdate={onUpdate}
           containerRef={containerRef}
+          onSnapChange={handleSnapChange}
         />
       ))}
+      {/* Centre snap guides */}
+      <div style={{
+        position: 'absolute', left: '50%', top: 0, bottom: 0, width: '1px',
+        background: 'rgba(117,170,219,0.9)', boxShadow: '0 0 6px rgba(117,170,219,0.7)',
+        transform: 'translateX(-0.5px)', opacity: snap.v ? 1 : 0,
+        transition: 'opacity 0.12s ease-out', pointerEvents: 'none',
+      }} />
+      <div style={{
+        position: 'absolute', top: '50%', left: 0, right: 0, height: '1px',
+        background: 'rgba(117,170,219,0.9)', boxShadow: '0 0 6px rgba(117,170,219,0.7)',
+        transform: 'translateY(-0.5px)', opacity: snap.h ? 1 : 0,
+        transition: 'opacity 0.12s ease-out', pointerEvents: 'none',
+      }} />
     </div>
   );
 });

@@ -247,9 +247,9 @@ export async function canvasExport({
 
   // Separate clips by type
   const videoClips = clips
-    .filter(c => c.type !== 'audio' && c.type !== 'text' && c.file)
+    .filter(c => c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && c.file)
     .sort((a, b) => a.startTime - b.startTime);
-  const textClips = clips.filter(c => c.type === 'text' || c.text?.trim());
+  const textClips = clips.filter(c => c.type === 'text' || c.type === 'sticker' || c.text?.trim());
 
   if (videoClips.length === 0) {
     throw new Error('No video clips to export.');
