@@ -502,9 +502,10 @@ const DASH_CSS = `
     .stats-row { grid-template-columns: 1fr; }
     .quick-actions { grid-template-columns: 1fr; }
     .top-bar { padding: 14px 16px 0; }
-    .top-bar h1 { font-size: 16px; }
+    .top-bar h1 { font-size: 18px; }
     .dash-body { padding: 16px 16px 80px; }
     .projects-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .project-thumb { aspect-ratio: 4/3; }
     .projects-header { flex-direction: column; align-items: stretch; gap: 8px; }
     .proj-search { width: 100%; }
     .empty-state { padding: 32px 16px; }
@@ -512,7 +513,7 @@ const DASH_CSS = `
   }
 
   @media (max-width: 400px) {
-    .projects-grid { grid-template-columns: 1fr; }
+    .projects-grid { grid-template-columns: repeat(2, 1fr); }
     .stats-row { gap: 8px; }
     .top-bar h1 { font-size: 14px; }
   }
