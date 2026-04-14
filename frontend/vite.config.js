@@ -61,6 +61,8 @@ export default defineConfig({
         ]
       },
       workbox: {
+        clientsClaim: true,
+        skipWaiting: false,
         // Cache strategies
         runtimeCaching: [
           {
