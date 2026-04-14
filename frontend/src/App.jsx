@@ -16,6 +16,7 @@ import { initAnalytics, trackPageView, trackEvent, analyticsEvents, initCoreWebV
 import { onNetworkStatusChange } from './utils/errorHandling'
 
 // Lazy load route components for code splitting
+const Landing = lazy(() => import('./components/Landing.jsx'))
 const DesktopLogin = lazy(() => import('./components/DesktopLogin.jsx'))
 const DesktopRegister = lazy(() => import('./components/DesktopRegister.jsx'))
 const ResetPassword = lazy(() => import('./components/ResetPassword.jsx'))
@@ -151,14 +152,15 @@ const AppContent = () => {
   }, [location.pathname, showSplash])
 
   useEffect(() => {
+    // Splash hands off to whatever route is at `/` (Landing for public
+    // visitors, /dashboard redirect for authenticated users via PublicRoute).
+    // No forced navigate('/login') — we want unauthenticated visitors to
+    // land on the marketing page, not bypass straight to the login form.
     const timer = setTimeout(() => {
       setShowSplash(false)
-      if (location.pathname === '/') {
-        navigate('/login')
-      }
     }, SPLASH_DURATION)
     return () => clearTimeout(timer)
-  }, [navigate])
+  }, [])
 
   if (showSplash) {
     return <ClipCutSplash />
@@ -175,7 +177,9 @@ const AppContent = () => {
             path="/"
             element={
               <PublicRoute>
-                <ClipCutSplash />
+                <ErrorBoundary name="landing" message="Landing page failed to load" onReset={() => navigate('/')}>
+                  <Landing />
+                </ErrorBoundary>
               </PublicRoute>
             }
           />
