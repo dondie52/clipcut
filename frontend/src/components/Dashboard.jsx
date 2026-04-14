@@ -87,7 +87,7 @@ const DASH_CSS = `
   }
   .sidebar-user {
     padding: 0 16px 16px; display: flex; align-items: center; gap: 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 12px;
   }
   .sidebar-avatar {
     width: 30px; height: 30px; border-radius: 50%;
@@ -95,9 +95,9 @@ const DASH_CSS = `
     display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     font-size: 12px; font-weight: 700; color: white;
   }
-  .sidebar-nav { flex: 1; padding: 4px 8px; }
+  .sidebar-nav { flex: 1; padding: 8px 8px; }
   .nav-item {
-    display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
     border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
     color: rgba(255,255,255,0.45); transition: all 0.15s ease;
     border: none; background: none; width: 100%; text-align: left;
@@ -109,7 +109,7 @@ const DASH_CSS = `
   .nav-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 6px 14px; }
   .sidebar-footer {
     padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.06);
-    font-size: 10px; color: rgba(255,255,255,0.15);
+    font-size: 10px; color: rgba(255,255,255,0.25);
   }
 
   /* ---- Content wrapper ---- */
@@ -124,11 +124,11 @@ const DASH_CSS = `
     padding: 18px 28px 0; flex-shrink: 0;
   }
   .top-bar h1 {
-    font-size: 18px; font-weight: 700; margin: 0; letter-spacing: -0.3px;
+    font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -0.3px;
     line-height: 1.3;
   }
   .top-bar-sub {
-    font-size: 11px; color: rgba(255,255,255,0.3); margin: 2px 0 0;
+    font-size: 12px; color: rgba(255,255,255,0.45); margin: 2px 0 0;
   }
   .top-bar-actions { display: flex; align-items: center; gap: 6px; }
   .icon-btn {
@@ -177,20 +177,20 @@ const DASH_CSS = `
   .stat-card:hover { border-color: rgba(255,255,255,0.08); }
   .stat-icon {
     width: 34px; height: 34px; border-radius: 8px;
-    background: rgba(117,170,219,0.07); display: flex;
+    background: rgba(117,170,219,0.12); display: flex;
     align-items: center; justify-content: center; flex-shrink: 0;
   }
   .stat-value {
-    font-size: 15px; font-weight: 700; display: block; line-height: 1.2;
+    font-size: 17px; font-weight: 700; display: block; line-height: 1.2;
   }
   .stat-label {
-    font-size: 10px; color: rgba(255,255,255,0.3); display: block;
+    font-size: 10px; color: rgba(255,255,255,0.45); display: block;
     margin-top: 1px; letter-spacing: 0.2px;
   }
 
   /* ---- Section Labels ---- */
   .section-label {
-    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.25);
+    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4);
     text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px;
   }
 
@@ -279,7 +279,7 @@ const DASH_CSS = `
     font-size: 13px; font-weight: 600; margin: 0 0 2px; color: white;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .project-info .meta { font-size: 11px; color: rgba(255,255,255,0.25); margin: 0; }
+  .project-info .meta { font-size: 11px; color: rgba(255,255,255,0.5); margin: 0; }
   .del-btn {
     position: absolute; top: 6px; right: 6px;
     width: 28px; height: 28px; border-radius: 6px;
@@ -316,21 +316,21 @@ const DASH_CSS = `
     text-align: center;
   }
   .empty-icon {
-    width: 52px; height: 52px; border-radius: 14px; margin: 0 auto 16px;
-    background: rgba(117,170,219,0.06); display: flex;
+    width: 60px; height: 60px; border-radius: 14px; margin: 0 auto 16px;
+    background: rgba(117,170,219,0.1); display: flex;
     align-items: center; justify-content: center;
   }
   .empty-state h3 {
-    font-size: 15px; font-weight: 700; margin: 0 0 6px; color: rgba(255,255,255,0.9);
+    font-size: 17px; font-weight: 700; margin: 0 0 6px; color: rgba(255,255,255,0.9);
   }
   .empty-state p {
-    font-size: 12px; color: rgba(255,255,255,0.35); margin: 0 auto 20px;
+    font-size: 12px; color: rgba(255,255,255,0.5); margin: 0 auto 20px;
     line-height: 1.6; max-width: 300px;
   }
   .empty-actions { display: flex; gap: 8px; justify-content: center; }
   .empty-btn {
-    display: inline-flex; align-items: center; gap: 7px; padding: 9px 18px;
-    border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px; padding: 10px 22px;
+    border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
     font-family: inherit; transition: all 0.15s ease; border: none;
   }
   .empty-btn--primary { background: #75AADB; color: #0a0a0a; }
@@ -341,7 +341,7 @@ const DASH_CSS = `
   }
   .empty-btn--ghost:hover { background: rgba(255,255,255,0.08); color: white; }
   .empty-hint {
-    margin-top: 18px; font-size: 11px; color: rgba(255,255,255,0.15);
+    margin-top: 18px; font-size: 11px; color: rgba(255,255,255,0.25);
     line-height: 1.5;
   }
 
@@ -353,7 +353,7 @@ const DASH_CSS = `
   }
   .advisor-label {
     display: flex; align-items: center; gap: 6px; margin-bottom: 0;
-    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.25);
+    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4);
     text-transform: uppercase; letter-spacing: 0.8px;
   }
   .advisor-dismiss {
@@ -1045,7 +1045,7 @@ const Dashboard = () => {
                             width: '100%', height: '100%', position: 'absolute', inset: 0,
                             background: 'linear-gradient(135deg, #111820, #0e1218)',
                           }}>
-                            <I i="movie" s={32} c="rgba(117,170,219,0.2)" />
+                            <I i="movie" s={32} c="rgba(117,170,219,0.35)" />
                           </div>
                         )}
                         <button
@@ -1130,7 +1130,7 @@ const Dashboard = () => {
                   <div className="empty-icon">
                     <I i="movie_edit" s={26} c="rgba(117,170,219,0.5)" />
                   </div>
-                  <h3>Your workspace is ready</h3>
+                  <h3>Start your first project</h3>
                   <p>
                     Import a video, image, or audio file to create your first project
                     and start editing.
@@ -1262,7 +1262,7 @@ const Dashboard = () => {
           </button>
           <button className={activeNav === 'shorts' ? 'active' : ''} onClick={() => navigate('/long-to-shorts')}>
             <I i="content_cut" s={22} />
-            <span>Shorts</span>
+            <span>Reframe</span>
           </button>
           <button className={activeNav === 'settings' ? 'active' : ''} onClick={() => navigate('/settings')}>
             <I i="settings" s={22} />
