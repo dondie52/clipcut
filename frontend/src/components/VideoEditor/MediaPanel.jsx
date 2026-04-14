@@ -234,12 +234,19 @@ const MediaItem = memo(({
         cursor: 'pointer',
         position: 'relative',
         animationDelay: `${index * 50}ms`,
-        opacity: isDragging ? 0.5 : 1
+        opacity: isDragging ? 0.5 : 1,
+        minWidth: 0,
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box'
       }}
     >
       <div 
         className="media-item-thumbnail"
         style={{
+          width: '100%',
+          maxWidth: '100%',
+          minWidth: 0,
           aspectRatio: '16/9',
           borderRadius: '6px',
           overflow: 'hidden',
@@ -249,7 +256,9 @@ const MediaItem = memo(({
               ? '1px solid rgba(117, 170, 219, 0.5)'
               : '1px solid rgba(255,255,255,0.06)',
           position: 'relative',
-          background: '#0a0a0a'
+          background: '#0a0a0a',
+          boxSizing: 'border-box',
+          flexShrink: 0
         }}
       >
         {item.thumbnail ? (
@@ -849,7 +858,7 @@ const MediaPanel = ({
       {mediaTab === 'local' ? (
         /* Media grid */
         <div
-          style={{ flex: 1, overflowY: "auto", padding: "0 16px 16px" }}
+          style={{ flex: 1, overflowY: "auto", overflowX: "hidden", minWidth: 0, padding: "0 16px 16px" }}
           className="cs"
           role="tabpanel"
           id="local-panel"
@@ -868,7 +877,9 @@ const MediaPanel = ({
                 display: viewMode === 'grid' ? "grid" : "flex",
                 gridTemplateColumns: viewMode === 'grid' ? "1fr 1fr" : undefined,
                 flexDirection: viewMode === 'list' ? 'column' : undefined,
-                gap: "10px"
+                gap: "10px",
+                minWidth: 0,
+                width: "100%"
               }}
               role="list"
               aria-label="Imported media items"
