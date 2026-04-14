@@ -7,36 +7,41 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+defaults:
+  run:
+    working-directory: frontend
+
 jobs:
   performance-check:
     name: Check Performance Budget
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      
+          cache-dependency-path: frontend/package-lock.json
+
       - name: Install dependencies
         run: npm ci
-      
+
       - name: Build application
         run: npm run build
         env:
           NODE_ENV: production
-      
+
       - name: Check bundle sizes
         run: node scripts/check-performance-budget.mjs
-      
+
       - name: Upload build artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
-          path: dist/
+          path: frontend/dist/
           retention-days: 7
