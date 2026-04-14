@@ -34,10 +34,13 @@ const MobileFiltersPanel = memo(function MobileFiltersPanel({ selectedClip, onCl
   const activeFilter = cp(selectedClip, 'filterName');
 
   return (
-    <div style={{ padding: '12px' }}>
-      {/* Horizontal scrollable filter row */}
+    <div>
+      {/* Sticky horizontal scrollable filter row — stays pinned while the strength slider scrolls below */}
       <div style={{
-        display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '12px',
+        position: 'sticky', top: 0, zIndex: 2, background: '#0e1218',
+        display: 'flex', gap: '10px', overflowX: 'auto',
+        padding: '12px 12px 12px',
+        borderBottom: '1px solid rgba(255,255,255,0.04)',
         WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none',
       }}>
         {FILTER_PRESETS.map(f => {
@@ -74,7 +77,7 @@ const MobileFiltersPanel = memo(function MobileFiltersPanel({ selectedClip, onCl
 
       {/* Filter strength slider */}
       {activeFilter && (
-        <div style={{ paddingTop: '4px' }}>
+        <div style={{ padding: '12px' }}>
           <Slider
             l="Strength"
             value={cp(selectedClip, 'filterStrength') ?? 50}
