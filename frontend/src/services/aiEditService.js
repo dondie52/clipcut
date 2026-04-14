@@ -93,7 +93,14 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
   const { history } = options;
 
   // Step 1: Parse intent via Cloudflare Worker (with conversation history)
-  const actions = await parseIntent(prompt, context, history);
+  const parsed = await parseIntent(prompt, context, history);
+
+  // If the Worker returned a conversational reply, pass it through without executing
+  if (parsed && parsed.chat === true) {
+    return { summary: parsed.message, actionLabels: [], isChat: true };
+  }
+
+  const actions = parsed;
 
   // Step 2: Execute each action sequentially; collect successes and failures
   const labels = [];
@@ -174,8 +181,18 @@ async function parseIntent(prompt, context, history) {
 
     const data = await res.json();
 
+    // Handle conversational response — not an edit command
+    if (data.type === 'chat' && typeof data.message === 'string') {
+      return { chat: true, message: data.message };
+    }
+
     // Handle structured actions (expected format)
-    if (data.actions && Array.isArray(data.actions) && data.actions.length > 0) {
+    if (data.type === 'actions' && Array.isArray(data.actions) && data.actions.length > 0) {
+      return data.actions;
+    }
+
+    // Legacy format: bare actions array
+    if (Array.isArray(data.actions) && data.actions.length > 0) {
       return data.actions;
     }
 

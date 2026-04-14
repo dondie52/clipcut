@@ -1460,30 +1460,35 @@ const VideoEditor = () => {
         splitClip, selectedClipId, mediaItems,
       }, { history });
 
-      // Store undo snapshot
-      const undoId = `ai-${Date.now()}`;
-      aiUndoStackRef.current.push({ id: undoId, snapshot, filesMap });
+      // Conversational reply — no actions executed, no undo needed
+      if (result.isChat) {
+        setAiMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: result.summary }]);
+      } else {
+        // Store undo snapshot
+        const undoId = `ai-${Date.now()}`;
+        aiUndoStackRef.current.push({ id: undoId, snapshot, filesMap });
 
-      const assistantMsg = {
-        id: `a-${Date.now()}`, role: 'assistant',
-        text: result.summary || 'Done!',
-        actions: result.actionLabels || [],
-        canUndo: true,
-        onUndo: () => {
-          const entry = aiUndoStackRef.current.find(e => e.id === undoId);
-          if (entry) {
-            const restored = entry.snapshot.map(c => {
-              const file = entry.filesMap.get(c.id);
-              return file ? { ...c, file } : c;
-            });
-            setClips(restored);
-            aiUndoStackRef.current = aiUndoStackRef.current.filter(e => e.id !== undoId);
-            setAiMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, canUndo: false } : m));
-            notify('info', 'AI edit undone');
-          }
-        },
-      };
-      setAiMessages(prev => [...prev, assistantMsg]);
+        const assistantMsg = {
+          id: `a-${Date.now()}`, role: 'assistant',
+          text: result.summary || 'Done!',
+          actions: result.actionLabels || [],
+          canUndo: true,
+          onUndo: () => {
+            const entry = aiUndoStackRef.current.find(e => e.id === undoId);
+            if (entry) {
+              const restored = entry.snapshot.map(c => {
+                const file = entry.filesMap.get(c.id);
+                return file ? { ...c, file } : c;
+              });
+              setClips(restored);
+              aiUndoStackRef.current = aiUndoStackRef.current.filter(e => e.id !== undoId);
+              setAiMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, canUndo: false } : m));
+              notify('info', 'AI edit undone');
+            }
+          },
+        };
+        setAiMessages(prev => [...prev, assistantMsg]);
+      }
     } catch (err) {
       const errMsg = { id: `e-${Date.now()}`, role: 'assistant', text: `Error: ${err.message || 'Something went wrong. Please try again.'}` };
       setAiMessages(prev => [...prev, errMsg]);

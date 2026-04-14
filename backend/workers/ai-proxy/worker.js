@@ -100,27 +100,36 @@ const VALID_ACTION_TYPES = new Set([
   'smart_crop', 'beat_sync', 'zoom_to_speaker', 'remove_boring',
 ]);
 
-const EDIT_SYSTEM_PROMPT = `You are a video editing assistant. Parse the user's request into a JSON array of actions.
-Each action has a "type" and "params" object. Valid types and their params:
+const EDIT_SYSTEM_PROMPT = `You are a friendly video editing assistant called ClipCut AI.
+You handle TWO types of user messages:
 
-- add_captions: style (classic|boxed|modern|minimal)
-- remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
-- cut_clip: from (seconds), to (seconds)
-- split_clip: at (seconds)
-- add_text: text (string), position (top|center|bottom), duration (seconds)
-- apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
-- change_speed: speed (0.5|1|1.5|2|4)
-- add_music: genre (chill|epic|happy|sad|energetic)
-- remove_filler_words: fillers (optional array like ['um','uh','like','you know'])
-- detect_scenes: sensitivity (low|medium|high, default medium)
-- auto_highlight: duration (seconds, default 30)
-- smart_crop: aspect (9:16|1:1|4:5, default 9:16)
-- beat_sync: sensitivity (0.5-3.0, default 1.5)
-- zoom_to_speaker: zoomFactor (1.1-2.0, default 1.3)
-- remove_boring: threshold (1-10 engagement score, default 4)
+1. CONVERSATION — greetings, questions, or messages that are NOT editing commands.
+   Respond with EXACTLY this JSON (no extra text):
+   {"type":"chat","message":"your friendly reply here"}
+   Keep replies short (1-2 sentences). You can suggest editing actions the user can try.
+
+2. EDIT COMMANDS — requests to modify the video (add captions, remove silence, etc.).
+   Respond with EXACTLY this JSON (no extra text):
+   {"type":"actions","actions":[...array of action objects...]}
+   Each action has a "type" and "params" object. Valid types and their params:
+   - add_captions: style (classic|boxed|modern|minimal)
+   - remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
+   - cut_clip: from (seconds), to (seconds)
+   - split_clip: at (seconds)
+   - add_text: text (string), position (top|center|bottom), duration (seconds)
+   - apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
+   - change_speed: speed (0.5|1|1.5|2|4)
+   - add_music: genre (chill|epic|happy|sad|energetic)
+   - remove_filler_words: fillers (optional array like ['um','uh','like','you know'])
+   - detect_scenes: sensitivity (low|medium|high, default medium)
+   - auto_highlight: duration (seconds, default 30)
+   - smart_crop: aspect (9:16|1:1|4:5, default 9:16)
+   - beat_sync: sensitivity (0.5-3.0, default 1.5)
+   - zoom_to_speaker: zoomFactor (1.1-2.0, default 1.3)
+   - remove_boring: threshold (1-10 engagement score, default 4)
 
 Context about the video will be provided. Use it to make smart defaults.
-Return ONLY a valid JSON array. No markdown fences, no explanation, no extra text.`;
+Return ONLY valid JSON. No markdown fences, no explanation, no extra text.`;
 
 async function handleEdit(request, env) {
   const body = await request.json();
@@ -161,31 +170,46 @@ async function handleEdit(request, env) {
   const raw = result?.response || '';
 
   // Parse JSON from the response, stripping any accidental markdown fences
-  let actions;
+  let parsed;
   try {
     const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-    actions = JSON.parse(cleaned);
+    parsed = JSON.parse(cleaned);
   } catch (parseErr) {
-    console.error('[edit] Failed to parse LLM JSON:', raw);
-    return jsonResponse({ error: 'AI returned invalid JSON', raw }, 422);
+    // LLM returned unparseable text — treat it as a conversational reply
+    console.log('[edit] LLM returned non-JSON, treating as chat:', raw.slice(0, 120));
+    return jsonResponse({ type: 'chat', message: raw.trim() || "I'm not sure what you mean. Try something like 'add captions' or 'remove silence'." });
   }
 
-  if (!Array.isArray(actions)) {
-    return jsonResponse({ error: 'Expected JSON array of actions', raw }, 422);
+  // Handle conversational response: {type: "chat", message: "..."}
+  if (parsed && parsed.type === 'chat' && typeof parsed.message === 'string') {
+    console.log('[edit] Chat response');
+    return jsonResponse({ type: 'chat', message: parsed.message });
+  }
+
+  // Handle edit actions — either {type: "actions", actions: [...]} or bare [...]
+  const rawActions = Array.isArray(parsed) ? parsed
+    : (parsed?.type === 'actions' && Array.isArray(parsed?.actions)) ? parsed.actions
+    : null;
+
+  if (!rawActions) {
+    // LLM returned valid JSON but not in expected shape — treat as chat
+    const fallbackMsg = typeof parsed?.message === 'string' ? parsed.message
+      : "I'm not sure what you mean. Try something like 'add captions' or 'remove silence'.";
+    return jsonResponse({ type: 'chat', message: fallbackMsg });
   }
 
   // Validate and sanitize each action
-  const validated = actions
+  const validated = rawActions
     .filter(a => a && typeof a === 'object' && VALID_ACTION_TYPES.has(a.type))
     .map(a => ({ type: a.type, params: a.params || {} }));
 
   if (validated.length === 0) {
-    return jsonResponse({ error: 'No valid actions parsed from prompt', raw }, 422);
+    return jsonResponse({ type: 'chat', message: "I couldn't find a matching edit action. Try 'add captions', 'remove silence', or 'make it vertical'." });
   }
 
   console.log(`[edit] Parsed ${validated.length} action(s):`, validated.map(a => a.type));
 
-  return jsonResponse({ actions: validated });
+  return jsonResponse({ type: 'actions', actions: validated });
 }
 
 /* ─── Route: POST / (existing frame analysis) ──────────────── */
