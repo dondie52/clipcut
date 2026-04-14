@@ -36,8 +36,13 @@ export function parseIntentLocally(prompt) {
 
   // Pattern table: [regex, action builder]
   const patterns = [
+    // Order matters: match removal intent BEFORE the generic `captions?` fallback.
+    // The prior `(?!.*remove)` lookahead only inspected characters AFTER the match,
+    // so "remove captions" still hit add_captions.
+    [/\b(?:remove|delete|clear|get\s+rid\s+of|strip)\s+(?:the\s+|all\s+)?(?:auto[- ]?)?captions?\b/, () => [{ type: 'remove_captions', params: {} }]],
+    [/\b(?:no|without)\s+captions?\b/, () => [{ type: 'remove_captions', params: {} }]],
     [/\badd\s+(auto[- ]?)?captions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
-    [/\bcaptions?\b(?!.*remove)/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
+    [/\bcaptions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\bremove\s+silence\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
     [/\bremove\s+filler\b/, () => [{ type: 'remove_filler_words', params: {} }]],
     [/\bmake\s+(?:it\s+)?vertical\b|tiktok|9[:\s]16|reels?\b|shorts?\b/, () => [{ type: 'smart_crop', params: { aspect: '9:16' } }]],
@@ -223,6 +228,9 @@ async function executeAction(action, editor) {
     case 'add_captions':
       return await executeAddCaptions(action.params, editor);
 
+    case 'remove_captions':
+      return executeRemoveCaptions(editor);
+
     case 'remove_silence':
       return await executeRemoveSilence(action.params, editor);
 
@@ -269,6 +277,15 @@ async function executeAction(action, editor) {
     default:
       return null;
   }
+}
+
+/* ─── Action: Remove Captions ───────────────────────────────── */
+function executeRemoveCaptions(editor) {
+  const { clips, setClips } = editor;
+  const captionCount = clips.filter(c => c.isCaption).length;
+  if (captionCount === 0) return 'No captions to remove';
+  setClips(prev => prev.filter(c => !c.isCaption));
+  return `Removed ${captionCount} caption${captionCount === 1 ? '' : 's'}`;
 }
 
 /* ─── Action: Add Captions ──────────────────────────────────── */

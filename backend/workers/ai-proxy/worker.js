@@ -93,7 +93,7 @@ async function handleScore(request, env) {
 
 /* ─── Route: POST /edit ────────────────────────────────────── */
 const VALID_ACTION_TYPES = new Set([
-  'add_captions', 'remove_silence', 'cut_clip', 'split_clip',
+  'add_captions', 'remove_captions', 'remove_silence', 'cut_clip', 'split_clip',
   'add_text', 'apply_filter', 'change_speed', 'add_music',
   // Phase 2 — ML-powered actions
   'remove_filler_words', 'detect_scenes', 'auto_highlight',
@@ -113,6 +113,7 @@ You handle TWO types of user messages:
    {"type":"actions","actions":[...array of action objects...]}
    Each action has a "type" and "params" object. Valid types and their params:
    - add_captions: style (classic|boxed|modern|minimal)
+   - remove_captions: (no params) — deletes all existing caption clips from the timeline. Use this when the user says "remove captions", "delete captions", "get rid of captions", "no captions", or similar. Never map removal requests to add_captions.
    - remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
    - cut_clip: from (seconds), to (seconds)
    - split_clip: at (seconds)
