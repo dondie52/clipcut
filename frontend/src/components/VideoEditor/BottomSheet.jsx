@@ -5,7 +5,7 @@ const DISMISS_THRESHOLD_PX = 80; // drag past this downward from lowest snap to 
 // Snap points, expressed as a fraction of the viewport height.
 // Portrait: single height. Landscape: three snaps so the user can
 // expand the sheet to almost full-screen to reach panel content.
-const PORTRAIT_SNAPS = [0.6];
+const PORTRAIT_SNAPS = [0.7, 0.95];
 const LANDSCAPE_SNAPS = [0.4, 0.7, 0.9];
 
 const BottomSheet = memo(function BottomSheet({ isOpen, onClose, title, zIndex = 2900, children }) {

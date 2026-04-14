@@ -208,6 +208,21 @@ const AIChatPanel = memo(function AIChatPanel({
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
+  const hasShownWelcomeRef = useRef(false);
+  const [showWelcome, setShowWelcome] = useState(false);
+
+  // Show welcome message on first open per session (mobile only)
+  useEffect(() => {
+    if (isOpen && isMobile && !hasShownWelcomeRef.current && messages.length === 0) {
+      hasShownWelcomeRef.current = true;
+      setShowWelcome(true);
+    }
+  }, [isOpen, isMobile, messages.length]);
+
+  // Hide welcome once the user sends a message
+  useEffect(() => {
+    if (messages.length > 0) setShowWelcome(false);
+  }, [messages.length]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -364,8 +379,15 @@ const AIChatPanel = memo(function AIChatPanel({
           </div>
         )}
 
-        {/* Empty state — only when no messages AND no suggestions */}
-        {messages.length === 0 && !isThinking && suggestions.length === 0 && (
+        {/* Welcome message — mobile only, first open per session */}
+        {showWelcome && messages.length === 0 && (
+          <div className="ai-msg-bubble ai-msg-assistant" style={{ alignSelf: 'flex-start' }}>
+            Hi! I'm your AI video editor. Try 'add captions' or 'remove silence'. What would you like to do?
+          </div>
+        )}
+
+        {/* Empty state — only when no messages AND no suggestions AND no welcome */}
+        {messages.length === 0 && !isThinking && suggestions.length === 0 && !showWelcome && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, gap: 12, padding: '40px 16px', textAlign: 'center' }}>
             <Icon i="auto_awesome" s={40} c="rgba(117,170,219,0.25)" />
             <span style={{ fontSize: 14, color: COLORS.TEXT_MUTED, fontFamily: FONTS.PRIMARY, lineHeight: 1.6 }}>
@@ -398,11 +420,13 @@ const AIChatPanel = memo(function AIChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick action chips */}
+      {/* Quick action chips — horizontal scroll, no wrap */}
       <div style={{
-        padding: '6px 12px 0', flexShrink: 0,
-        display: 'flex', gap: 6, overflowX: 'auto', overflowY: 'hidden',
+        padding: isMobile ? '6px 16px 0' : '6px 12px 0', flexShrink: 0,
+        display: 'flex', flexWrap: 'nowrap', gap: 6,
+        overflowX: 'auto', overflowY: 'hidden',
         scrollbarWidth: 'none',
+        WebkitOverflowScrolling: 'touch',
       }}>
         {QUICK_ACTIONS.map(qa => (
           <button
