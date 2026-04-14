@@ -83,45 +83,83 @@ function getBundleFiles() {
 }
 
 /**
+ * Identify the initial bundle from the built index.html.
+ *
+ * Vite emits exactly one <script type="module" src="/assets/xxx.js"> for the
+ * entry point, plus <link rel="modulepreload" href="/assets/yyy.js"> for its
+ * synchronous dependencies. Everything else (route chunks, vendor chunks
+ * behind React.lazy, worker chunks) is lazy and shouldn't count toward the
+ * "initial bundle" budget.
+ *
+ * Previously this script treated files[0] (the biggest chunk) as the entry,
+ * which is wrong in any code-split app: the biggest chunk is usually a lazy
+ * route (here, LongToShorts + TFJS). That produced false-positive failures
+ * like "Initial bundle exceeds limit: 288KB" when the real critical path
+ * was ~115KB.
+ */
+function getInitialChunkNames() {
+  try {
+    const html = readFileSync(join(rootDir, 'dist', 'index.html'), 'utf-8');
+    const names = new Set();
+    const scriptRe = /<script\b[^>]*\bsrc="([^"]+\.js)"/g;
+    const preloadRe = /<link\b[^>]*\brel="modulepreload"[^>]*\bhref="([^"]+\.js)"/g;
+    let m;
+    while ((m = scriptRe.exec(html)) !== null) names.add(m[1].split('/').pop());
+    while ((m = preloadRe.exec(html)) !== null) names.add(m[1].split('/').pop());
+    return names;
+  } catch {
+    return new Set();
+  }
+}
+
+/**
  * Check bundle sizes against budget
  */
 function checkBundleSizes(budget, files) {
   const errors = [];
   const warnings = [];
-  
-  // Find initial bundle (usually the largest entry point)
-  const initialBundle = files[0];
-  if (initialBundle) {
+
+  // Initial bundle = the entry script + its modulepreloaded dependencies
+  // (what actually downloads on first paint). Fall back to files[0] only if
+  // the HTML isn't parseable, to stay useful during local dev.
+  const initialNames = getInitialChunkNames();
+  const initialFiles = initialNames.size > 0
+    ? files.filter(f => initialNames.has(f.name))
+    : [files[0]].filter(Boolean);
+  const initialSize = initialFiles.reduce((sum, f) => sum + f.size, 0);
+  const initialListing = initialFiles.map(f => f.name).join(', ') || 'n/a';
+
+  if (initialFiles.length > 0) {
     const limit = budget.bundleSize.initial.limit;
     const warning = budget.bundleSize.initial.warning || limit * 0.9;
-    
-    if (initialBundle.size > limit) {
-      errors.push(`Initial bundle exceeds limit: ${initialBundle.size.toFixed(2)}KB > ${limit}KB (${initialBundle.name})`);
-    } else if (initialBundle.size > warning) {
-      warnings.push(`Initial bundle approaching limit: ${initialBundle.size.toFixed(2)}KB > ${warning}KB (${initialBundle.name})`);
+
+    if (initialSize > limit) {
+      errors.push(`Initial bundle exceeds limit: ${initialSize.toFixed(2)}KB > ${limit}KB (entry + preloads: ${initialListing})`);
+    } else if (initialSize > warning) {
+      warnings.push(`Initial bundle approaching limit: ${initialSize.toFixed(2)}KB > ${warning}KB (entry + preloads: ${initialListing})`);
     }
   }
-  
+
   // Check total bundle size
   const totalSize = files.reduce((sum, file) => sum + file.size, 0);
   const totalLimit = budget.bundleSize.total.limit;
   const totalWarning = budget.bundleSize.total.warning || totalLimit * 0.9;
-  
+
   if (totalSize > totalLimit) {
     errors.push(`Total bundle size exceeds limit: ${totalSize.toFixed(2)}KB > ${totalLimit}KB`);
   } else if (totalSize > totalWarning) {
     warnings.push(`Total bundle size approaching limit: ${totalSize.toFixed(2)}KB > ${totalWarning}KB`);
   }
-  
-  // Check per-route chunks (exclude vendor chunks)
-  const routeChunks = files.filter(file => 
-    !file.name.includes('vendor') && 
-    file.name !== initialBundle?.name
+
+  // Check per-route chunks (exclude vendor chunks and initial-path chunks)
+  const routeChunks = files.filter(file =>
+    !file.name.includes('vendor') &&
+    !initialNames.has(file.name)
   );
-  
+
   const perRouteLimit = budget.bundleSize.perRoute.limit;
   const perRouteWarning = budget.bundleSize.perRoute.warning || perRouteLimit * 0.9;
-  
+
   routeChunks.forEach(file => {
     if (file.size > perRouteLimit) {
       errors.push(`Route chunk exceeds limit: ${file.name} (${file.size.toFixed(2)}KB > ${perRouteLimit}KB)`);
@@ -148,7 +186,7 @@ function checkBundleSizes(budget, files) {
     }
   });
   
-  return { errors, warnings, summary: { totalSize, initialSize: initialBundle?.size || 0 } };
+  return { errors, warnings, summary: { totalSize, initialSize } };
 }
 
 /**
