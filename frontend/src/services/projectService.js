@@ -601,8 +601,15 @@ async function uploadProjectThumbnail(userId, projectId, thumbnail) {
 
   if (error) throw error;
 
-  const { data } = supabase.storage.from("projects").getPublicUrl(storagePath);
-  return data.publicUrl;
+  // The `projects` bucket is private (see migration 005_storage_buckets.sql).
+  // getPublicUrl returns a URL that 400s on read — use createSignedUrl instead.
+  // 7-day TTL; autosave refreshes this on every thumbnail regeneration, and
+  // project_data.thumbnailDataUrl provides a durable base64 fallback.
+  const { data, error: signErr } = await supabase.storage
+    .from("projects")
+    .createSignedUrl(storagePath, 60 * 60 * 24 * 7);
+  if (signErr) throw signErr;
+  return data.signedUrl;
 }
 
 // ========== localStorage fallback functions ==========
