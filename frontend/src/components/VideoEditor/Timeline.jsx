@@ -772,9 +772,9 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      captureTarget?.removeEventListener('pointermove', onMove);
+      captureTarget?.removeEventListener('pointerup', onUp);
+      captureTarget?.removeEventListener('pointercancel', onUp);
       try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (didDrag) {
@@ -790,9 +790,9 @@ const Timeline = ({
       ir.dragClipId = null;
     };
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    captureTarget?.addEventListener('pointermove', onMove);
+    captureTarget?.addEventListener('pointerup', onUp);
+    captureTarget?.addEventListener('pointercancel', onUp);
   }, [onSelectClip, onSplitClip, onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────
@@ -898,9 +898,9 @@ const Timeline = ({
     };
 
     const onUp = () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      window.removeEventListener('pointercancel', onUp);
+      captureTarget?.removeEventListener('pointermove', onMove);
+      captureTarget?.removeEventListener('pointerup', onUp);
+      captureTarget?.removeEventListener('pointercancel', onUp);
       try { captureTarget?.releasePointerCapture?.(pointerId); } catch { /* noop */ }
 
       if (clipEl) clipEl.classList.remove('tl-resizing');
@@ -920,9 +920,9 @@ const Timeline = ({
       ir.resizeClipId = null;
     };
 
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    window.addEventListener('pointercancel', onUp);
+    captureTarget?.addEventListener('pointermove', onMove);
+    captureTarget?.addEventListener('pointerup', onUp);
+    captureTarget?.addEventListener('pointercancel', onUp);
   }, [onUpdateClip, showSnapLine, hideSnapLine]);
 
   // ────────────────────────────────────────────────────────────

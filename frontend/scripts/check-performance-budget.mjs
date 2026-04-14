@@ -8,6 +8,7 @@
 import { readFileSync, statSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { gzipSync } from 'zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -40,21 +41,40 @@ function getFileSize(filePath) {
 }
 
 /**
- * Get all JS files in dist/assets
+ * Get all JS files in dist/assets, sized by their gzipped output.
+ *
+ * The budget in performance-budget.json is expressed as gzipped KB (see the
+ * "(gzipped)" descriptions on every bundleSize entry), so we read the .js.gz
+ * emitted by vite-plugin-compression instead of the raw .js byte count. Files
+ * smaller than the compression plugin's threshold (1KB) have no .gz sibling;
+ * for those we gzip on the fly so the check still represents over-the-wire
+ * size for every chunk.
  */
 function getBundleFiles() {
   const distDir = join(rootDir, 'dist');
   const assetsDir = join(distDir, 'assets');
-  
+
   try {
     const files = readdirSync(assetsDir);
     return files
       .filter(file => file.endsWith('.js'))
-      .map(file => ({
-        name: file,
-        path: join(assetsDir, file),
-        size: getFileSize(join(assetsDir, file))
-      }))
+      .map(file => {
+        const jsPath = join(assetsDir, file);
+        const gzPath = `${jsPath}.gz`;
+        const gzSize = getFileSize(gzPath);
+        let size = gzSize;
+        if (size === 0) {
+          // No pre-compressed sibling (file below plugin threshold) — gzip on
+          // the fly so we still measure transfer size.
+          try {
+            const raw = readFileSync(jsPath);
+            size = gzipSync(raw).length / 1024;
+          } catch {
+            size = getFileSize(jsPath); // last-resort fallback
+          }
+        }
+        return { name: file, path: jsPath, size };
+      })
       .sort((a, b) => b.size - a.size);
   } catch (error) {
     console.warn('dist/assets directory not found. Run build first.');
@@ -145,7 +165,7 @@ function main() {
     process.exit(0);
   }
   
-  console.log(`Found ${files.length} bundle files:\n`);
+  console.log(`Found ${files.length} bundle files (sizes shown gzipped):\n`);
   files.forEach(file => {
     console.log(`  ${file.name}: ${file.size.toFixed(2)}KB`);
   });
@@ -154,7 +174,7 @@ function main() {
   const { errors, warnings, summary } = checkBundleSizes(budget, files);
   
   // Print summary
-  console.log('📊 Bundle Size Summary:');
+  console.log('📊 Bundle Size Summary (gzipped):');
   console.log(`  Total: ${summary.totalSize.toFixed(2)}KB`);
   console.log(`  Initial: ${summary.initialSize.toFixed(2)}KB\n`);
   
