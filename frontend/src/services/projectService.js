@@ -156,7 +156,7 @@ export async function saveProject(userId, projectData) {
   // Sanitize project name before saving (max 100 chars, remove HTML, trim)
   const sanitizedName = sanitizeTextInput(name || "Untitled Project", { maxLength: 100 });
 
-  const projectDataPayload = sanitizeForJsonb({
+  let projectDataPayload = sanitizeForJsonb({
     clips: clips || [],
     mediaItems: projectData.mediaItems || [],
     savedAt: new Date().toISOString(),
@@ -164,6 +164,24 @@ export async function saveProject(userId, projectData) {
     // Embed thumbnail data URL in JSONB as fallback when Storage URLs break
     ...(projectData.thumbnailDataUrl ? { thumbnailDataUrl: projectData.thumbnailDataUrl } : {}),
   });
+
+  // Follow-up saves (e.g. after media upload) often omit thumbnailDataUrl; merging avoids wiping JSONB.
+  if (id && !projectData.thumbnailDataUrl) {
+    try {
+      const { data: existing } = await supabase
+        .from("projects")
+        .select("project_data")
+        .eq("id", id)
+        .eq("user_id", userId)
+        .maybeSingle();
+      const prev = existing?.project_data?.thumbnailDataUrl;
+      if (prev) {
+        projectDataPayload = { ...projectDataPayload, thumbnailDataUrl: prev };
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
 
   // Do not set updated_at here — the DB trigger update_projects_updated_at handles it; sending it can
   // conflict with the trigger or PostgREST expectations on some deployments.

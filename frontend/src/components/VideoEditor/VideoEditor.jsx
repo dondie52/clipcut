@@ -412,6 +412,16 @@ const Toast = memo(({ type = "error", message, onClose, autoClose = false }) => 
 });
 Toast.displayName = "Toast";
 
+/** First video source for dashboard thumbnail — clip may only reference media via mediaId. */
+function getVideoFileForThumbnail(clips, mediaItems) {
+  const vid = clips.find((c) => c.type === "video");
+  if (!vid) return null;
+  if (vid.file) return { file: vid.file, mediaId: vid.mediaId };
+  const mi = mediaItems.find((m) => m.id === vid.mediaId);
+  if (mi?.file) return { file: mi.file, mediaId: vid.mediaId };
+  return null;
+}
+
 /** Upload local media files to project storage; updates clips with storagePath for reload. */
 async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips, setMediaItems, setClips) {
   const uploaded = new Map();
@@ -454,6 +464,7 @@ const useAutoSave = (
   const isSavingRef = useRef(false);
   const projectIdRef = useRef(projectId);
   const lastThumbnailClipIdRef = useRef(null);
+  const lastThumbnailDataUrlRef = useRef(null);
   const doSaveRef = useRef(null);
   const consecutiveFailuresRef = useRef(0);
   const backoffTicksRef = useRef(0);
@@ -549,12 +560,12 @@ const useAutoSave = (
         // Generate thumbnail for both Supabase and localStorage saves.
         // We always generate a base64 data URL and embed it in project_data
         // so the Dashboard can show it even if Supabase Storage URLs break.
-        const firstVideoClip = currentClips.find((c) => c.type === "video" && c.file);
-        const firstClipMediaId = firstVideoClip?.mediaId || null;
-        const needsNewThumb = firstVideoClip && firstClipMediaId !== lastThumbnailClipIdRef.current;
+        const videoSource = getVideoFileForThumbnail(currentClips, currentMedia);
+        const firstClipMediaId = videoSource?.mediaId || null;
+        const needsNewThumb = videoSource && firstClipMediaId !== lastThumbnailClipIdRef.current;
         if (needsNewThumb) {
           try {
-            const thumbBlob = await generateThumbnailFast(firstVideoClip.file, 1);
+            const thumbBlob = await generateThumbnailFast(videoSource.file, 1);
             // Validate that the blob is a real image, not a tiny fallback
             if (thumbBlob && thumbBlob.size > 500) {
               lastThumbnailClipIdRef.current = firstClipMediaId;
@@ -568,10 +579,13 @@ const useAutoSave = (
                 reader.readAsDataURL(thumbBlob);
               });
               projectData.thumbnailDataUrl = dataUrl;
+              lastThumbnailDataUrlRef.current = dataUrl;
             }
           } catch (e) {
             console.warn("Auto-save thumbnail generation failed:", e);
           }
+        } else if (lastThumbnailDataUrlRef.current) {
+          projectData.thumbnailDataUrl = lastThumbnailDataUrlRef.current;
         }
 
         if (userId) {
@@ -622,6 +636,7 @@ const useAutoSave = (
                 mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                 duration: totalDurationRef.current,
                 resolution: resolutionRef.current || "1080p",
+                ...(lastThumbnailDataUrlRef.current ? { thumbnailDataUrl: lastThumbnailDataUrlRef.current } : {}),
               };
               if (bgMusicRef.current?.storagePath) {
                 projectData2.bgMusic = {
@@ -646,6 +661,7 @@ const useAutoSave = (
                   duration: totalDurationRef.current,
                   resolution: resolutionRef.current || "1080p",
                   bgMusic: { storagePath: path, name: bg.name, volume: bg.volume ?? 0.3 },
+                  ...(lastThumbnailDataUrlRef.current ? { thumbnailDataUrl: lastThumbnailDataUrlRef.current } : {}),
                 });
               } catch (e) {
                 console.warn("Background music upload failed:", e);
@@ -1084,7 +1100,9 @@ const VideoEditor = () => {
     };
     setClips(p => [...p, clip]);
     setSelectedClipId(clip.id);
-  }, [setClips]);
+    // Persist dashboard thumbnail soon after the first clip exists (autosave interval is 30s).
+    setTimeout(() => triggerSave(), 100);
+  }, [setClips, triggerSave]);
 
   // ---- Import ----
   const importMedia = useCallback(async (files) => {
