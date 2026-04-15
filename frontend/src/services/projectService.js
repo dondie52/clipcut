@@ -555,6 +555,14 @@ export async function uploadProjectMedia(userId, projectId, file, options = {}) 
   return storagePath;
 }
 
+// In-memory cache for signed URLs. Dashboard renders many thumbnails per visit;
+// without this, every render re-signs every URL. Re-signs when < 5 min of TTL
+// remain so the returned URL has enough lifetime for the caller to use it.
+// Deliberately NOT persisted — signed URLs expire; a stale one survives no
+// better than none. Failures are not cached (caller retries on next call).
+const SIGN_REFRESH_SKEW_MS = 5 * 60 * 1000;
+const signedUrlCache = new Map();
+
 /**
  * Get a signed URL for a project media file
  * @param {string} storagePath - Storage path
@@ -563,12 +571,33 @@ export async function uploadProjectMedia(userId, projectId, file, options = {}) 
  * @throws {Error} If URL generation fails
  */
 export async function getProjectMediaUrl(storagePath, expiresIn = 3600) {
+  const cacheKey = `${storagePath}|${expiresIn}`;
+  const cached = signedUrlCache.get(cacheKey);
+  if (cached && cached.expiresAt - Date.now() > SIGN_REFRESH_SKEW_MS) {
+    return cached.url;
+  }
+
   const { data, error } = await supabase.storage
     .from("projects")
     .createSignedUrl(storagePath, expiresIn);
 
   if (error) throw error;
+
+  signedUrlCache.set(cacheKey, {
+    url: data.signedUrl,
+    expiresAt: Date.now() + expiresIn * 1000,
+  });
   return data.signedUrl;
+}
+
+// Invalidate on delete so a new upload at the same path doesn't hand back a
+// signed URL from before the delete. (Supabase tokens remain valid for the
+// TTL regardless of file state, but the semantic contract is "URL for the
+// current file," so clear the entry.)
+function invalidateSignedUrl(storagePath) {
+  for (const key of signedUrlCache.keys()) {
+    if (key.startsWith(`${storagePath}|`)) signedUrlCache.delete(key);
+  }
 }
 
 /**
@@ -581,6 +610,7 @@ export async function deleteProjectMedia(storagePath) {
   const { error } = await supabase.storage.from("projects").remove([storagePath]);
 
   if (error) throw error;
+  invalidateSignedUrl(storagePath);
 }
 
 /**
