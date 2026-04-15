@@ -343,6 +343,10 @@ export async function loadProject(projectId, userId) {
     throw new Error("Access denied");
   }
 
+  if (data.thumbnail_url) {
+    data.thumbnail_url = await rehydrateThumbnailUrl(data.thumbnail_url);
+  }
+
   return data;
 }
 
@@ -388,6 +392,14 @@ export async function listProjects(userId, options = {}) {
         logger.warn(`Retrying listProjects (attempt ${attempt}, waiting ${Math.round(delay)}ms)`);
       },
     }
+  );
+
+  await Promise.all(
+    data.map(async (p) => {
+      if (p.thumbnail_url) {
+        p.thumbnail_url = await rehydrateThumbnailUrl(p.thumbnail_url);
+      }
+    })
   );
 
   return data;
@@ -553,6 +565,45 @@ export async function uploadProjectMedia(userId, projectId, file, options = {}) 
   }
 
   return storagePath;
+}
+
+/**
+ * Extract a Supabase Storage path (within the `projects` bucket) from a URL,
+ * regardless of whether it's a `public/` URL (which 400s on a private bucket)
+ * or a `sign/` URL (whose token may be expired). Returns null if the URL is
+ * not a Supabase Storage URL for the projects bucket.
+ *
+ * Examples of input → output:
+ *   https://…/storage/v1/object/public/projects/u/p/thumb.jpg        → "u/p/thumb.jpg"
+ *   https://…/storage/v1/object/sign/projects/u/p/thumb.jpg?token=x  → "u/p/thumb.jpg"
+ *   data:image/png;base64,…                                          → null
+ */
+function extractProjectsStoragePath(url) {
+  if (!url || typeof url !== "string") return null;
+  if (url.startsWith("data:") || url.startsWith("blob:")) return null;
+  const match = url.match(/\/storage\/v1\/object\/(?:public|sign)\/projects\/([^?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
+ * Heal a stored thumbnail_url that may contain a stale publicUrl or an
+ * expired signed URL. Old projects (saved before the signed-URL fix) have
+ * publicUrl strings pointing at a private bucket — these 400 on every render.
+ * When the URL resolves to a path inside the `projects` bucket, we re-sign
+ * it using the current session; otherwise we leave the value alone (data
+ * URLs, avatars, external URLs all pass through unchanged). On sign failure
+ * we return the original URL so the broken-image signal still surfaces for
+ * files that are genuinely missing (needed to locate Part B candidates).
+ */
+async function rehydrateThumbnailUrl(url) {
+  if (!url) return null;
+  const storagePath = extractProjectsStoragePath(url);
+  if (!storagePath) return url;
+  try {
+    return await getProjectMediaUrl(storagePath);
+  } catch {
+    return url;
+  }
 }
 
 // In-memory cache for signed URLs. Dashboard renders many thumbnails per visit;
