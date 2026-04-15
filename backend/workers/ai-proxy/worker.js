@@ -1,10 +1,11 @@
 /**
  * ClipCut AI Proxy Worker
  * Routes:
- *   POST /            — Frame analysis (LLaVA vision + Llama JSON)
- *   POST /transcribe  — Audio transcription (Whisper)
- *   POST /score       — Transcript scoring  (Llama structured JSON)
- *   POST /edit        — Intent parsing (natural language → structured edit actions)
+ *   POST /                — Frame analysis (LLaVA vision + Llama JSON)
+ *   POST /transcribe      — Audio transcription via Contabo Whisper (CPU, fallback)
+ *   POST /transcribe-fast — Audio transcription via Cloudflare Workers AI Whisper Turbo (GPU, primary)
+ *   POST /score           — Transcript scoring  (Llama structured JSON)
+ *   POST /edit            — Intent parsing (natural language → structured edit actions)
  *
  * Deploy: cd workers/ai-proxy && npx wrangler deploy
  */
@@ -71,6 +72,62 @@ async function handleTranscribe(request) {
       { error: `Failed to reach Whisper server: ${err.message}` },
       502
     );
+  }
+}
+
+/* ─── Route: POST /transcribe-fast ─────────────────────────── */
+// Primary transcription path. Runs Whisper Turbo on Cloudflare GPUs
+// (~5-10x faster than the CPU-bound Contabo upstream). Falls through to
+// /transcribe on the client side if this returns 413/5xx or network fails.
+const FAST_MAX_BYTES = 25 * 1024 * 1024; // Workers AI input cap per request
+
+async function handleTranscribeFast(request, env) {
+  const audioData = await request.arrayBuffer();
+  const byteLength = audioData.byteLength;
+
+  if (!byteLength) {
+    return jsonResponse({ error: 'Empty audio data' }, 400);
+  }
+
+  if (byteLength > FAST_MAX_BYTES) {
+    // Client should chunk smaller or fall back to /transcribe
+    return jsonResponse(
+      { error: `Audio exceeds ${FAST_MAX_BYTES / 1024 / 1024} MB limit`, size: byteLength },
+      413
+    );
+  }
+
+  console.log(`[transcribe-fast] Running Whisper Turbo on ${byteLength} bytes (${(byteLength / 1024).toFixed(1)} KB)`);
+
+  try {
+    const raw = await env.AI.run('@cf/openai/whisper-large-v3-turbo', {
+      // Workers AI expects a plain array of byte values for the audio field
+      audio: [...new Uint8Array(audioData)],
+    });
+
+    // Normalise to the shape the client already consumes for /transcribe:
+    //   { result: { text, words: [{word, start, end}], language } }
+    const words = Array.isArray(raw?.words)
+      ? raw.words.map(w => ({
+          word: w.word ?? w.text ?? '',
+          start: typeof w.start === 'number' ? w.start : 0,
+          end: typeof w.end === 'number' ? w.end : 0,
+        }))
+      : [];
+
+    const result = {
+      text: raw?.text ?? '',
+      words,
+      language: raw?.language ?? raw?.transcription_info?.language ?? 'unknown',
+    };
+
+    return jsonResponse({ result });
+  } catch (err) {
+    console.error('[transcribe-fast] Workers AI failed:', err.message);
+    // 502 so the client treats this as a transient upstream error and falls
+    // back to /transcribe (Contabo). Not 500 — we don't want the client to
+    // surface this as a hard error when a fallback exists.
+    return jsonResponse({ error: `Workers AI error: ${err.message}` }, 502);
   }
 }
 
@@ -283,6 +340,8 @@ export default {
       switch (path) {
         case '/transcribe':
           return await handleTranscribe(request);
+        case '/transcribe-fast':
+          return await handleTranscribeFast(request, env);
         case '/score':
           return await handleScore(request, env);
         case '/edit':

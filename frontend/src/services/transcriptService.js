@@ -291,12 +291,51 @@ const RETRY_STATUSES = new Set([502, 503]);
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 2000;
 
-async function transcribeChunk(chunkData, workerUrl) {
+// Statuses/conditions that make us fall back from /transcribe-fast → /transcribe.
+// 413 = too big for Workers AI (25 MB cap); 5xx = upstream failure; network/abort
+// errors bubble up as thrown exceptions. We deliberately do NOT fall back on:
+//   400 (malformed audio — Contabo would fail the same way)
+//   429 (rate limit — hitting Contabo with the same load is worse)
+function shouldFallbackFromFast(status) {
+  return status === 413 || (status >= 500 && status <= 599);
+}
+
+/**
+ * Send one chunk to /transcribe-fast (Cloudflare Whisper Turbo, GPU).
+ * Returns the result on success, or throws an error tagged with `.fallback = true`
+ * if the caller should retry via /transcribe (Contabo Whisper).
+ */
+async function transcribeChunkFast(chunkData, workerUrl) {
+  let res;
+  try {
+    res = await fetch(`${workerUrl}/transcribe-fast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: chunkData,
+    });
+  } catch (err) {
+    // Network error, aborted request, DNS failure — all transient; try fallback
+    throw Object.assign(new Error(`fast network error: ${err.message}`), { fallback: true, cause: err });
+  }
+
+  if (res.ok) {
+    const json = await res.json();
+    return json.result;
+  }
+
+  const body = await res.text().catch(() => '');
+  const err = Object.assign(new Error(`fast failed (${res.status})`), { status: res.status, body });
+  err.fallback = shouldFallbackFromFast(res.status);
+  throw err;
+}
+
+/** Send one chunk to /transcribe (Contabo Whisper, CPU fallback path). */
+async function transcribeChunkContabo(chunkData, workerUrl) {
   let lastErr;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
-      console.warn(`[Captions] Retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`);
+      console.warn(`[Captions] Contabo retry ${attempt}/${MAX_RETRIES} after ${RETRY_DELAY_MS}ms...`);
       await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
     }
 
@@ -308,8 +347,6 @@ async function transcribeChunk(chunkData, workerUrl) {
 
     if (res.ok) {
       const json = await res.json();
-      console.log('[Captions] Chunk response keys:', Object.keys(json),
-        json.result ? 'result keys: ' + Object.keys(json.result) : 'NO result field');
       return json.result;
     }
 
@@ -318,12 +355,35 @@ async function transcribeChunk(chunkData, workerUrl) {
     lastErr = Object.assign(new Error(`Transcription failed (${status})`), { status, body });
 
     if (!RETRY_STATUSES.has(status)) {
-      throw lastErr; // Non-retryable status — fail immediately
+      throw lastErr;
     }
-    console.warn(`[Captions] Chunk got ${status}, will retry (attempt ${attempt + 1}/${MAX_RETRIES})`);
+    console.warn(`[Captions] Contabo chunk got ${status}, will retry (attempt ${attempt + 1}/${MAX_RETRIES})`);
   }
 
   throw lastErr;
+}
+
+/**
+ * Transcribe one chunk. Tries Cloudflare Whisper Turbo first (GPU, fast),
+ * falls back to Contabo Whisper (CPU, slow but reliable) on 413/5xx/network.
+ * Logs which route handled the chunk so we can monitor hit rate in prod.
+ */
+async function transcribeChunk(chunkData, workerUrl) {
+  try {
+    const result = await transcribeChunkFast(chunkData, workerUrl);
+    console.log('[Captions] chunk via cf-turbo ✓');
+    return result;
+  } catch (err) {
+    if (!err.fallback) {
+      // 400, 429, or other non-fallback error — bubble up as real failure
+      console.error('[Captions] cf-turbo hard failure, not falling back:', err.status, err.message);
+      throw err;
+    }
+    console.warn(`[Captions] cf-turbo failed (${err.status || 'network'}), falling back to contabo`);
+    const result = await transcribeChunkContabo(chunkData, workerUrl);
+    console.log('[Captions] chunk via contabo ✓ (fallback)');
+    return result;
+  }
 }
 
 /** Parse a WebVTT string into approximate word objects. */
