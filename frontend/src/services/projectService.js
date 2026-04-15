@@ -598,10 +598,16 @@ function extractProjectsStoragePath(url) {
 async function rehydrateThumbnailUrl(url) {
   if (!url) return null;
   const storagePath = extractProjectsStoragePath(url);
-  if (!storagePath) return url;
+  if (!storagePath) {
+    console.debug('[rehydrateThumb] passthrough (no storage path):', url?.slice(0, 80));
+    return url;
+  }
   try {
-    return await getProjectMediaUrl(storagePath);
-  } catch {
+    const signed = await getProjectMediaUrl(storagePath);
+    console.debug('[rehydrateThumb] signed OK:', storagePath, '→', signed?.slice(0, 100));
+    return signed;
+  } catch (err) {
+    console.warn('[rehydrateThumb] sign FAILED, falling back to original:', storagePath, err?.message || err);
     return url;
   }
 }
