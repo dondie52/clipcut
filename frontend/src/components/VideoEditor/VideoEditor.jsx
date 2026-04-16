@@ -1854,12 +1854,18 @@ const VideoEditor = () => {
   }, [ffmpeg, mediaItems, clips, setClips, notify]);
 
   // ---- Import from dashboard ----
+  // Guard against StrictMode's double-mount: consume each filesToImport array
+  // at most once. window.history.replaceState below doesn't invalidate
+  // useLocation()'s cached state, so without this ref the second mount would
+  // re-import the same files and produce duplicate media items.
+  const consumedFilesToImportRef = useRef(null);
   useEffect(() => {
     const f = location.state?.filesToImport;
-    if (f?.length > 0) {
-      window.history.replaceState({ ...location.state, filesToImport: null }, "");
-      importMedia(f);
-    }
+    if (!f?.length) return;
+    if (consumedFilesToImportRef.current === f) return;
+    consumedFilesToImportRef.current = f;
+    window.history.replaceState({ ...location.state, filesToImport: null }, "");
+    importMedia(f);
   }, [location.state?.filesToImport, importMedia]);
 
   // ---- Load project from dashboard OR URL query param (page reload) ----
