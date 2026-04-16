@@ -5,7 +5,7 @@
  */
 
 import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import { supabase } from "./supabaseClient";
+import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
 /**
  * Session security configuration
@@ -73,6 +73,11 @@ export function AuthProvider({ children }) {
    * Validate session integrity
    */
   const validateSession = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setIsSessionValid(false);
+      return false;
+    }
+
     try {
       const { data: { session: currentSession }, error } = await supabase.auth.getSession();
       
@@ -126,7 +131,9 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      await supabase.auth.signOut();
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut();
+      }
     } catch (error) {
       console.warn('Sign out error:', error);
     }
@@ -162,6 +169,11 @@ export function AuthProvider({ children }) {
    * Manually refresh session
    */
   const refreshSession = useCallback(async () => {
+    if (!isSupabaseConfigured()) {
+      setIsSessionValid(false);
+      return false;
+    }
+
     try {
       const { data: { session: refreshedSession }, error } = 
         await supabase.auth.refreshSession();
@@ -185,24 +197,49 @@ export function AuthProvider({ children }) {
   // Initialize auth state
   useEffect(() => {
     let mounted = true;
-    
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      if (!mounted) return;
-      
-      setSession(initialSession);
-      setUser(initialSession?.user ?? null);
-      setIsSessionValid(!!initialSession);
+
+    if (!isSupabaseConfigured()) {
       setLoading(false);
-      
-      // Start inactivity timeout if logged in
-      if (initialSession) {
-        handleUserActivity();
+      setIsSessionValid(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    let subscription;
+
+    const initializeAuth = async () => {
+      try {
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+
+        if (!mounted) return;
+
+        setSession(initialSession);
+        setUser(initialSession?.user ?? null);
+        setIsSessionValid(!!initialSession);
+
+        // Start inactivity timeout if logged in
+        if (initialSession) {
+          handleUserActivity();
+        }
+      } catch (error) {
+        if (!mounted) return;
+
+        console.warn('Initial session lookup failed:', error);
+        setSession(null);
+        setUser(null);
+        setIsSessionValid(false);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-    });
+    };
+
+    initializeAuth();
 
     // Listen for auth changes (login, logout, token refresh)
-    const {
+    ({
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, currentSession) => {
       if (!mounted) return;
@@ -233,11 +270,11 @@ export function AuthProvider({ children }) {
         default:
           break;
       }
-    });
+    }));
 
     return () => {
       mounted = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
       if (inactivityTimeoutRef.current) {
         clearTimeout(inactivityTimeoutRef.current);
       }
