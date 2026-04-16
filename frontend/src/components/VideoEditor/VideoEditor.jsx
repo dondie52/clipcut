@@ -43,6 +43,7 @@ import BottomSheet from './BottomSheet';
 import Icon from './Icon';
 import { formatTimecode } from './timelineEngine';
 import { buildRestoredProjectState, hasUnavailableMediaClips } from './restoreState';
+import { shouldSkipAutoSave } from './autoSaveGuard';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -474,6 +475,7 @@ const useAutoSave = (
   setClips,
   bgMusic,
   setBgMusic,
+  isRestoreCompleteRef,
   interval = AUTO_SAVE_INTERVAL
 ) => {
   const [lastSaved, setLastSaved] = useState(null);
@@ -484,6 +486,10 @@ const useAutoSave = (
   const doSaveRef = useRef(null);
   const consecutiveFailuresRef = useRef(0);
   const backoffTicksRef = useRef(0);
+  // Flips true the first time we observe non-empty clips or mediaItems this
+  // session. Lets the guard distinguish "user intentionally cleared the
+  // timeline" (save) from "restore hasn't populated state yet" (skip).
+  const hasBeenNonEmptyRef = useRef(false);
 
   const clipsRef = useRef(clips);
   clipsRef.current = clips;
@@ -534,12 +540,30 @@ const useAutoSave = (
     };
 
     const doSave = async () => {
-      if (isSavingRef.current) return;
+      if (isSavingRef.current) return { saved: false, skipReason: 'in-progress' };
+
+      // Latch "session has touched this project" before consulting the guard —
+      // once true, stays true, so clearing the timeline on purpose is still saved.
+      const pendingClipsCount = clipsRef.current?.length || 0;
+      const pendingMediaCount = mediaItemsRef.current?.length || 0;
+      if (pendingClipsCount > 0 || pendingMediaCount > 0) {
+        hasBeenNonEmptyRef.current = true;
+      }
+
+      const guard = shouldSkipAutoSave({
+        projectId: projectIdRef.current,
+        isRestored: isRestoreCompleteRef ? isRestoreCompleteRef.current : true,
+        hasBeenNonEmpty: hasBeenNonEmptyRef.current,
+        clipsCount: pendingClipsCount,
+        mediaItemsCount: pendingMediaCount,
+      });
+      if (guard.skip) return { saved: false, skipReason: guard.reason };
+
       // Exponential backoff: after consecutive failures, skip ticks to avoid spamming
       if (consecutiveFailuresRef.current >= 3) {
         if (backoffTicksRef.current > 0) {
           backoffTicksRef.current--;
-          return;
+          return { saved: false, skipReason: 'backoff' };
         }
         // Next backoff: skip 2^(failures-3) ticks (e.g. 1, 2, 4, 8...)
         backoffTicksRef.current = Math.min(
@@ -610,6 +634,11 @@ const useAutoSave = (
             baseDelay: 1000,
             maxDelay: 5000,
           });
+
+          // Once we've committed any state to Supabase, the in-memory project is
+          // the source of truth for this row — future empty saves are legitimate
+          // user actions, not a pre-restore race.
+          if (isRestoreCompleteRef) isRestoreCompleteRef.current = true;
 
           // After first Supabase save: adopt the server-generated UUID and re-key IndexedDB
           const oldPid = projectIdRef.current;
@@ -689,6 +718,7 @@ const useAutoSave = (
           const saved = saveProject(null, projectData);
           const pid = saved.id;
           if (!projectIdRef.current) projectIdRef.current = pid;
+          if (isRestoreCompleteRef) isRestoreCompleteRef.current = true;
 
           // Persist media files to IndexedDB so they survive page reloads
           for (const m of mediaItemsRef.current) {
@@ -706,6 +736,7 @@ const useAutoSave = (
         setLastSaved(new Date());
         consecutiveFailuresRef.current = 0;
         backoffTicksRef.current = 0;
+        return { saved: true };
       } catch (e) {
         consecutiveFailuresRef.current++;
         if (consecutiveFailuresRef.current <= 1) {
@@ -735,6 +766,7 @@ const useAutoSave = (
         } catch {
           /* localStorage full or unavailable */
         }
+        return { saved: false, skipReason: 'error', error: e };
       } finally {
         isSavingRef.current = false;
       }
@@ -746,7 +778,8 @@ const useAutoSave = (
   }, [userId, interval, setMediaItems, setClips, setBgMusic]);
 
   const triggerSave = useCallback(() => {
-    if (doSaveRef.current) doSaveRef.current();
+    if (doSaveRef.current) return doSaveRef.current();
+    return Promise.resolve({ saved: false, skipReason: 'not-ready' });
   }, []);
 
   return { lastSaved, projectId: projectIdRef.current, triggerSave };
@@ -868,6 +901,10 @@ const VideoEditor = () => {
   const [projectName, setProjectName] = useState("Untitled Project");
   const [projectResolution, setProjectResolution] = useState("1080p");
   const hasRestoredRef = useRef(false);
+  // Flips to true only after restoreProject() confirms what Supabase holds for
+  // this projectId. Guards autosave from clobbering a populated row with the
+  // still-empty initial React state during the restore window.
+  const isRestoreCompleteRef = useRef(false);
 
   // Keep URL in sync with projectId so page reloads can restore the project
   useEffect(() => {
@@ -1085,7 +1122,8 @@ const VideoEditor = () => {
     setMediaItems,
     setClips,
     bgMusic,
-    setBgMusic
+    setBgMusic,
+    isRestoreCompleteRef
   );
 
   // Sync the server-generated project ID back to React state.
@@ -1430,15 +1468,38 @@ const VideoEditor = () => {
     setProjectName('Untitled Project');
     setProjectId(null);
     hasRestoredRef.current = false;
+    isRestoreCompleteRef.current = false;
     setMediaItems([]);
     setSelectedClipId(null);
     setSelectedMediaId(null);
     notify('info', 'New project created');
   }, [clips.length, notify, setClips]);
 
-  const handleSave = useCallback(() => {
-    triggerSave();
-    notify('success', 'Project saved');
+  const handleSave = useCallback(async () => {
+    const result = await triggerSave();
+    if (result?.saved) {
+      notify('success', 'Project saved');
+      return;
+    }
+    switch (result?.skipReason) {
+      case 'restore-in-progress':
+        notify('info', 'Project still loading — try again in a moment');
+        break;
+      case 'empty-without-session-edit':
+        notify('info', 'Nothing to save yet — add media or clips first');
+        break;
+      case 'in-progress':
+        notify('info', 'Save already in progress');
+        break;
+      case 'backoff':
+        notify('warning', 'Previous saves failed — retrying shortly');
+        break;
+      case 'error':
+        notify('error', `Save failed${result?.error?.message ? ': ' + result.error.message : ''}`);
+        break;
+      default:
+        notify('info', 'Save skipped');
+    }
   }, [triggerSave, notify]);
 
   const handleSettings = useCallback(() => {
@@ -1872,6 +1933,13 @@ const VideoEditor = () => {
       return { idbProjectId: payload.slice(0, colonIdx), idbMediaId: payload.slice(colonIdx + 1) };
     };
 
+    /** Map a MIME type to ClipCut's coarse media type taxonomy. */
+    const typeFromMime = (mime) => {
+      if (mime?.startsWith('audio/')) return 'audio';
+      if (mime?.startsWith('image/')) return 'image';
+      return 'video';
+    };
+
     /** Race a promise against a timeout (ms). Returns fallback on timeout. */
     const withTimeout = (promise, ms, fallback = null) =>
       Promise.race([promise, new Promise(resolve => setTimeout(() => resolve(fallback), ms))]);
@@ -1991,13 +2059,10 @@ const VideoEditor = () => {
         const savedClips = pData.project_data?.clips || pData.clips || [];
         const savedMediaItems = pData.project_data?.mediaItems || [];
 
-        // Dump IndexedDB for debugging
-        try {
-          const allMedia = await withTimeout(listAllMedia(), 3000, []);
-          console.log('[restore] IndexedDB entries:', allMedia);
-        } catch (e) {
-          console.warn('[restore] Could not list IndexedDB:', e);
-        }
+        // Single scan — reused by the debug log, the empty-project recovery
+        // path, and the full-resolution path below.
+        const cachedIdbEntries = await withTimeout(listAllMedia(), 3000, []);
+        console.log('[restore] IndexedDB entries:', cachedIdbEntries);
 
         console.log('[restore] Project data:', {
           projectId,
@@ -2008,15 +2073,73 @@ const VideoEditor = () => {
         });
 
         if (savedClips.length === 0 && savedMediaItems.length === 0) {
+          // Recovery attempt: Supabase JSONB may have been clobbered by a
+          // pre-fix autosave-during-restore race, but the user's media blobs
+          // are still in IndexedDB. Rebuild the media panel from the cache so
+          // the user can reassemble their timeline without re-importing.
+          const recoveryCandidates = cachedIdbEntries.filter(e => e.projectId === projectId);
+          const recovered = [];
+          for (const entry of recoveryCandidates) {
+            try {
+              const loaded = await withTimeout(loadMedia(projectId, entry.mediaId), 3000);
+              if (!loaded) continue;
+              recovered.push({
+                id: entry.mediaId,
+                name: entry.name || 'media',
+                file: loaded.file,
+                blobUrl: loaded.blobUrl,
+                thumbnail: null,
+                duration: 0,
+                width: 0,
+                height: 0,
+                type: typeFromMime(entry.mime),
+                isProcessing: false,
+                idbKey: `idb://${projectId}:${entry.mediaId}`,
+                _mediaError: null,
+              });
+            } catch (e) {
+              console.warn('[recover] load failed for', entry.mediaId, e);
+            }
+          }
+          if (cancelled) return;
           await restoreBgMusic(pData);
+
+          if (recovered.length > 0) {
+            setMediaItems(recovered);
+            // Kick off metadata/thumbnail regen in the background so the
+            // media panel becomes usable immediately.
+            for (const mi of recovered) {
+              if (mi.type === 'audio') continue;
+              (async () => {
+                try {
+                  const info = await getVideoInfoFast(mi.file);
+                  setMediaItems(prev => prev.map(m =>
+                    m.id === mi.id ? { ...m, duration: info.duration || m.duration, width: info.width, height: info.height } : m
+                  ));
+                  const thumbBlob = await generateThumbnailFast(mi.file, 0);
+                  const thumbUrl = URL.createObjectURL(thumbBlob);
+                  setMediaItems(prev => prev.map(m =>
+                    m.id === mi.id ? { ...m, thumbnail: thumbUrl } : m
+                  ));
+                } catch (e) {
+                  console.warn('[recover] metadata regen failed:', mi.name, e);
+                }
+              })();
+            }
+            isRestoreCompleteRef.current = true;
+            notify(
+              'warning',
+              `Recovered ${recovered.length} media file(s) from local cache — re-add them to the timeline, then save`
+            );
+            return;
+          }
+
+          isRestoreCompleteRef.current = true;
           notify("info", `Loaded project "${pName}" (no clips)`);
           return;
         }
 
         setLoadMsg("Restoring media...");
-
-        // Pre-cache all IndexedDB entries once (avoids repeated full scans)
-        const cachedIdbEntries = await withTimeout(listAllMedia(), 3000, []);
 
         // 1. Collect all unique media that needs resolution
         const mediaMap = new Map(); // mediaId → { blobUrl, file, meta }
@@ -2155,6 +2278,7 @@ const VideoEditor = () => {
           })();
         }
 
+        isRestoreCompleteRef.current = true;
         notify(restoredState.notification.level, restoredState.notification.message);
       } catch (e) {
         console.error("Project load error:", e);
