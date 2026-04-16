@@ -3,6 +3,7 @@ import Icon from './Icon';
 import { styles } from './styles';
 import { FILTER_PRESETS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
+import { getPlayerRestoreState } from './restoreState';
 
 /* ========== CSS ========== */
 const PLAYER_CSS = `
@@ -635,6 +636,7 @@ const Player = ({
   onClipUpdate = null,
   onSelectClip = null,
   hasTimelineClips = false,
+  hasUnavailableMediaClips = false,
   isRestoringMedia = false,
 }) => {
   const isMobile = useMobile();
@@ -657,6 +659,12 @@ const Player = ({
   const [videoError, setVideoError] = useState(null);
   const [mobileControlsVisible, setMobileControlsVisible] = useState(true);
   const controlsTimerRef = useRef(null);
+  const restoreState = useMemo(() => getPlayerRestoreState({
+    videoSrc,
+    hasTimelineClips,
+    hasUnavailableMediaClips,
+    isRestoringMedia,
+  }), [videoSrc, hasTimelineClips, hasUnavailableMediaClips, isRestoringMedia]);
 
   // State machine for video element lifecycle
   const videoStateRef = useRef('idle'); // 'idle' | 'loading' | 'ready' | 'playing' | 'paused'
@@ -1266,26 +1274,26 @@ const Player = ({
                     </div>
                     <div style={{ textAlign: "center" }}>
                       <p style={{ fontSize: "14px", fontWeight: 600, color: "#64748b", margin: "0 0 4px" }}>
-                        {hasTimelineClips ? "No clip at playhead" : "No media loaded"}
+                        {restoreState.title}
                       </p>
                       <p style={{ fontSize: "11px", color: "#334155", margin: 0, lineHeight: 1.5 }}>
-                        {hasTimelineClips
-                          ? "Move the playhead over a clip on the timeline to preview"
-                          : "Import media and add clips to the timeline to preview"}
+                        {restoreState.description}
                       </p>
                     </div>
-                    <div style={{
-                      display: "flex", gap: "16px", marginTop: "4px",
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <Icon i="upload_file" s={13} c="#334155" />
-                        <span style={{ fontSize: "10px", color: "#334155" }}>Ctrl+I to import</span>
+                    {restoreState.showImportHint && (
+                      <div style={{
+                        display: "flex", gap: "16px", marginTop: "4px",
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                          <Icon i="upload_file" s={13} c="#334155" />
+                          <span style={{ fontSize: "10px", color: "#334155" }}>Ctrl+I to import</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                          <Icon i="space_bar" s={13} c="#334155" />
+                          <span style={{ fontSize: "10px", color: "#334155" }}>Space to play</span>
+                        </div>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                        <Icon i="space_bar" s={13} c="#334155" />
-                        <span style={{ fontSize: "10px", color: "#334155" }}>Space to play</span>
-                      </div>
-                    </div>
+                    )}
                   </>
                 )}
               </div>

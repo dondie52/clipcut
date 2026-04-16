@@ -42,6 +42,7 @@ const AIChatPanel = lazy(() => import('./AIChatPanel'));
 import BottomSheet from './BottomSheet';
 import Icon from './Icon';
 import { formatTimecode } from './timelineEngine';
+import { buildRestoredProjectState, hasUnavailableMediaClips } from './restoreState';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -895,6 +896,7 @@ const VideoEditor = () => {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiMessages, setAiMessages] = useState([]);
   const [aiThinking, setAiThinking] = useState(false);
+  const [aiSlowHint, setAiSlowHint] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const aiUndoStackRef = useRef([]);
   const aiRateLimitRef = useRef([]); // timestamps of recent prompts for rate limiting
@@ -1026,6 +1028,7 @@ const VideoEditor = () => {
     const first = clips.find(c => c.type !== 'audio' && c.type !== 'text' && c.blobUrl);
     return first?.blobUrl || null;
   }, [pb.currentClip, selectedMediaId, mediaItems, clips]);
+  const hasMissingPlayableMedia = useMemo(() => hasUnavailableMediaClips(clips), [clips]);
 
   // Text overlays visible at current playhead time (manual text + auto captions: both use type "text"; captions also set isCaption; stickers use type "sticker" with the emoji in clip.text)
   const textOverlays = useMemo(() => {
@@ -1476,6 +1479,7 @@ const VideoEditor = () => {
     }
 
     setAiThinking(true);
+    setAiSlowHint(false);
 
     try {
       const { executeAiEdit } = await import('../../services/aiEditService');
@@ -1511,7 +1515,7 @@ const VideoEditor = () => {
           setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
         },
         splitClip, selectedClipId, mediaItems,
-      }, { history });
+      }, { history, onSlowResponse: () => setAiSlowHint(true) });
 
       // Conversational reply — no actions executed, no undo needed
       if (result.isChat) {
@@ -1547,6 +1551,7 @@ const VideoEditor = () => {
       setAiMessages(prev => [...prev, errMsg]);
     } finally {
       setAiThinking(false);
+      setAiSlowHint(false);
     }
   }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime, aiMessages]);
 
@@ -1874,9 +1879,10 @@ const VideoEditor = () => {
     /** Try loading media from IndexedDB, then Supabase, returning { file, blobUrl } or nulls. */
     const resolveMedia = async (clipData, cachedIdbEntries = []) => {
       let file = null, blobUrl = null;
+      const mediaKey = clipData.mediaId || clipData.id || null;
 
       console.log('[restore] resolveMedia called for:', {
-        name: clipData.name, type: clipData.type, mediaId: clipData.mediaId,
+        name: clipData.name, type: clipData.type, mediaId: mediaKey,
         idbKey: clipData.idbKey, storagePath: clipData.storagePath,
       });
 
@@ -1900,25 +1906,25 @@ const VideoEditor = () => {
       }
 
       // Also try with the current projectId as key (for older saves without idbKey)
-      if (!blobUrl && clipData.mediaId) {
+      if (!blobUrl && mediaKey) {
         try {
-          console.log('[restore] Trying fallback IndexedDB with projectId:', projectId, 'mediaId:', clipData.mediaId);
-          const stored = await withTimeout(loadMedia(projectId, clipData.mediaId), 2000);
+          console.log('[restore] Trying fallback IndexedDB with projectId:', projectId, 'mediaId:', mediaKey);
+          const stored = await withTimeout(loadMedia(projectId, mediaKey), 2000);
           if (stored) {
             file = stored.file; blobUrl = stored.blobUrl;
             console.log('[restore] Fallback IndexedDB HIT:', clipData.name);
           } else {
-            console.warn('[restore] Fallback IndexedDB MISS:', projectId, clipData.mediaId);
+            console.warn('[restore] Fallback IndexedDB MISS:', projectId, mediaKey);
           }
         } catch (e) {
-          console.warn('[restore] IndexedDB fallback load failed:', clipData.mediaId, e);
+          console.warn('[restore] IndexedDB fallback load failed:', mediaKey, e);
         }
       }
 
       // 2b. Broad scan: use pre-cached IndexedDB entries instead of fetching again
-      if (!blobUrl && clipData.mediaId) {
+      if (!blobUrl && mediaKey) {
         try {
-          const match = cachedIdbEntries.find(e => e.mediaId === clipData.mediaId);
+          const match = cachedIdbEntries.find(e => e.mediaId === mediaKey);
           if (match) {
             console.log('[restore] IndexedDB SCAN HIT:', match.key);
             const stored = await withTimeout(loadMedia(match.projectId, match.mediaId), 2000);
@@ -2017,13 +2023,15 @@ const VideoEditor = () => {
         const uniqueMedia = new Map(); // mediaId → clipData (deduplicated)
 
         for (const mi of savedMediaItems) {
-          if (mi.id && !uniqueMedia.has(mi.id)) {
-            uniqueMedia.set(mi.id, mi);
+          const mediaKey = mi.id || mi.mediaId;
+          if (mediaKey && !uniqueMedia.has(mediaKey)) {
+            uniqueMedia.set(mediaKey, mi);
           }
         }
         for (const clipData of savedClips) {
-          if (clipData.type !== 'text' && clipData.mediaId && !uniqueMedia.has(clipData.mediaId)) {
-            uniqueMedia.set(clipData.mediaId, clipData);
+          const mediaKey = clipData.mediaId || clipData.id;
+          if (clipData.type !== 'text' && mediaKey && !uniqueMedia.has(mediaKey)) {
+            uniqueMedia.set(mediaKey, clipData);
           }
         }
 
@@ -2051,9 +2059,10 @@ const VideoEditor = () => {
         for (const clipData of savedClips) {
           let blobUrl = null;
           let file = null;
+          const mediaKey = clipData.mediaId || clipData.id;
 
-          if (clipData.mediaId && mediaMap.has(clipData.mediaId)) {
-            const cached = mediaMap.get(clipData.mediaId);
+          if (mediaKey && mediaMap.has(mediaKey)) {
+            const cached = mediaMap.get(mediaKey);
             blobUrl = cached.blobUrl;
             file = cached.file;
           }
@@ -2070,10 +2079,10 @@ const VideoEditor = () => {
         }
 
         // 3. Build media panel from mediaMap (includes both timeline clips and standalone imports)
-        const newMediaItems = [];
+        const resolvedMediaItemsById = new Map();
         for (const [id, entry] of mediaMap) {
           const meta = entry.meta || {};
-          newMediaItems.push({
+          resolvedMediaItemsById.set(id, {
             id,
             name: meta.name || 'media',
             file: entry.file,
@@ -2085,19 +2094,49 @@ const VideoEditor = () => {
             type: meta.type || 'video',
             isProcessing: false,
             storagePath: meta.storagePath,
+            _mediaError: null,
           });
         }
 
-        // Filter out non-text clips that failed to download (no blobUrl)
-        const playableClips = restoredClips.filter(c => c.type === 'text' || c.type === 'sticker' || c.blobUrl);
-        const skippedCount = restoredClips.length - playableClips.length;
+        const mergedMediaItems = [];
+        const mergedIds = new Set();
+        for (const savedItem of savedMediaItems) {
+          const mediaKey = savedItem.id || savedItem.mediaId;
+          const resolvedItem = mediaKey ? resolvedMediaItemsById.get(mediaKey) : null;
+          mergedMediaItems.push({
+            id: mediaKey,
+            name: savedItem.name || resolvedItem?.name || 'media',
+            file: resolvedItem?.file || null,
+            blobUrl: resolvedItem?.blobUrl || null,
+            thumbnail: null,
+            duration: resolvedItem?.duration ?? savedItem.duration ?? 0,
+            width: resolvedItem?.width ?? savedItem.width ?? 0,
+            height: resolvedItem?.height ?? savedItem.height ?? 0,
+            type: savedItem.type || resolvedItem?.type || 'video',
+            isProcessing: false,
+            storagePath: savedItem.storagePath || resolvedItem?.storagePath,
+            idbKey: savedItem.idbKey,
+            _mediaError: resolvedItem?.blobUrl || savedItem.type === 'audio' ? null : 'Media not found — re-import',
+          });
+          if (mediaKey) mergedIds.add(mediaKey);
+        }
+        for (const [mediaKey, resolvedItem] of resolvedMediaItemsById) {
+          if (mergedIds.has(mediaKey)) continue;
+          mergedMediaItems.push(resolvedItem);
+        }
 
-        setMediaItems(newMediaItems);
-        setClips(playableClips);
+        const restoredState = buildRestoredProjectState({
+          restoredClips,
+          mediaItems: mergedMediaItems,
+          projectName: pName,
+        });
+
+        setMediaItems(restoredState.mediaItems);
+        setClips(restoredState.clips);
         await restoreBgMusic(pData);
 
         // Asynchronously regenerate metadata and thumbnails for restored media items
-        for (const mi of newMediaItems) {
+        for (const mi of restoredState.mediaItems) {
           if (!mi.file || mi.type === 'audio') continue;
           (async () => {
             try {
@@ -2116,11 +2155,7 @@ const VideoEditor = () => {
           })();
         }
 
-        if (skippedCount > 0) {
-          notify("warning", `Loaded "${pName}" — ${skippedCount} clip(s) skipped (media unavailable)`);
-        } else {
-          notify("success", `Loaded "${pName}" (${playableClips.length} clips)`);
-        }
+        notify(restoredState.notification.level, restoredState.notification.message);
       } catch (e) {
         console.error("Project load error:", e);
         notify("error", "Failed to load project");
@@ -2329,6 +2364,7 @@ const VideoEditor = () => {
                 onClipUpdate={updateClip}
                 onSelectClip={setSelectedClipId}
                 hasTimelineClips={clips.some(c => c.type !== 'audio' && c.type !== 'text')}
+                hasUnavailableMediaClips={hasMissingPlayableMedia}
                 isRestoringMedia={isProcessing && loadMsg.includes('Restoring')}
               />
             </Suspense>
@@ -2363,6 +2399,7 @@ const VideoEditor = () => {
                 onClose={() => setAiPanelOpen(false)}
                 messages={aiMessages}
                 isThinking={aiThinking}
+                slowHint={aiSlowHint}
                 onSendMessage={handleAiSendMessage}
                 suggestions={aiSuggestions}
                 onApplySuggestion={handleAiSuggestion}
@@ -2539,6 +2576,7 @@ const VideoEditor = () => {
                     onClose={() => setMobileDrawerOpen(false)}
                     messages={aiMessages}
                     isThinking={aiThinking}
+                    slowHint={aiSlowHint}
                     onSendMessage={handleAiSendMessage}
                     suggestions={aiSuggestions}
                     onApplySuggestion={handleAiSuggestion}

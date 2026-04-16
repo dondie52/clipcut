@@ -318,6 +318,23 @@ const MediaItem = memo(({
         }}>
           {formatDuration(item.duration)}
         </span>
+        {item._mediaError && (
+          <span style={{
+            position: 'absolute',
+            bottom: '4px',
+            right: '4px',
+            zIndex: 2,
+            background: 'rgba(239,68,68,0.9)',
+            fontSize: '8px',
+            padding: '2px 6px',
+            borderRadius: '999px',
+            color: 'white',
+            fontWeight: 600,
+            letterSpacing: '0.4px',
+          }}>
+            MISSING
+          </span>
+        )}
         
         {/* Hover overlay with actions */}
         <div 
@@ -443,9 +460,19 @@ const MediaItem = memo(({
       }}>
         {item.name}
       </p>
+      {item._mediaError && (
+        <p style={{
+          fontSize: '9px',
+          color: '#ef4444',
+          margin: '2px 0 0',
+          lineHeight: 1.4,
+        }}>
+          Re-import source media to restore preview
+        </p>
+      )}
       
       {/* Resolution info */}
-      {item.width && item.height && (
+      {item.width && item.height && !item._mediaError && (
         <p style={{
           fontSize: '9px',
           color: '#475569',
