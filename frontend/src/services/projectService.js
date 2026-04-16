@@ -758,7 +758,7 @@ function loadProjectFromLocalStorage(projectId) {
  * List projects from localStorage (fallback)
  * @returns {Array} Array of project summaries
  */
-function listProjectsFromLocalStorage() {
+export function listProjectsFromLocalStorage() {
   const projects = [];
 
   for (let i = 0; i < localStorage.length; i++) {
@@ -772,11 +772,13 @@ function listProjectsFromLocalStorage() {
           id: data.id || projectName,
           name: data.name || data.projectName || projectName,
           thumbnail_url: data.thumbnail_url || data.project_data?.thumbnailDataUrl || null,
+          project_data: data.project_data || null,
           duration_seconds: data.duration_seconds || 0,
           resolution: data.resolution || "1080p",
           created_at: data.created_at || data.savedAt,
           updated_at: data.updated_at || data.savedAt,
           _source: "localStorage",
+          _localStorageKey: key,
         });
       } catch (e) {
         console.warn("Failed to parse project:", key, e);
@@ -839,6 +841,11 @@ export async function migrateLocalProjectsToCloud(userId) {
   let migrated = 0;
 
   for (const project of localProjects) {
+    // Skip projects already migrated in a previous run
+    if (localStorage.getItem(`clipcut_migrated_${project.id}`) === "true") {
+      continue;
+    }
+
     try {
       const fullProject = loadProjectFromLocalStorage(project.id);
       if (fullProject) {
@@ -846,12 +853,20 @@ export async function migrateLocalProjectsToCloud(userId) {
         await saveProject(userId, {
           name: fullProject.name || fullProject.projectName,
           clips: fullProject.project_data?.clips || fullProject.clips || [],
+          mediaItems: fullProject.project_data?.mediaItems || fullProject.mediaItems || [],
           duration: fullProject.duration_seconds || 0,
           resolution: fullProject.resolution || "1080p",
+          thumbnailDataUrl: fullProject.project_data?.thumbnailDataUrl || fullProject.thumbnail_url || null,
         });
 
-        // Mark as migrated (optionally delete local copy)
+        // Mark as migrated and clean up the original localStorage entry
         localStorage.setItem(`clipcut_migrated_${project.id}`, "true");
+        if (project._localStorageKey) {
+          localStorage.removeItem(project._localStorageKey);
+        } else {
+          localStorage.removeItem(`clipcut_project_${project.id}`);
+          localStorage.removeItem(`clipcut_autosave_${project.id}`);
+        }
         migrated++;
       }
     } catch (e) {

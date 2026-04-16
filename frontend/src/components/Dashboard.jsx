@@ -11,7 +11,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../supabase/AuthContext";
 import { useMobile } from "../hooks/useMobile";
-import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject, loadProject as loadCloudProject, saveProject as saveCloudProject } from "../services/projectService";
+import { listProjects as listCloudProjects, deleteProject as deleteCloudProject, updateProject as updateCloudProject, loadProject as loadCloudProject, saveProject as saveCloudProject, listProjectsFromLocalStorage, migrateLocalProjectsToCloud } from "../services/projectService";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
@@ -642,6 +642,7 @@ const Dashboard = () => {
   const { user, signOut } = useAuth();
   const isMobile = useMobile();
   const fileInputRef = useRef(null);
+  const migrationTriggeredRef = useRef(false);
   const [activeNav, setActiveNav] = useState("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -699,21 +700,46 @@ const Dashboard = () => {
     try {
       const cloudProjects = await listCloudProjects(user?.id);
 
+      // Check for localStorage projects stranded by failed saves or expired sessions
+      let localOnly = [];
+      try {
+        const localProjects = listProjectsFromLocalStorage();
+        const cloudIds = new Set(cloudProjects.map(p => p.id));
+        localOnly = localProjects.filter(p => !cloudIds.has(p.id));
+      } catch { /* localStorage unavailable */ }
+
+      const allProjects = [...cloudProjects, ...localOnly];
+
+      // Background migration: push stranded local projects to Supabase
+      if (user?.id && localOnly.length > 0 && !migrationTriggeredRef.current) {
+        migrationTriggeredRef.current = true;
+        migrateLocalProjectsToCloud(user.id)
+          .then(count => {
+            if (count > 0) {
+              logger.info(`Migrated ${count} local project(s) to cloud`);
+              loadProjects();
+            }
+          })
+          .catch(err => logger.warn("Local project migration failed", { error: err }));
+      }
+
       // Auto-fix "Untitled Project" names from clip data and persist to DB
       const renamePromises = [];
-      for (const p of cloudProjects) {
+      for (const p of allProjects) {
         const derived = deriveProjectName(p);
         if (derived !== p.name) {
           p.name = derived;
-          renamePromises.push(
-            updateCloudProject(p.id, user?.id, { name: derived }).catch(() => {})
-          );
+          if (p._source !== "localStorage") {
+            renamePromises.push(
+              updateCloudProject(p.id, user?.id, { name: derived }).catch(() => {})
+            );
+          }
         }
       }
       // Fire-and-forget: update names in background
       if (renamePromises.length > 0) Promise.all(renamePromises);
 
-      const formattedProjects = cloudProjects.map(p => ({
+      const formattedProjects = allProjects.map(p => ({
         id: p.id,
         name: p.name,
         thumbnail: p.thumbnail_url || p.project_data?.thumbnailDataUrl || null,
@@ -784,6 +810,12 @@ const Dashboard = () => {
     if (window.confirm("Are you sure you want to delete this project?")) {
       try {
         await deleteCloudProject(projectId, user?.id);
+        // Also clean up any localStorage entries (no-op if not present)
+        try {
+          localStorage.removeItem(`clipcut_project_${projectId}`);
+          localStorage.removeItem(`clipcut_autosave_${projectId}`);
+          localStorage.removeItem(`clipcut_migrated_${projectId}`);
+        } catch { /* localStorage unavailable */ }
         trackEvent(analyticsEvents.dashboardProjectDelete, { projectId });
         setProjects(prev => prev.filter(p => p.id !== projectId));
       } catch (err) {
