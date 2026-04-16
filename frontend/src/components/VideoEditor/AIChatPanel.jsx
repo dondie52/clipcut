@@ -144,15 +144,20 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
 });
 
 /* ========== Thinking Indicator ========== */
-const ThinkingIndicator = memo(function ThinkingIndicator() {
+const ThinkingIndicator = memo(function ThinkingIndicator({ slowHint = false }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
       <div className="ai-msg-bubble ai-msg-assistant" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 18px' }}>
         <div className="ai-thinking-dot" />
         <div className="ai-thinking-dot" />
         <div className="ai-thinking-dot" />
         <span style={{ marginLeft: 6, fontSize: 12, color: COLORS.TEXT_MUTED }}>Thinking...</span>
       </div>
+      {slowHint && (
+        <div style={{ padding: '0 4px', fontSize: 11, color: COLORS.TEXT_SECONDARY, fontFamily: FONTS.PRIMARY, fontStyle: 'italic' }}>
+          This can take up to 30 seconds on a cold start…
+        </div>
+      )}
     </div>
   );
 });
@@ -198,6 +203,7 @@ const AIChatPanel = memo(function AIChatPanel({
   onClose,
   messages,
   isThinking,
+  slowHint = false,
   onSendMessage,
   suggestions = [],
   onApplySuggestion,
@@ -416,7 +422,7 @@ const AIChatPanel = memo(function AIChatPanel({
         {messages.map((msg, i) => (
           <ChatMessage key={msg.id || i} msg={msg} />
         ))}
-        {isThinking && <ThinkingIndicator />}
+        {isThinking && <ThinkingIndicator slowHint={slowHint} />}
         <div ref={messagesEndRef} />
       </div>
 

@@ -265,7 +265,11 @@ export const styles = {
     flexDirection: "column",
     minHeight: "120px",
     overflow: "hidden",
-    position: "relative"
+    position: "relative",
+    /* Stack above the main workspace so fixed full-viewport layers inside the
+       player (e.g. speed menu backdrop at z-index 99) cannot eat clicks on the
+       timeline toolbar. TopBar stays higher (z-index 3000). */
+    zIndex: 10,
   },
   tlToolbar: {
     height: "38px",

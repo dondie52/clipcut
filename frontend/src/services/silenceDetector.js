@@ -96,3 +96,27 @@ export async function detectSilence(file, options = {}) {
 export function totalSilenceDuration(ranges) {
   return ranges.reduce((sum, r) => sum + (r.end - r.start), 0);
 }
+
+/**
+ * Keep only the portion of each silence range that falls inside a source-time window
+ * (e.g. the trimmed segment used on the timeline). Drops fragments shorter than minDuration.
+ *
+ * @param {Array<{start: number, end: number}>} ranges
+ * @param {number} windowStart - source seconds (inclusive)
+ * @param {number} windowEnd - source seconds (exclusive)
+ * @param {number} [minDuration=0.5]
+ * @returns {Array<{start: number, end: number}>}
+ */
+export function intersectSilenceRanges(ranges, windowStart, windowEnd, minDuration = 0.5) {
+  if (!Array.isArray(ranges) || ranges.length === 0) return [];
+  if (!Number.isFinite(windowStart) || !Number.isFinite(windowEnd) || windowEnd <= windowStart) {
+    return ranges;
+  }
+  const out = [];
+  for (const r of ranges) {
+    const s = Math.max(r.start, windowStart);
+    const e = Math.min(r.end, windowEnd);
+    if (e - s >= minDuration) out.push({ start: s, end: e });
+  }
+  return out;
+}

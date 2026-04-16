@@ -148,7 +148,7 @@ export async function saveProject(userId, projectData) {
 
   checkRateLimit(apiRateLimiter, 'save');
 
-  const { name, clips, duration, resolution, thumbnail, bgMusic } = projectData;
+  const { name, clips, duration, resolution, thumbnail, bgMusic, timelineMarkers } = projectData;
   // Strip non-UUID IDs (draft-xxx, local_xxx) — Supabase needs a real UUID or no ID (INSERT)
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const id = projectData.id && UUID_RE.test(projectData.id) ? projectData.id : undefined;
@@ -160,6 +160,7 @@ export async function saveProject(userId, projectData) {
     clips: clips || [],
     mediaItems: projectData.mediaItems || [],
     savedAt: new Date().toISOString(),
+    ...(Array.isArray(timelineMarkers) ? { timelineMarkers } : {}),
     ...(bgMusic ? { bgMusic } : {}),
     // Embed thumbnail data URL in JSONB as fallback when Storage URLs break
     ...(projectData.thumbnailDataUrl ? { thumbnailDataUrl: projectData.thumbnailDataUrl } : {}),
@@ -721,6 +722,7 @@ function saveProjectToLocalStorage(projectData) {
       clips: projectData.clips,
       mediaItems: projectData.mediaItems || [],
       savedAt: new Date().toISOString(),
+      ...(Array.isArray(projectData.timelineMarkers) ? { timelineMarkers: projectData.timelineMarkers } : {}),
       ...(projectData.bgMusic ? { bgMusic: projectData.bgMusic } : {}),
     },
     thumbnail_url: thumbnailDataUrl,

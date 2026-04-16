@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { SCROLLBAR_CSS, DEFAULT_CLIP_PROPERTIES } from './constants';
+import { SCROLLBAR_CSS, DEFAULT_CLIP_PROPERTIES, TRANSITION_PRESETS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
 import {
   zoomToPxPerSec, timeToX, xToTime,
@@ -150,6 +150,27 @@ const TIMELINE_CSS = `
 
   .minimap { transition: opacity 0.2s ease; }
   .minimap:hover { opacity: 1 !important; }
+
+  .tl-junction-plus {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(26,35,50,0.95);
+    border: 1.5px solid rgba(117,170,219,0.55);
+    color: #75aadb;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; line-height: 1;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.45);
+    transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  }
+  .tl-junction-plus:hover {
+    transform: scale(1.08);
+    border-color: #75aadb;
+    background: rgba(117,170,219,0.15);
+  }
+  .tl-marker-hit {
+    transition: transform 0.1s ease, filter 0.1s ease;
+  }
+  .tl-marker-hit:hover { transform: scale(1.15); filter: brightness(1.15); }
 `;
 
 /* ========== WAVEFORM CANVAS ========== */
@@ -356,8 +377,10 @@ const TimelineClip = memo(({
       onPointerDown={(e) => {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         e.stopPropagation();
+        e.preventDefault(); // prevent subsequent mousedown from triggering timeline scrub
         onPointerDown(e, clip);
       }}
+      onMouseDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => {
         // Desktop right-click → open context menu at cursor
         e.preventDefault();
@@ -600,6 +623,33 @@ const TlBtn = memo(({ icon, onClick, disabled, active, label, shortcut, color = 
 TlBtn.displayName = "TlBtn";
 
 /* ========== MAIN TIMELINE COMPONENT ========== */
+const TRANS_JUNCTION_EPS = 0.08;
+
+const clipEligibleForTransition = (c) => {
+  if (!c || c.type === 'audio') return false;
+  if (c.type === 'text' || c.type === 'sticker') return false;
+  if (c.isCaption) return false;
+  return true;
+};
+
+const buildTransitionJunctions = (clipList) => {
+  const out = [];
+  for (const trackNum of [0, 1]) {
+    const list = clipList
+      .filter((c) => clipEligibleForTransition(c) && (c.track || 0) === trackNum)
+      .sort((a, b) => a.startTime - b.startTime);
+    for (let i = 0; i < list.length - 1; i++) {
+      const a = list[i];
+      const b = list[i + 1];
+      const endA = a.startTime + a.duration;
+      if (Math.abs(endA - b.startTime) < TRANS_JUNCTION_EPS) {
+        out.push({ time: endA, leftClipId: a.id, track: trackNum });
+      }
+    }
+  }
+  return out;
+};
+
 const Timeline = ({
   id,
   clips = [], selectedClipId, onSelectClip, onUpdateClip,
@@ -608,6 +658,8 @@ const Timeline = ({
   canUndo = false, canRedo = false, onUndo, onRedo,
   mediaItems = [], onAddToTimeline,
   timelineHeight,
+  timelineMarkers = [],
+  onTimelineMarkersChange,
 }) => {
   const isMobile = useMobile();
 
@@ -629,6 +681,15 @@ const Timeline = ({
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [showVolumePopover, setShowVolumePopover] = useState(false);
   const [showSpeedPopover, setShowSpeedPopover] = useState(false);
+  /** Fixed-position transition picker opened from the + between two clips */
+  const [junctionPopover, setJunctionPopover] = useState(null); // { leftClipId, x, y } | null
+
+  useEffect(() => {
+    if (!selectedClipId) {
+      setShowVolumePopover(false);
+      setShowSpeedPopover(false);
+    }
+  }, [selectedClipId]);
   const [viewport, setViewport] = useState({ start: 0, end: 30 });
 
   // ── Refs ─────────────────────────────────────────────────────
@@ -691,6 +752,7 @@ const Timeline = ({
   const hasV2Clips = useMemo(() => clips.some((c) => c.type !== "audio" && c.track === 1), [clips]);
   const hasA2Clips = useMemo(() => clips.some((c) => c.type === "audio" && c.track === 1), [clips]);
   const timeMarkers = useMemo(() => generateMarkers(totalDuration, pxPerSec), [totalDuration, pxPerSec]);
+  const transitionJunctions = useMemo(() => buildTransitionJunctions(clips), [clips]);
 
   // ── Sync playhead from currentTime prop ──────────────────────
   useEffect(() => {
@@ -762,6 +824,9 @@ const Timeline = ({
 
     // Select immediately
     onSelectClip?.(clip.id);
+
+    // Focus the timeline so keyboard shortcuts (Delete, S, etc.) work
+    timelineRef.current?.focus();
 
     // Capture the pointer on the clip element so drag keeps working
     // even if the finger / cursor leaves the clip's bounds.
@@ -1216,6 +1281,42 @@ const Timeline = ({
     onRippleDelete?.(updated);
   }, [selectedClipId, isProcessing, clips, onRippleDelete]);
 
+  const addMarkerAtPlayhead = useCallback(() => {
+    if (!onTimelineMarkersChange || isProcessing) return;
+    const t = Math.max(0, Math.min(totalDuration, playheadPos));
+    onTimelineMarkersChange((prev) => {
+      const list = Array.isArray(prev) ? prev : [];
+      if (list.some((m) => Math.abs(m.time - t) < 0.04)) return list;
+      const id = `mk-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      return [...list, { id, time: t }].sort((a, b) => a.time - b.time);
+    });
+  }, [onTimelineMarkersChange, isProcessing, playheadPos, totalDuration]);
+
+  const removeMarkerById = useCallback((markerId) => {
+    onTimelineMarkersChange?.((prev) => (Array.isArray(prev) ? prev : []).filter((m) => m.id !== markerId));
+  }, [onTimelineMarkersChange]);
+
+  const openJunctionPopover = useCallback((e, leftClipId) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (isProcessing) return;
+    onSelectClip?.(leftClipId);
+    setJunctionPopover({ leftClipId, x: e.clientX, y: e.clientY });
+  }, [isProcessing, onSelectClip]);
+
+  const applyJunctionTransition = useCallback((leftClipId, value) => {
+    onUpdateClip?.(leftClipId, { transition: value });
+    setJunctionPopover(null);
+  }, [onUpdateClip]);
+
+  useEffect(() => {
+    if (!junctionPopover) return;
+    const onScrollClose = () => setJunctionPopover(null);
+    const el = timelineRef.current;
+    el?.addEventListener("scroll", onScrollClose, { passive: true });
+    return () => el?.removeEventListener("scroll", onScrollClose);
+  }, [junctionPopover]);
+
   // ────────────────────────────────────────────────────────────
   //  KEYBOARD SHORTCUTS
   // ────────────────────────────────────────────────────────────
@@ -1240,7 +1341,17 @@ const Timeline = ({
           { const dt = e.shiftKey ? 1 : 1 / 30; const t = Math.min(totalDuration, playheadPos + dt); setPlayheadPos(t); onSeek?.(t); } break;
         case "Home": e.preventDefault(); setPlayheadPos(0); onSeek?.(0); break;
         case "End": e.preventDefault(); setPlayheadPos(totalDuration); onSeek?.(totalDuration); break;
-        case "Escape": onSelectClip?.(null); break;
+        case "Escape":
+          setJunctionPopover(null);
+          onSelectClip?.(null);
+          break;
+        case "m":
+        case "M":
+          if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            addMarkerAtPlayhead();
+          }
+          break;
         case "v": case "V":
           if (e.ctrlKey || e.metaKey) { e.preventDefault(); handlePaste(); }
           else setActiveTool("select");
@@ -1259,7 +1370,7 @@ const Timeline = ({
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [selectedClipId, isProcessing, playheadPos, totalDuration, onDeleteClip, onSeek, onSelectClip, handleSplit, handleCopy, handlePaste, handleDuplicate]);
+  }, [selectedClipId, isProcessing, playheadPos, totalDuration, onDeleteClip, onSeek, onSelectClip, handleSplit, handleCopy, handlePaste, handleDuplicate, addMarkerAtPlayhead]);
 
   // ── Cleanup on unmount ───────────────────────────────────────
   useEffect(() => () => {
@@ -1296,6 +1407,13 @@ const Timeline = ({
           {/* Clip actions — hide duplicate on mobile */}
           <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
             <TlBtn icon="carpenter" onClick={handleSplit} disabled={!canSplit} label="Split at playhead" shortcut="S" />
+            <TlBtn
+              icon="bookmark_add"
+              onClick={addMarkerAtPlayhead}
+              disabled={isProcessing || !onTimelineMarkersChange}
+              label="Add marker at playhead (timestamp diamond)"
+              shortcut="M"
+            />
             {!isMobile && <TlBtn icon="content_copy" onClick={handleDuplicate} disabled={!canSplit} label="Duplicate clip" shortcut="Ctrl+D" />}
             <TlBtn icon="delete" onClick={handleRippleDelete} disabled={!canDelete} label="Ripple delete" shortcut="Del" />
           </div>
@@ -1500,7 +1618,7 @@ const Timeline = ({
           onTouchEnd={() => { endTouchScrub(); handleTouchEndZoom(); }}
           tabIndex={0}
           role="application"
-          aria-label="Timeline — arrow keys to scrub, S to split, Del to delete, Ctrl+wheel to zoom"
+          aria-label="Timeline — arrow keys to scrub, S to split, M for marker, Del to delete, Ctrl+wheel to zoom"
           style={{
             flex: 1, position: "relative", overflowX: "auto", overflowY: "hidden",
             background: "linear-gradient(180deg, rgba(8,10,14,0.8) 0%, rgba(6,8,12,0.9) 100%)",
@@ -1534,6 +1652,47 @@ const Timeline = ({
                 bottom: 0, width: "1px", height: "8px",
                 background: "rgba(100,116,139,0.12)",
               }} />
+            ))}
+            {(Array.isArray(timelineMarkers) ? timelineMarkers : []).map((mk) => (
+              <button
+                key={mk.id}
+                type="button"
+                title={`${formatTimecode(mk.time)} — click to seek; double-click or Alt+click to remove`}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  if (e.altKey || e.detail >= 2) {
+                    removeMarkerById(mk.id);
+                    return;
+                  }
+                  setPlayheadPos(mk.time);
+                  onSeek?.(mk.time);
+                }}
+                className="tl-marker-hit"
+                aria-label={`Timeline marker at ${formatTimecode(mk.time)}`}
+                style={{
+                  position: "absolute",
+                  left: `${timeToX(mk.time, pxPerSec)}px`,
+                  top: "3px",
+                  zIndex: 22,
+                  width: "14px",
+                  height: "14px",
+                  marginLeft: "-7px",
+                  padding: 0,
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                }}
+              >
+                <span style={{
+                  display: "block", width: "9px", height: "9px", margin: "2px auto 0",
+                  background: "linear-gradient(135deg, #fbbf24 0%, #d97706 100%)",
+                  transform: "rotate(45deg)",
+                  borderRadius: "1px",
+                  boxShadow: "0 0 0 1px rgba(0,0,0,0.35), 0 1px 4px rgba(0,0,0,0.4)",
+                  pointerEvents: "none",
+                }} />
+              </button>
             ))}
           </div>
 
@@ -1613,6 +1772,24 @@ const Timeline = ({
                   cutMode={activeTool === "cut"}
                 />
               ))}
+              {!trackLocks.video && transitionJunctions.filter((j) => j.track === 0).map((j) => (
+                <button
+                  key={`tj-v1-${j.leftClipId}-${j.time}`}
+                  type="button"
+                  className="tl-junction-plus"
+                  aria-label="Add transition between clips"
+                  title="Add transition"
+                  style={{
+                    position: "absolute",
+                    left: `${timeToX(j.time, pxPerSec) - 9}px`,
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    zIndex: 24,
+                    padding: 0,
+                  }}
+                  onPointerDown={(e) => openJunctionPopover(e, j.leftClipId)}
+                >+</button>
+              ))}
               {videoClips.length === 0 && <EmptyTrackPlaceholder type="video" isDragOver={dragOverTrack === "video"} />}
             </div>
 
@@ -1636,6 +1813,24 @@ const Timeline = ({
                     onRequestMenu={openClipMenu}
                     cutMode={activeTool === "cut"}
                   />
+                ))}
+                {!trackLocks.video2 && transitionJunctions.filter((j) => j.track === 1).map((j) => (
+                  <button
+                    key={`tj-v2-${j.leftClipId}-${j.time}`}
+                    type="button"
+                    className="tl-junction-plus"
+                    aria-label="Add transition between clips"
+                    title="Add transition"
+                    style={{
+                      position: "absolute",
+                      left: `${timeToX(j.time, pxPerSec) - 9}px`,
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      zIndex: 24,
+                      padding: 0,
+                    }}
+                    onPointerDown={(e) => openJunctionPopover(e, j.leftClipId)}
+                  >+</button>
                 ))}
               </div>
             )}
@@ -1717,6 +1912,64 @@ const Timeline = ({
             <span style={{ color: "white", fontSize: "13px", fontWeight: 500 }}>Processing...</span>
           </div>
         </div>
+      )}
+
+      {junctionPopover && (
+        <>
+          <div
+            role="presentation"
+            onPointerDown={() => setJunctionPopover(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 9997 }}
+          />
+          <div
+            role="dialog"
+            aria-label="Choose transition"
+            style={{
+              position: "fixed",
+              left: Math.min(junctionPopover.x, (typeof window !== "undefined" ? window.innerWidth : 800) - 210),
+              top: Math.min(junctionPopover.y + 10, (typeof window !== "undefined" ? window.innerHeight : 600) - 220),
+              zIndex: 9998,
+              background: "rgba(26,35,50,0.98)",
+              border: "1px solid rgba(117,170,219,0.25)",
+              borderRadius: "8px",
+              padding: "8px",
+              boxShadow: "0 12px 32px rgba(0,0,0,0.55)",
+              maxWidth: "210px",
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: "10px", fontWeight: 600, color: "#94a3b8", marginBottom: "6px" }}>
+              Transition to next clip
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "4px" }}>
+              {TRANSITION_PRESETS.map((t) => (
+                <button
+                  key={String(t.value)}
+                  type="button"
+                  title={t.label}
+                  onClick={() => applyJunctionTransition(junctionPopover.leftClipId, t.value)}
+                  style={{
+                    background: "rgba(30,41,59,0.6)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: "4px",
+                    padding: "5px 2px",
+                    cursor: "pointer",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "2px",
+                    fontSize: "8px",
+                    color: "#94a3b8",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <Icon i={t.icon} s={14} c="#94a3b8" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
       {/* Clip context menu — right-click (desktop) / long-press (mobile) */}

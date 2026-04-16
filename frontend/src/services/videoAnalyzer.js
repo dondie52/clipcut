@@ -5,7 +5,7 @@
  * Called after a video is added to the timeline.
  */
 
-import { detectSilence, totalSilenceDuration } from './silenceDetector';
+import { detectSilence, totalSilenceDuration, intersectSilenceRanges } from './silenceDetector';
 
 /**
  * Analyze a video clip and return suggestions for the AI panel.
@@ -39,14 +39,20 @@ export async function analyzeVideo(clip, options = {}) {
 
   // Silence detection (fast — runs in < 2s for most videos)
   try {
-    const silentRanges = await detectSilence(file, { threshold: -40, minDuration: 0.5 });
+    const silentRangesFull = await detectSilence(file, { threshold: -40, minDuration: 0.5 });
+    const trimStart = clip.trimStart || 0;
+    const dur = typeof clip.duration === 'number' && clip.duration > 0 ? clip.duration : 0;
+    const windowEnd = trimStart + dur;
+    const silentRanges = dur > 0 && windowEnd > trimStart
+      ? intersectSilenceRanges(silentRangesFull, trimStart, windowEnd, 0.5)
+      : silentRangesFull;
     if (silentRanges.length > 0) {
       const totalSilence = totalSilenceDuration(silentRanges);
       suggestions.push({
         id: 'remove-silence',
         icon: 'volume_off',
         title: `Remove silence (${totalSilence.toFixed(0)}s)`,
-        description: `${silentRanges.length} silent section${silentRanges.length !== 1 ? 's' : ''} detected.`,
+        description: `${silentRanges.length} silent section${silentRanges.length !== 1 ? 's' : ''} detected in this clip.`,
         action: 'remove_silence',
         params: { threshold: -40, minDuration: 0.5 },
       });

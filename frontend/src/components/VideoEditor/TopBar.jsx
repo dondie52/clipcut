@@ -879,11 +879,13 @@ const TopBar = ({
           </div>
         </div>
         
-        {/* Center section - Project title */}
+        {/* Center section - Project title (wrapper ignores pointer events so a
+            wide invisible hit-box cannot block header controls on narrow widths) */}
         <div style={{
           position: 'absolute',
           left: '50%',
-          transform: 'translateX(-50%)'
+          transform: 'translateX(-50%)',
+          pointerEvents: 'none',
         }}>
           <input
             type="text"
@@ -899,7 +901,8 @@ const TopBar = ({
               left: 'auto',
               transform: 'none',
               border: '1px solid transparent',
-              width: isMobile ? '120px' : '220px'
+              width: isMobile ? '120px' : '220px',
+              pointerEvents: 'auto',
             }}
             aria-label="Project name"
             title="Click to edit project name"

@@ -39,14 +39,20 @@ export function parseIntentLocally(prompt) {
     // Order matters: match removal intent BEFORE the generic `captions?` fallback.
     // The prior `(?!.*remove)` lookahead only inspected characters AFTER the match,
     // so "remove captions" still hit add_captions.
-    [/\b(?:remove|delete|clear|get\s+rid\s+of|strip)\s+(?:the\s+|all\s+)?(?:auto[- ]?)?captions?\b/, () => [{ type: 'remove_captions', params: {} }]],
-    [/\b(?:no|without)\s+captions?\b/, () => [{ type: 'remove_captions', params: {} }]],
+    [/\b(?:remove|delete|clear|get\s+rid\s+of|strip)\s+(?:the\s+|all\s+)?(?:auto[- ]?)?(?:captions?|subs?(?:titles?)?)\b/, () => [{ type: 'remove_captions', params: {} }]],
+    [/\b(?:no|without)\s+(?:captions?|subs?(?:titles?)?)\b/, () => [{ type: 'remove_captions', params: {} }]],
     [/\badd\s+(auto[- ]?)?captions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
+    [/\b(?:add|generate|put|turn\s+on)\s+(?:the\s+)?subs?(?:titles?)?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\bcaptions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\bremove\s+silence\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
+    // Filler must match BEFORE the silence-synonym pattern below — "cut the ums" shouldn't become remove_silence.
+    [/\b(?:remove|cut|delete|strip)\s+(?:the\s+|all\s+)?(?:ums?|uhs?|umms?|filler\s+words?)\b/, () => [{ type: 'remove_filler_words', params: {} }]],
     [/\bremove\s+filler\b/, () => [{ type: 'remove_filler_words', params: {} }]],
+    [/\b(?:cut|trim|delete|take)\s+(?:out\s+)?(?:the\s+|all\s+)?(?:silent|silence|quiet\s+parts?|dead\s+air|pauses?)\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
+    [/\b(?:make\s+(?:it|this)\s+shorter|shorten\s+(?:it|this|the\s+video))\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
     [/\bmake\s+(?:it\s+)?vertical\b|tiktok|9[:\s]16|reels?\b|shorts?\b/, () => [{ type: 'smart_crop', params: { aspect: '9:16' } }]],
     [/\bmake\s+(?:it\s+)?square\b|1[:\s]1/, () => [{ type: 'smart_crop', params: { aspect: '1:1' } }]],
+    [/\bmake\s+(?:it\s+)?(?:horizontal|landscape|widescreen)\b|16[:\s]9/, () => [{ type: 'smart_crop', params: { aspect: '16:9' } }]],
     [/\bhighlight|best\s+(\d+)\s*(?:sec|s\b|seconds?)/, (m) => [{ type: 'auto_highlight', params: { duration: parseInt(m[1]) || 60 } }]],
     [/\bfind\s+(?:the\s+)?best\b/, () => [{ type: 'auto_highlight', params: { duration: 60 } }]],
     [/\bdetect\s+scenes?\b|scene\s+split/, () => [{ type: 'detect_scenes', params: { sensitivity: 'medium' } }]],
@@ -95,10 +101,10 @@ export function parseIntentLocally(prompt) {
  * @returns {Promise<{summary: string, actionLabels: string[]}>}
  */
 export async function executeAiEdit(prompt, context, editor, options = {}) {
-  const { history } = options;
+  const { history, onSlowResponse } = options;
 
   // Step 1: Parse intent via Cloudflare Worker (with conversation history)
-  const parsed = await parseIntent(prompt, context, history);
+  const parsed = await parseIntent(prompt, context, history, onSlowResponse);
 
   // If the Worker returned a conversational reply, pass it through without executing
   if (parsed && parsed.chat === true) {
@@ -138,7 +144,7 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
  * Parse intent — tries local pattern matching first (instant, offline),
  * falls back to the Worker /edit endpoint for ambiguous prompts.
  */
-async function parseIntent(prompt, context, history) {
+async function parseIntent(prompt, context, history, onSlowResponse) {
   // Try local parser first — handles all quick-action prompts instantly
   const localActions = parseIntentLocally(prompt);
   if (localActions) return localActions;
@@ -156,10 +162,13 @@ async function parseIntent(prompt, context, history) {
     payload.history = history;
   }
 
-  // Try up to 2 times (retry once on invalid JSON)
+  // Try up to 2 times (retry once on invalid JSON or timeout)
   for (let attempt = 0; attempt < 2; attempt++) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const slowTimerId = onSlowResponse
+      ? setTimeout(() => { try { onSlowResponse(); } catch { /* ignore */ } }, 8000)
+      : null;
 
     let res;
     try {
@@ -171,12 +180,16 @@ async function parseIntent(prompt, context, history) {
       });
     } catch (err) {
       clearTimeout(timeoutId);
+      if (slowTimerId) clearTimeout(slowTimerId);
       if (err.name === 'AbortError') {
-        throw new Error('AI service took too long to respond. Try a simpler command like "add captions" or "remove silence".');
+        // Retry once on timeout — Workers AI cold starts can exceed 15s
+        if (attempt === 0) continue;
+        throw new Error('AI service took too long to respond. Try a quick-action phrasing like "add captions", "remove silence", or "make it vertical".');
       }
       throw err;
     }
     clearTimeout(timeoutId);
+    if (slowTimerId) clearTimeout(slowTimerId);
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
@@ -889,7 +902,7 @@ async function executeSmartCrop(params, editor) {
   const file = await getClipFile(clip);
   const aspect = params.aspect || '9:16';
 
-  const validAspects = ['9:16', '1:1', '4:5'];
+  const validAspects = ['9:16', '1:1', '4:5', '16:9'];
   if (!validAspects.includes(aspect)) {
     throw new Error(`Invalid aspect ratio "${aspect}". Use: ${validAspects.join(', ')}`);
   }

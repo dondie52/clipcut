@@ -315,7 +315,7 @@ const Landing = () => {
 
         <h1 className="lp-headline">
           Edit videos in your browser.
-          <span className="lp-headline-secondary">Built for African creators.</span>
+          <span className="lp-headline-secondary">Built for Botswana creators.</span>
         </h1>
 
         <p className="lp-subhead">

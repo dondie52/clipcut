@@ -17,7 +17,13 @@
       "Bash(git push origin main)",
       "Bash(npm run dev)",
       "Bash(npx vitest run --reporter=verbose)",
-      "Bash(git status -u)"
+      "Bash(git status -u)",
+      "Bash(grep -r \"contabo\\\\|SERVER_URL\\\\|EXPORT_URL\\\\|editor/export\\\\|VITE_\" /home/georgy/Desktop/clipcut-main/frontend/.env* /home/georgy/Desktop/clipcut-main/frontend/.env.example)",
+      "Bash(npm test *)",
+      "Bash(node --check worker.js)",
+      "Bash(command -v volta)",
+      "Read(//usr/local/n/versions/**)",
+      "Bash(curl -s -o /tmp/resp.json -w \"HTTP %{http_code}\\\\n\" -X POST https://clipcut-ai-proxy.monigeorgy42.workers.dev/transcribe-fast -H 'Content-Type: application/octet-stream' --data-binary '')"
     ],
     "additionalDirectories": [
       "/home/georgy/.claude/projects/-home-georgy-Desktop-clipcut-main"

@@ -475,6 +475,7 @@ const useAutoSave = (
   setClips,
   bgMusic,
   setBgMusic,
+  timelineMarkers,
   isRestoreCompleteRef,
   interval = AUTO_SAVE_INTERVAL
 ) => {
@@ -503,6 +504,8 @@ const useAutoSave = (
   resolutionRef.current = resolution;
   const bgMusicRef = useRef(bgMusic);
   bgMusicRef.current = bgMusic;
+  const timelineMarkersRef = useRef(timelineMarkers);
+  timelineMarkersRef.current = timelineMarkers;
 
   useEffect(() => {
     projectIdRef.current = projectId;
@@ -586,6 +589,7 @@ const useAutoSave = (
           mediaItems: currentMedia.map(serializeMediaItem),
           duration: totalDurationRef.current,
           resolution: resolutionRef.current || "1080p",
+          timelineMarkers: timelineMarkersRef.current || [],
         };
 
         if (currentBg?.storagePath || currentBg?.mediaId) {
@@ -681,6 +685,7 @@ const useAutoSave = (
                 mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                 duration: totalDurationRef.current,
                 resolution: resolutionRef.current || "1080p",
+                timelineMarkers: timelineMarkersRef.current || [],
                 ...(lastThumbnailDataUrlRef.current ? { thumbnailDataUrl: lastThumbnailDataUrlRef.current } : {}),
               };
               if (bgMusicRef.current?.storagePath) {
@@ -705,6 +710,7 @@ const useAutoSave = (
                   mediaItems: mediaItemsRef.current.map(serializeMediaItem),
                   duration: totalDurationRef.current,
                   resolution: resolutionRef.current || "1080p",
+                  timelineMarkers: timelineMarkersRef.current || [],
                   bgMusic: { storagePath: path, name: bg.name, volume: bg.volume ?? 0.3 },
                   ...(lastThumbnailDataUrlRef.current ? { thumbnailDataUrl: lastThumbnailDataUrlRef.current } : {}),
                 });
@@ -944,6 +950,17 @@ const VideoEditor = () => {
   const [inspectorWidth, setInspectorWidth] = useState(null);
   const [viewportW, setViewportW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1200));
 
+  // Layout presets: 'wide-timeline' was previously a no-op (same as default).
+  useEffect(() => {
+    if (editorLayout === 'wide-timeline') {
+      const maxTl = window.innerHeight - 296;
+      const target = Math.max(320, Math.floor(window.innerHeight * 0.46));
+      setTimelineHeight(Math.max(120, Math.min(target, maxTl)));
+    } else if (editorLayout === 'default' || editorLayout === 'compact') {
+      setTimelineHeight(null);
+    }
+  }, [editorLayout]);
+
   const maxMediaCap = useMemo(() => maxMediaPanelCap(viewportW), [viewportW]);
   const maxInspectorCap = useMemo(() => maxInspectorPanelCap(viewportW), [viewportW]);
   const effectiveMediaW = useMemo(
@@ -1015,6 +1032,8 @@ const VideoEditor = () => {
   const canUndo = tlState.past.length > 0;
   const canRedo = tlState.future.length > 0;
   const [selectedClipId, setSelectedClipId] = useState(null);
+  /** CapCut-style timeline markers (bookmarks) — persisted in project_data.timelineMarkers */
+  const [timelineMarkers, setTimelineMarkers] = useState([]);
 
   // Auto-open inspector bottom sheet when a clip is selected on mobile
   useEffect(() => {
@@ -1123,6 +1142,7 @@ const VideoEditor = () => {
     setClips,
     bgMusic,
     setBgMusic,
+    timelineMarkers,
     isRestoreCompleteRef
   );
 
@@ -1262,22 +1282,45 @@ const VideoEditor = () => {
   }, [notify, projectId, projectName]);
 
   // ---- Auto-analyze imported video for AI suggestions ----
-  const lastAnalyzedClipRef = useRef(null);
+  const lastAnalyzedKeyRef = useRef(null);
   useEffect(() => {
     const videoClip = clips.find(c =>
-      c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl)
+      c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl || c.mediaId)
     );
-    if (!videoClip || videoClip.id === lastAnalyzedClipRef.current) return;
-    lastAnalyzedClipRef.current = videoClip.id;
+    if (!videoClip) {
+      setAiSuggestions([]);
+      lastAnalyzedKeyRef.current = null;
+      return;
+    }
 
-    // Run analysis in background (non-blocking)
+    const media = videoClip.mediaId ? mediaItems.find(m => m.id === videoClip.mediaId) : null;
+    const file = videoClip.file || media?.file || null;
+    const blobUrl = videoClip.blobUrl || media?.blobUrl || null;
+    if (!file && !blobUrl) {
+      setAiSuggestions([]);
+      return;
+    }
+
+    const trimStart = videoClip.trimStart || 0;
+    const trimEnd = videoClip.trimEnd || 0;
+    const duration = videoClip.duration || 0;
+    const hasCaptions = clips.some(c => c.isCaption);
+    const fileSig = file ? `${file.size}:${file.lastModified}` : String(blobUrl || '');
+    const analysisKey = `${videoClip.id}|${videoClip.mediaId || ''}|${trimStart}|${trimEnd}|${duration}|${hasCaptions}|${fileSig}`;
+
+    if (analysisKey === lastAnalyzedKeyRef.current) return;
+    lastAnalyzedKeyRef.current = analysisKey;
+
+    const clipForAnalysis = { ...videoClip, file: file || undefined, blobUrl: blobUrl || undefined };
+
     import('../../services/videoAnalyzer').then(({ analyzeVideo }) => {
-      const hasCaptions = clips.some(c => c.isCaption);
-      analyzeVideo(videoClip, { hasCaptions }).then(suggestions => {
-        if (suggestions.length > 0) setAiSuggestions(suggestions);
-      }).catch(() => {}); // silently ignore analysis errors
+      analyzeVideo(clipForAnalysis, { hasCaptions }).then(suggestions => {
+        setAiSuggestions(suggestions.length > 0 ? suggestions : []);
+      }).catch(() => {
+        setAiSuggestions([]);
+      });
     });
-  }, [clips]);
+  }, [clips, mediaItems]);
 
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
@@ -1472,6 +1515,7 @@ const VideoEditor = () => {
     setMediaItems([]);
     setSelectedClipId(null);
     setSelectedMediaId(null);
+    setTimelineMarkers([]);
     notify('info', 'New project created');
   }, [clips.length, notify, setClips]);
 
@@ -2062,6 +2106,18 @@ const VideoEditor = () => {
         setProjectId(projectId);
         if (pData.resolution) setProjectResolution(pData.resolution);
 
+        const rawMarkers = pData.project_data?.timelineMarkers ?? pData.timelineMarkers;
+        setTimelineMarkers(
+          Array.isArray(rawMarkers)
+            ? rawMarkers
+              .filter((m) => m && typeof m.time === 'number' && Number.isFinite(m.time) && m.time >= 0)
+              .map((m, i) => ({
+                id: typeof m.id === 'string' && m.id ? m.id : `mk-${i}-${Math.round(m.time * 1000)}`,
+                time: m.time,
+              }))
+            : []
+        );
+
         const savedClips = pData.project_data?.clips || pData.clips || [];
         const savedMediaItems = pData.project_data?.mediaItems || [];
 
@@ -2404,10 +2460,11 @@ const VideoEditor = () => {
       {!isMobile && <Toolbar activeToolbar={activeToolbar} onToolbarChange={setActiveToolbar} />}
 
       <main aria-label="Editor workspace" style={{
-        flex: isMobile ? 1 : '1 1 0%',
+        flex: isMobile ? 1 : (editorLayout === 'wide-timeline' ? '0 1 48%' : '1 1 0%'),
         display: "flex",
         flexDirection: (isMobile && isLandscape) ? "row" : (isMobile ? "column" : "row"),
         minWidth: 0, minHeight: isMobile ? 0 : '200px', overflow: "hidden",
+        zIndex: 0,
       }}>
         {editorLayout !== 'compact' && !isMobile && (
           <>
@@ -2647,6 +2704,8 @@ const VideoEditor = () => {
                   isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
                   mediaItems={mediaItems} onAddToTimeline={addToTimeline}
                   timelineHeight={timelineHeight}
+                  timelineMarkers={timelineMarkers}
+                  onTimelineMarkersChange={setTimelineMarkers}
                 />
               </Suspense>
             </ErrorBoundary>
@@ -2767,6 +2826,8 @@ const VideoEditor = () => {
                 isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
                 mediaItems={mediaItems} onAddToTimeline={addToTimeline}
                 timelineHeight={timelineHeight}
+                timelineMarkers={timelineMarkers}
+                onTimelineMarkersChange={setTimelineMarkers}
               />
             </Suspense>
           </ErrorBoundary>
