@@ -40,6 +40,9 @@ jobs:
         # base-agnostic so Vercel keeps working; we pass --base here and emit
         # 404.html so SPA deep links fall back to index.html on Pages.
         run: npx vite build --base /clipcut/ && cp dist/index.html dist/404.html
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
