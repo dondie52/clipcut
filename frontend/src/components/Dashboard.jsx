@@ -107,6 +107,15 @@ const DASH_CSS = `
   .nav-item.active { background: rgba(117,170,219,0.1); color: white; font-weight: 600; }
   .nav-item .material-symbols-outlined { font-size: 20px; }
   .nav-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 6px 14px; }
+  .sidebar-logout {
+    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
+    margin: 0 8px 8px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.45);
+    border: none; background: none; width: calc(100% - 16px); text-align: left;
+    min-height: 38px; transition: all 0.15s ease;
+  }
+  .sidebar-logout:hover { background: rgba(239,68,68,0.08); color: #f87171; }
+  .sidebar-logout .material-symbols-outlined { font-size: 20px; }
   .sidebar-footer {
     padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.06);
     font-size: 10px; color: rgba(255,255,255,0.25);
@@ -196,8 +205,8 @@ const DASH_CSS = `
 
   /* ---- Quick Actions ---- */
   .quick-actions {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
-    margin-bottom: 24px;
+    display: grid; grid-template-columns: 1fr; gap: 10px;
+    margin-bottom: 24px; max-width: 400px;
   }
   .quick-action {
     display: flex; align-items: center; gap: 12px; padding: 14px 16px;
@@ -226,12 +235,6 @@ const DASH_CSS = `
     background: rgba(117,170,219,0.08);
   }
   .quick-action--primary .qa-icon { background: rgba(255,255,255,0.1); }
-  .qa-badge {
-    position: absolute; top: 8px; right: 8px;
-    background: rgba(117,170,219,0.9); color: #0a0a0a; font-size: 9px;
-    font-weight: 800; padding: 2px 6px; border-radius: 3px;
-    letter-spacing: 0.4px;
-  }
 
   /* ---- Projects Section ---- */
   .projects-header {
@@ -531,8 +534,6 @@ const I = ({ i, s = 20, c, fill = false, style: sx }) => (
 /* ========== NAV ITEMS ========== */
 const NAV_ITEMS = [
   { id: "home", icon: "home", label: "Home", fill: true },
-  { id: "templates", icon: "dashboard", label: "Templates" },
-  { id: "shorts", icon: "content_cut", label: "Long to Shorts" },
   { id: "divider" },
   { id: "settings", icon: "settings", label: "Settings" },
 ];
@@ -572,7 +573,7 @@ function formatJoinDate(dateStr) {
 }
 
 /* ========== SIDEBAR ========== */
-const Sidebar = memo(({ user, activeNav, onNav, onNavigate, isOpen, onClose }) => {
+const Sidebar = memo(({ user, activeNav, onNav, onNavigate, onLogout, isOpen, onClose }) => {
   const displayName = user?.user_metadata?.full_name
     || user?.email?.split("@")[0]
     || "Creator";
@@ -614,8 +615,7 @@ const Sidebar = memo(({ user, activeNav, onNav, onNavigate, isOpen, onClose }) =
               className={`nav-item ${activeNav === item.id ? "active" : ""}`}
               onClick={() => {
                 onNav(item.id);
-                if (item.id === "shorts") onNavigate("/long-to-shorts");
-                else if (item.id === "settings") onNavigate("/settings");
+                if (item.id === "settings") onNavigate("/settings");
               }}
             >
               <I i={item.icon} s={20} fill={item.fill && activeNav === item.id} />
@@ -624,6 +624,11 @@ const Sidebar = memo(({ user, activeNav, onNav, onNavigate, isOpen, onClose }) =
           )
         )}
       </nav>
+
+      <button className="sidebar-logout" onClick={onLogout}>
+        <I i="logout" s={20} />
+        <span style={{ flex: 1 }}>Log out</span>
+      </button>
 
       <div className="sidebar-footer">v0.1.0 beta</div>
     </aside>
@@ -634,7 +639,7 @@ Sidebar.displayName = "Sidebar";
 /* ========== MAIN DASHBOARD ========== */
 const Dashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const isMobile = useMobile();
   const fileInputRef = useRef(null);
   const [activeNav, setActiveNav] = useState("home");
@@ -881,6 +886,7 @@ const Dashboard = () => {
         activeNav={activeNav}
         onNav={(id) => { setActiveNav(id); if (isMobile) setSidebarOpen(false); }}
         onNavigate={navigate}
+        onLogout={async () => { await signOut(); navigate("/login"); }}
         isOpen={sidebarOpen}
         onClose={isMobile ? () => setSidebarOpen(false) : undefined}
       />
@@ -965,19 +971,6 @@ const Dashboard = () => {
                     <I i="add" s={20} c="white" />
                   </div>
                   <span>New Project</span>
-                </button>
-                <button
-                  className="quick-action"
-                  onClick={() => {
-                    trackEvent(analyticsEvents.dashboardToolSelect, { tool: "long_to_shorts" });
-                    navigate("/long-to-shorts");
-                  }}
-                >
-                  <div className="qa-icon">
-                    <I i="content_cut" s={18} c="#75AADB" />
-                  </div>
-                  <span>Long to Shorts</span>
-                  <span className="qa-badge">AI</span>
                 </button>
               </div>
 
@@ -1141,13 +1134,6 @@ const Dashboard = () => {
                       <I i="add" s={16} c="#0a0a0a" />
                       Import Media
                     </button>
-                    <button
-                      className="empty-btn empty-btn--ghost"
-                      onClick={() => navigate("/long-to-shorts")}
-                    >
-                      <I i="content_cut" s={14} />
-                      Long to Shorts
-                    </button>
                   </div>
                   <p className="empty-hint">
                     Supports MP4, WebM, MP3, WAV, PNG, JPG and more
@@ -1226,24 +1212,6 @@ const Dashboard = () => {
                   </p>
                 </div>
               ) : null}
-
-              {/* Feature tip */}
-              <div className="advisor-item advisor-item--info">
-                <div className="advisor-item-header">
-                  <I i="auto_awesome" s={16} c="#75AADB" />
-                  <h4>Long to Shorts</h4>
-                </div>
-                <p>
-                  Convert landscape videos to vertical format with AI-powered speaker tracking and smart reframing.
-                </p>
-                <button
-                  className="advisor-action advisor-action--info"
-                  onClick={() => navigate("/long-to-shorts")}
-                >
-                  <I i="arrow_forward" s={12} c="#75AADB" />
-                  Try it
-                </button>
-              </div>
             </aside>}
 
           </div>
@@ -1260,10 +1228,6 @@ const Dashboard = () => {
           <button onClick={handleNewProject}>
             <I i="add_circle" s={22} c="#75AADB" />
             <span>New</span>
-          </button>
-          <button className={activeNav === 'shorts' ? 'active' : ''} onClick={() => navigate('/long-to-shorts')}>
-            <I i="content_cut" s={22} />
-            <span>Reframe</span>
           </button>
           <button className={activeNav === 'settings' ? 'active' : ''} onClick={() => navigate('/settings')}>
             <I i="settings" s={22} />
