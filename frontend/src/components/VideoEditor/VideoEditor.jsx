@@ -2194,6 +2194,49 @@ const VideoEditor = () => {
           if (cancelled) return;
           await restoreBgMusic(pData);
 
+          // Fallback: if nothing under the current projectId, scan IndexedDB
+          // for ORPHAN media — entries keyed to stale draft-*/local_* IDs
+          // from sessions that never successfully rekeyed to a UUID. These
+          // are stranded files with no other route back to the user.
+          // Dedupe by mediaId (same file may exist under multiple stale
+          // projectIds from repeated rekey failures).
+          let orphanCount = 0;
+          if (recovered.length === 0) {
+            const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            const orphanEntries = cachedIdbEntries.filter(e =>
+              e.projectId && e.projectId !== projectId && !UUID_RE.test(e.projectId)
+            );
+            const seenMediaIds = new Set();
+            for (const entry of orphanEntries) {
+              if (seenMediaIds.has(entry.mediaId)) continue;
+              seenMediaIds.add(entry.mediaId);
+              try {
+                const loaded = await withTimeout(loadMedia(entry.projectId, entry.mediaId), 3000);
+                if (!loaded) continue;
+                recovered.push({
+                  id: entry.mediaId,
+                  name: entry.name || 'media',
+                  file: loaded.file,
+                  blobUrl: loaded.blobUrl,
+                  thumbnail: null,
+                  duration: 0,
+                  width: 0,
+                  height: 0,
+                  type: typeFromMime(entry.mime),
+                  isProcessing: false,
+                  idbKey: `idb://${entry.projectId}:${entry.mediaId}`,
+                  _mediaError: null,
+                });
+                orphanCount++;
+              } catch (e) {
+                console.warn('[recover-orphan] load failed for', entry.mediaId, e);
+              }
+            }
+            if (orphanCount > 0) {
+              console.warn(`[recover-orphan] Surfacing ${orphanCount} orphan media file(s) from stale projectIds`);
+            }
+          }
+
           if (recovered.length > 0) {
             setMediaItems(recovered);
             // Kick off metadata/thumbnail regen in the background so the
@@ -2217,10 +2260,10 @@ const VideoEditor = () => {
               })();
             }
             isRestoreCompleteRef.current = true;
-            notify(
-              'warning',
-              `Recovered ${recovered.length} media file(s) from local cache — re-add them to the timeline, then save`
-            );
+            const message = orphanCount > 0
+              ? `Surfaced ${orphanCount} orphan media file(s) from old sessions — drag any that belong here onto the timeline, then save`
+              : `Recovered ${recovered.length} media file(s) from local cache — re-add them to the timeline, then save`;
+            notify('warning', message);
             return;
           }
 
