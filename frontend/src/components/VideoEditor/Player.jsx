@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { FILTER_PRESETS } from './constants';
+import { FILTER_PRESETS, EFFECT_PRESETS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
 import { getPlayerRestoreState } from './restoreState';
 
@@ -10,6 +10,36 @@ const PLAYER_CSS = `
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slideUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes scaleIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+  /* Video-effect live previews. These mirror the behaviour of the FFmpeg
+     pipeline at export — approximate, but gives the user visual feedback. */
+  @keyframes clipcut-shake {
+    0%, 100% { transform: translate(0, 0); }
+    10% { transform: translate(-2px, 1px); }
+    25% { transform: translate(3px, -1px); }
+    40% { transform: translate(-3px, 2px); }
+    55% { transform: translate(2px, -2px); }
+    70% { transform: translate(-1px, 3px); }
+    85% { transform: translate(1px, -1px); }
+  }
+  @keyframes clipcut-flash {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(2.2) contrast(1.1); }
+  }
+  @keyframes clipcut-glitch {
+    0%, 100% { transform: translate(0); filter: none; }
+    20% { transform: translate(-2px, 0); filter: hue-rotate(20deg); }
+    40% { transform: translate(2px, 1px); filter: hue-rotate(-30deg) saturate(1.5); }
+    60% { transform: translate(-1px, -1px); filter: hue-rotate(15deg); }
+    80% { transform: translate(1px, 0); filter: hue-rotate(-10deg); }
+  }
+  .clipcut-effect-shake { animation: clipcut-shake 0.4s linear infinite; }
+  .clipcut-effect-flash { animation: clipcut-flash 1.2s ease-in-out infinite; }
+  .clipcut-effect-glitch { animation: clipcut-glitch 0.3s steps(3) infinite; }
+  .clipcut-vignette-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.75) 100%);
+  }
 
   .player-root { position: relative; }
   .player-root:fullscreen { background: #000; }
@@ -1022,9 +1052,41 @@ const Player = ({
       style.opacity = clipProperties.opacity;
     }
 
+    // Applied video effects (from the Effects panel — stored on clip.effects[])
+    // The export path applies them via FFmpeg (blur/sharpen); the live preview
+    // approximates each one in CSS so the user sees immediate feedback.
+    const animationClasses = [];
+    let zoomScale = 1;
+    let hasVignette = false;
+    if (Array.isArray(clipProperties.effects)) {
+      for (const effect of clipProperties.effects) {
+        if (effect.enabled === false) continue;
+        const preset = EFFECT_PRESETS.find(p => p.name === effect.name) || effect;
+        // Blur / sharpen that carry a static CSS string
+        if (preset.css) {
+          filters.push(preset.css);
+        }
+        switch (effect.type) {
+          case 'shake':   animationClasses.push('clipcut-effect-shake'); break;
+          case 'flash':   animationClasses.push('clipcut-effect-flash'); break;
+          case 'glitch':  animationClasses.push('clipcut-effect-glitch'); break;
+          case 'vignette': hasVignette = true; break;
+          case 'zoom': {
+            const factor = effect.params?.factor ?? 1.5;
+            if (Number.isFinite(factor) && factor > zoomScale) zoomScale = factor;
+            break;
+          }
+          default: break;
+        }
+      }
+    }
+    if (zoomScale > 1) transforms.push(`scale(${zoomScale})`);
+
     if (transforms.length) style.transform = transforms.join(' ');
     if (filters.length) style.filter = filters.join(' ');
     style.transition = 'transform 0.1s ease, filter 0.1s ease, opacity 0.1s ease';
+    if (animationClasses.length) style._effectClassName = animationClasses.join(' ');
+    if (hasVignette) style._hasVignette = true;
 
     return style;
   }, [clipProperties, cropTransform]);
@@ -1147,12 +1209,19 @@ const Player = ({
                       onTimeUpdate={handleTimeUpdate}
                       onLoadedMetadata={handleMeta}
                       onEnded={handleEnded}
-                      style={{
-                        position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
-                        objectFit: fitStyles[fitMode],
-                        ...videoPreviewStyle,
-                      }}
+                      className={videoPreviewStyle._effectClassName}
+                      style={(() => {
+                        const { _effectClassName, _hasVignette, ...rest } = videoPreviewStyle;
+                        return {
+                          position: "absolute", top: 0, left: 0, width: "100%", height: "100%",
+                          objectFit: fitStyles[fitMode],
+                          ...rest,
+                        };
+                      })()}
                     />
+                    {videoPreviewStyle._hasVignette && (
+                      <div className="clipcut-vignette-overlay" aria-hidden="true" />
+                    )}
                     {/* Canvas text overlay preview (text on video clips) */}
                     {clipProperties?.text?.trim() && clipProperties?.type !== 'text' && (
                       <TextOverlayCanvas
