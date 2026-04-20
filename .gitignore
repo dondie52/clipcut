@@ -41,3 +41,10 @@ coverage/
 
 # Misc
 .cursor/
+
+# Claude Code / Agents / MCP local state
+.agents/
+.claude/skills/
+.mcp.json
+.playwright-mcp/
+skills-lock.json
