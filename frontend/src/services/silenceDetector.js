@@ -6,6 +6,43 @@
  */
 
 /**
+ * Decode an audio/video file into an `AudioBuffer`.
+ *
+ * Fast path: hand the raw file bytes to `decodeAudioData` — this works for WAV,
+ * MP3, and clean AAC streams and is much cheaper than booting FFmpeg.
+ *
+ * Fallback: if Web Audio rejects the container (typically MP4/MOV on Firefox,
+ * Safari, and several Chromium variants), reuse the FFmpeg-backed
+ * `extractAudio` helper that the captions pipeline already relies on. It
+ * returns a WAV `Uint8Array`, which Web Audio then decodes reliably on every
+ * browser.
+ */
+async function decodeAudioBufferFromFile(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  try {
+    try {
+      return await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+    } catch (err) {
+      console.warn('[silenceDetector] Web Audio failed on raw file — trying FFmpeg fallback:', err?.message || err);
+    }
+
+    // Fallback: extract audio via FFmpeg.wasm → WAV → Web Audio decodes that cleanly.
+    const { extractAudio } = await import('./transcriptService');
+    const wavBytes = await extractAudio(file);
+    // `extractAudio` closed its own AudioContext when it took the Web-Audio fast
+    // path; to keep decoding independent from its internals, use a fresh context.
+    await audioCtx.close();
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Copy into a fresh ArrayBuffer — `decodeAudioData` neuters the input.
+    const wavCopy = wavBytes.slice().buffer;
+    return await audioCtx.decodeAudioData(wavCopy);
+  } finally {
+    try { await audioCtx.close(); } catch { /* already closed */ }
+  }
+}
+
+/**
  * Detect silent sections in an audio/video file.
  *
  * @param {File|Blob} file - The media file to analyze
@@ -22,16 +59,7 @@ export async function detectSilence(file, options = {}) {
     windowSize = 0.1,
   } = options;
 
-  // Decode audio from the file
-  const arrayBuffer = await file.arrayBuffer();
-  const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  let audioBuffer;
-  try {
-    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-  } finally {
-    await audioCtx.close();
-  }
+  const audioBuffer = await decodeAudioBufferFromFile(file);
 
   const sampleRate = audioBuffer.sampleRate;
   const channelData = audioBuffer.getChannelData(0); // mono or left channel

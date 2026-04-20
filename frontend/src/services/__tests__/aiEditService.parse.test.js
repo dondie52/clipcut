@@ -109,33 +109,15 @@ describe('parseIntentLocally — typo tolerance', () => {
   });
 });
 
-describe('parseIntentLocally — small talk fallback', () => {
-  it('replies to "hi" without hitting the Worker', () => {
-    const r = parseIntentLocally('hi', { duration: 0 });
-    expect(r).toMatchObject({ chat: true });
-    expect(r.message).toMatch(/hi/i);
-  });
-
-  it('replies to greetings with punctuation variations', () => {
-    for (const g of ['hello!', 'hey', 'yo', 'good morning', 'hiii']) {
+describe('parseIntentLocally — non-command prompts fall through to the Worker', () => {
+  it('returns null for greetings so the Worker LLM can respond naturally', () => {
+    for (const g of ['hi', 'hello', 'how are you', 'thanks', 'bye', 'help']) {
       const r = parseIntentLocally(g, { duration: 0 });
-      expect(r, `expected greeting reply for "${g}"`).toMatchObject({ chat: true });
+      expect(r, `expected null (Worker fallthrough) for "${g}"`).toBeNull();
     }
   });
 
-  it('replies to "help" with a capability overview', () => {
-    const r = parseIntentLocally('help', { duration: 0 });
-    expect(r).toMatchObject({ chat: true });
-    expect(r.message).toMatch(/split|caption|transition/i);
-  });
-
-  it('replies to "thanks" and "bye"', () => {
-    expect(parseIntentLocally('thanks', {})).toMatchObject({ chat: true });
-    expect(parseIntentLocally('bye', {})).toMatchObject({ chat: true });
-  });
-
-  it('does NOT intercept editing commands that happen to contain greeting words', () => {
-    // "add a hi-contrast filter" should not be treated as a greeting
+  it('still recognises editing commands', () => {
     const r = parseIntentLocally('apply cinematic filter', { duration: 60 });
     expect(r[0].type).toBe('apply_filter');
   });

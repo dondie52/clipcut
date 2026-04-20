@@ -16,6 +16,12 @@ import {
   deleteUserData,
 } from "../services/gdprService";
 import { supabase } from "../supabase/supabaseClient";
+import {
+  getWorkerUrl,
+  setWorkerUrl,
+  clearWorkerUrl,
+  getWorkerUrlSource,
+} from "../services/workerConfig";
 
 const SETTINGS_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -193,6 +199,128 @@ const I = ({ i, s = 20, c, fill = false, style: sx }) => (
   </span>
 );
 
+function IntegrationsPanel() {
+  const [url, setUrl] = useState(() => getWorkerUrl());
+  const [source, setSource] = useState(() => getWorkerUrlSource());
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // {ok:boolean, message:string}
+
+  const refresh = () => {
+    setUrl(getWorkerUrl());
+    setSource(getWorkerUrlSource());
+  };
+
+  const handleSave = () => {
+    setWorkerUrl(url);
+    setTestResult(null);
+    refresh();
+  };
+
+  const handleClear = () => {
+    clearWorkerUrl();
+    setTestResult(null);
+    refresh();
+  };
+
+  const handleTest = async () => {
+    const target = (url || getWorkerUrl()).replace(/\/+$/, '');
+    if (!target) {
+      setTestResult({ ok: false, message: 'Enter a URL first.' });
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`${target}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'hi' }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        setTestResult({ ok: true, message: `Connected (HTTP ${res.status}).` });
+      } else {
+        setTestResult({ ok: false, message: `Reached server but got HTTP ${res.status}.` });
+      }
+    } catch (err) {
+      const msg = err?.name === 'AbortError' ? 'Timed out after 10s.' : (err?.message || 'Network error.');
+      setTestResult({ ok: false, message: msg });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const sourceLabel = source === 'runtime'
+    ? 'Set in Settings (overrides .env)'
+    : source === 'env'
+      ? 'Set via VITE_TRANSCRIPT_WORKER_URL at build time'
+      : 'Not configured';
+
+  return (
+    <div className="settings-section">
+      <h1>Integrations</h1>
+      <p>External services ClipCut can talk to.</p>
+
+      <div className="settings-card">
+        <h3>AI Proxy / Transcription Worker</h3>
+        <p>
+          Powers auto-captions, AI chat editing, silence analysis, and highlight
+          detection. Deploy the Cloudflare Worker under <code>backend/workers/ai-proxy</code>
+          and paste its URL here. This override is stored in your browser only
+          (localStorage) and takes effect on the next AI action — no rebuild needed.
+        </p>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="url"
+            placeholder="https://clipcut-ai-proxy.your-account.workers.dev"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            style={{
+              flex: '1 1 320px',
+              minWidth: 260,
+              padding: '10px 12px',
+              borderRadius: 6,
+              border: '1px solid rgba(255,255,255,0.12)',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'white',
+              fontSize: 13,
+              fontFamily: 'inherit',
+            }}
+          />
+          <button className="settings-button settings-button-primary" onClick={handleSave}>
+            Save
+          </button>
+          <button className="settings-button settings-button-secondary" onClick={handleTest} disabled={testing}>
+            {testing ? 'Testing…' : 'Test connection'}
+          </button>
+          <button className="settings-button settings-button-secondary" onClick={handleClear}>
+            Clear
+          </button>
+        </div>
+        <p style={{ marginTop: 12, fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+          Currently: <strong style={{ color: source === 'none' ? '#ef4444' : '#75AADB' }}>{sourceLabel}</strong>
+        </p>
+        {testResult && (
+          <p
+            role="status"
+            style={{
+              marginTop: 8, padding: '8px 12px', borderRadius: 6, fontSize: 13,
+              background: testResult.ok ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+              border: `1px solid ${testResult.ok ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+              color: testResult.ok ? '#22c55e' : '#ef4444',
+            }}
+          >
+            {testResult.message}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const Settings = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
@@ -273,6 +401,13 @@ const Settings = () => {
           >
             <I i="privacy_tip" s={22} />
             <span>Privacy & Data</span>
+          </button>
+          <button
+            className={`settings-nav-item ${activeTab === "integrations" ? "active" : ""}`}
+            onClick={() => setActiveTab("integrations")}
+          >
+            <I i="extension" s={22} />
+            <span>Integrations</span>
           </button>
           <button
             className={`settings-nav-item ${activeTab === "legal" ? "active" : ""}`}
@@ -413,6 +548,8 @@ const Settings = () => {
             </div>
           </div>
         )}
+
+        {activeTab === "integrations" && <IntegrationsPanel />}
 
         {activeTab === "legal" && (
           <div className="settings-section">

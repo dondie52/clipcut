@@ -7,10 +7,7 @@
 
 import { detectSilence, totalSilenceDuration } from './silenceDetector';
 import { FILTER_PRESETS } from '../components/VideoEditor/constants';
-
-const WORKER_URL = typeof import.meta !== 'undefined'
-  ? import.meta.env?.VITE_TRANSCRIPT_WORKER_URL || ''
-  : '';
+import { getWorkerUrl, WORKER_URL_NOT_SET_ERROR } from './workerConfig';
 
 // Map friendly filter names to FILTER_PRESETS entries
 const FILTER_NAME_MAP = {
@@ -219,42 +216,8 @@ export function parseIntentLocally(prompt, context = {}) {
     }
   }
 
-  // Greeting / small-talk fallback. Handled locally so a missing VITE_TRANSCRIPT_WORKER_URL
-  // doesn't surface as a scary "AI proxy not configured" error for a simple "hi".
-  const chat = matchSmallTalk(p);
-  if (chat) return { chat: true, message: chat };
-
-  return null; // ambiguous — fall through to Worker
-}
-
-/** Return a friendly reply if the prompt is clearly conversational, else null. */
-function matchSmallTalk(p) {
-  const trimmed = p.trim();
-  if (!trimmed) return null;
-
-  // Short greetings: "hi", "hey", "hello", "yo", "sup", "gm", optionally with punctuation.
-  if (/^(?:hi+|hey+|hello+|yo+|sup|gm|good\s+(?:morning|afternoon|evening))[\s!.?,]*$/i.test(trimmed)) {
-    return "Hi! I can split clips, add transitions, captions, filters and more. Try something like \"split at 0:26\" or \"add a fade transition\".";
-  }
-
-  // Thanks / bye
-  if (/^(?:thanks?|thank\s+you|ty|thx|cheers)[\s!.?,]*$/i.test(trimmed)) {
-    return "Anytime! Let me know what you want to edit next.";
-  }
-  if (/^(?:bye|goodbye|cya|see\s+ya|later)[\s!.?,]*$/i.test(trimmed)) {
-    return "See you later! Your project is auto-saved.";
-  }
-
-  // "what can you do" / "help" — give a capability overview.
-  if (/^(?:help|what\s+can\s+you\s+do|how\s+does\s+this\s+work|what\s+do\s+you\s+do)\??$/i.test(trimmed)) {
-    return "I can split/cut clips, add captions and transitions, remove silence or filler words, apply filters (cinematic, vintage, bw, warm, cool, 90s, sepia), change speed, make it vertical for TikTok, and more. Just describe what you want.";
-  }
-
-  // Bare "?" / "ok" / "okay"
-  if (/^(?:ok(?:ay)?|cool|nice|great|\?)[\s!.?,]*$/i.test(trimmed)) {
-    return "Ready when you are — what should I do with the video?";
-  }
-
+  // Anything that isn't a recognised editing command falls through to the Worker LLM.
+  // We deliberately do NOT canned-reply for greetings / small talk — let the model think.
   return null;
 }
 
@@ -329,11 +292,11 @@ async function parseIntent(prompt, context, history, onSlowResponse) {
   if (localResult) return localResult;
 
   // Fall back to Worker for complex / conversational prompts
-  if (!WORKER_URL) {
-    throw new Error('AI proxy not configured. Set VITE_TRANSCRIPT_WORKER_URL in your .env file.');
+  if (!getWorkerUrl()) {
+    throw new Error(WORKER_URL_NOT_SET_ERROR);
   }
 
-  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+  const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
   const editUrl = `${baseUrl}/edit`;
 
   const payload = { prompt, context };
@@ -500,8 +463,8 @@ async function executeAddCaptions(params, editor) {
     throw new Error('No video clip found to generate captions from. Import a video first.');
   }
 
-  if (!WORKER_URL) {
-    throw new Error('Caption generation requires VITE_TRANSCRIPT_WORKER_URL to be configured.');
+  if (!getWorkerUrl()) {
+    throw new Error(WORKER_URL_NOT_SET_ERROR);
   }
 
   // Dynamic import to keep bundle small
@@ -510,7 +473,7 @@ async function executeAddCaptions(params, editor) {
   const file = videoClip.file || (videoClip.blobUrl ? await fetch(videoClip.blobUrl).then(r => r.blob()) : null);
   if (!file) throw new Error('Cannot access video file for transcription.');
 
-  const captionClips = await generateCaptionClips(file, WORKER_URL, style, () => {});
+  const captionClips = await generateCaptionClips(file, getWorkerUrl(), style, () => {});
 
   if (captionClips.length === 0) {
     return 'No speech detected for captions';
@@ -994,10 +957,10 @@ async function executeRemoveFillerWords(params, editor) {
   const fillers = (params.fillers || DEFAULT_FILLERS).map(f => f.toLowerCase());
   const padding = Math.max(0, Math.min(0.2, params.padding ?? 0.05));
 
-  if (!WORKER_URL) throw new Error('Filler word removal requires VITE_TRANSCRIPT_WORKER_URL.');
+  if (!getWorkerUrl()) throw new Error(WORKER_URL_NOT_SET_ERROR);
 
   const { transcribeVideo } = await import('./transcriptService');
-  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+  const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
   const { words } = await transcribeVideo(file, baseUrl, () => {});
 
   if (words.length === 0) throw new Error('No speech detected in video.');
@@ -1052,10 +1015,10 @@ async function executeAutoHighlight(params, editor) {
   const file = await getClipFile(clip);
   const targetDuration = params.duration || 30;
 
-  if (!WORKER_URL) throw new Error('Auto highlight requires VITE_TRANSCRIPT_WORKER_URL.');
+  if (!getWorkerUrl()) throw new Error(WORKER_URL_NOT_SET_ERROR);
 
   const { analyzeTranscript } = await import('./transcriptService');
-  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+  const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
 
   const segments = await analyzeTranscript(file, clip.duration, baseUrl, targetDuration, () => {});
 
@@ -1092,10 +1055,10 @@ async function executeRemoveBoring(params, editor) {
   const file = await getClipFile(clip);
   const threshold = Math.max(1, Math.min(10, params.threshold ?? 4));
 
-  if (!WORKER_URL) throw new Error('Remove boring requires VITE_TRANSCRIPT_WORKER_URL.');
+  if (!getWorkerUrl()) throw new Error(WORKER_URL_NOT_SET_ERROR);
 
   const { analyzeTranscript } = await import('./transcriptService');
-  const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+  const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
 
   // Use 15s windows for granular scoring
   const segments = await analyzeTranscript(file, clip.duration, baseUrl, 15, () => {});
@@ -1211,9 +1174,9 @@ async function executeSmartCrop(params, editor) {
   // Try to get transcript for better speaker tracking
   let words = null;
   try {
-    if (WORKER_URL) {
+    if (getWorkerUrl()) {
       const { transcribeVideo } = await import('./transcriptService');
-      const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+      const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
       const result = await transcribeVideo(file, baseUrl, () => {});
       words = result.words;
     }
@@ -1260,9 +1223,9 @@ async function executeZoomToSpeaker(params, editor) {
   // Transcribe for speaker-aware tracking
   let words = null;
   try {
-    if (WORKER_URL) {
+    if (getWorkerUrl()) {
       const { transcribeVideo } = await import('./transcriptService');
-      const baseUrl = WORKER_URL.replace(/\/transcribe\/?$/, '');
+      const baseUrl = getWorkerUrl().replace(/\/transcribe\/?$/, '');
       const result = await transcribeVideo(file, baseUrl, () => {});
       words = result.words;
     }
