@@ -80,6 +80,7 @@ const QUICK_ACTIONS = [
   { label: 'Remove silence', prompt: 'remove silence' },
   { label: 'Make vertical', prompt: 'make it vertical for TikTok' },
   { label: 'Highlights', prompt: 'find the best 60 seconds' },
+  { label: 'Extract audio', prompt: 'extract audio' },
 ];
 
 /* ========== Message Component ========== */

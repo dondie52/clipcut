@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseIntentLocally } from '../aiEditService.js'
+import { parseIntentLocally, executeExtractAudio } from '../aiEditService.js'
 
 describe('parseIntentLocally — existing quick actions still work', () => {
   it('maps "add captions" to add_captions', () => {
@@ -152,5 +152,38 @@ describe('parseIntentLocally — horizontal/landscape patterns', () => {
     expect(parseIntentLocally('make it widescreen')).toEqual([
       { type: 'smart_crop', params: { aspect: '16:9' } },
     ])
+  })
+})
+
+describe('parseIntentLocally — extract audio', () => {
+  it('"extract audio" maps to extract_audio with mp3 default', () => {
+    expect(parseIntentLocally('extract audio')).toEqual([
+      { type: 'extract_audio', params: { format: 'mp3' } },
+    ])
+  })
+
+  it('"extract the audio" also maps to extract_audio', () => {
+    expect(parseIntentLocally('extract the audio')).toEqual([
+      { type: 'extract_audio', params: { format: 'mp3' } },
+    ])
+  })
+})
+
+describe('executeExtractAudio — source clip resolution', () => {
+  it('throws a helpful error when there are no video clips on the timeline', async () => {
+    const editor = { clips: [], setClips: () => {}, selectedClipId: null, mediaItems: [] }
+    await expect(executeExtractAudio({ format: 'mp3' }, editor))
+      .rejects.toThrow(/No video clip found/)
+  })
+
+  it('throws when the only clips are audio/text/caption (no extractable source)', async () => {
+    const clips = [
+      { id: 'a1', type: 'audio', startTime: 0, duration: 5 },
+      { id: 't1', type: 'text', startTime: 0, duration: 5 },
+      { id: 'c1', type: 'video', isCaption: true, startTime: 0, duration: 5 },
+    ]
+    const editor = { clips, setClips: () => {}, selectedClipId: null, mediaItems: [] }
+    await expect(executeExtractAudio({ format: 'mp3' }, editor))
+      .rejects.toThrow(/No video clip found/)
   })
 })

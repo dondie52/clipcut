@@ -125,6 +125,7 @@ export function parseIntentLocally(prompt, context = {}) {
     [/\b(?:add|generate|put|turn\s+on)\s+(?:the\s+)?subs?(?:titles?)?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\bcaptions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\bremove\s+silence\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
+    [/\bextract\s+(?:the\s+)?audio\b/, () => [{ type: 'extract_audio', params: { format: 'mp3' } }]],
     // Filler must match BEFORE the silence-synonym pattern below — "cut the ums" shouldn't become remove_silence.
     [/\b(?:remove|cut|delete|strip)\s+(?:the\s+|all\s+)?(?:ums?|uhs?|umms?|filler\s+words?)\b/, () => [{ type: 'remove_filler_words', params: {} }]],
     [/\bremove\s+filler\b/, () => [{ type: 'remove_filler_words', params: {} }]],
@@ -437,6 +438,9 @@ async function executeAction(action, editor) {
     case 'add_music':
       return 'Background music (coming soon)';
 
+    case 'extract_audio':
+      return await executeExtractAudio(action.params, editor);
+
     // Phase 2 — ML-powered actions
     case 'remove_filler_words':
       return await executeRemoveFillerWords(action.params, editor);
@@ -510,6 +514,55 @@ async function executeAddCaptions(params, editor) {
   ]);
 
   return `Added ${captionClips.length} caption${captionClips.length !== 1 ? 's' : ''}`;
+}
+
+/* ─── Action: Extract Audio ─────────────────────────────────── */
+// Pulls the audio track out of a video clip and drops it on the timeline as a new
+// audio clip, stacked directly under the source so it plays in sync. The source
+// video's audio is left untouched — user mutes manually if they want to swap.
+export async function executeExtractAudio(params, editor) {
+  const { clips, setClips, selectedClipId, mediaItems = [] } = editor;
+  const format = params.format || 'mp3';
+
+  const isVideoClip = (c) =>
+    c && c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption;
+
+  const selected = clips.find(c => c.id === selectedClipId);
+  const videoClip = (selected && isVideoClip(selected))
+    ? selected
+    : clips.find(isVideoClip);
+
+  if (!videoClip) {
+    throw new Error('No video clip found to extract audio from. Import a video first.');
+  }
+
+  const media = videoClip.mediaId ? mediaItems.find(m => m.id === videoClip.mediaId) : null;
+  const file =
+    videoClip.file ||
+    media?.file ||
+    (videoClip.blobUrl ? await fetch(videoClip.blobUrl).then(r => r.blob()) : null);
+
+  if (!file) throw new Error('Cannot access the source video file.');
+
+  const { extractAudio } = await import('./audioOperations');
+  const audioBlob = await extractAudio(file, format);
+  const baseName = (videoClip.name || 'clip').replace(/\.[^.]+$/, '');
+  const audioFile = new File([audioBlob], `${baseName}.${format}`, { type: audioBlob.type });
+  const blobUrl = URL.createObjectURL(audioBlob);
+
+  const newClip = {
+    id: `extracted-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: `${baseName} (audio)`,
+    type: 'audio',
+    startTime: videoClip.startTime,
+    duration: videoClip.duration,
+    file: audioFile,
+    blobUrl,
+    volume: 1,
+  };
+
+  setClips(prev => [...prev, newClip]);
+  return `Extracted audio from "${baseName}"`;
 }
 
 /* ─── Action: Remove Silence ────────────────────────────────── */
