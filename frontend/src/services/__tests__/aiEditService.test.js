@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { parseIntentLocally, executeExtractAudio } from '../aiEditService.js'
+import { describe, it, expect, vi } from 'vitest'
+import { parseIntentLocally, executeExtractAudio, executeAiEdit } from '../aiEditService.js'
 
 describe('parseIntentLocally — existing quick actions still work', () => {
   it('maps "add captions" to add_captions', () => {
@@ -166,6 +166,28 @@ describe('parseIntentLocally — extract audio', () => {
     expect(parseIntentLocally('extract the audio')).toEqual([
       { type: 'extract_audio', params: { format: 'mp3' } },
     ])
+  })
+})
+
+describe('executeAiEdit — error normalization', () => {
+  it('renders bare-string rejections as meaningful text, not "undefined"', async () => {
+    // Silence the expected console.error from the error-normalizer path.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // "remove captions" parses locally → executeRemoveCaptions → calls setClips.
+      // Force setClips to throw a bare string (mimics ffmpeg.wasm-style rejections
+      // with no .message property) and assert the surfaced summary.
+      const editor = {
+        clips: [{ id: 'cap1', isCaption: true, type: 'video' }],
+        setClips: () => { throw 'boom' },
+        mediaItems: [],
+      }
+      const result = await executeAiEdit('remove captions', {}, editor)
+      expect(result.summary).toContain('remove_captions: boom')
+      expect(result.summary).not.toContain('undefined')
+    } finally {
+      errSpy.mockRestore()
+    }
   })
 })
 

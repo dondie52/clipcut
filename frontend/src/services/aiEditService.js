@@ -289,7 +289,16 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
       const label = await executeAction(action, editor);
       if (label) labels.push(label);
     } catch (err) {
-      errors.push(`${action.type}: ${err.message}`);
+      // Actions (esp. ones backed by FFmpeg WASM) can reject with non-Error values
+      // that have no .message — rendering as the literal string "undefined" is useless.
+      // Fall through a chain of accessors so the user sees something meaningful.
+      const msg =
+        (err && err.message) ||
+        (typeof err === 'string' ? err : null) ||
+        (err && err.toString && err.toString() !== '[object Object]' ? err.toString() : null) ||
+        'unknown error';
+      console.error(`[AI] action '${action.type}' failed:`, err);
+      errors.push(`${action.type}: ${msg}`);
     }
   }
 
@@ -544,8 +553,19 @@ export async function executeExtractAudio(params, editor) {
 
   if (!file) throw new Error('Cannot access the source video file.');
 
-  const { extractAudio } = await import('./audioOperations');
-  const audioBlob = await extractAudio(file, format);
+  let audioBlob;
+  try {
+    const { extractAudio } = await import('./audioOperations');
+    audioBlob = await extractAudio(file, format);
+  } catch (err) {
+    const meta = `file=${file?.name || '(blob)'} size=${file?.size ?? '?'} type=${file?.type || '?'}`;
+    console.error('[extract_audio] FFmpeg failed:', err, meta);
+    const underlying =
+      (err && err.message) ||
+      (typeof err === 'string' ? err : '') ||
+      'FFmpeg failed (no message — check devtools)';
+    throw new Error(`Couldn't extract audio: ${underlying}. (${meta})`);
+  }
   const baseName = (videoClip.name || 'clip').replace(/\.[^.]+$/, '');
   const audioFile = new File([audioBlob], `${baseName}.${format}`, { type: audioBlob.type });
   const blobUrl = URL.createObjectURL(audioBlob);
