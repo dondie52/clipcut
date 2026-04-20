@@ -2,8 +2,7 @@
  * ClipCut AI Proxy Worker
  * Routes:
  *   POST /                — Frame analysis (LLaVA vision + Llama JSON)
- *   POST /transcribe      — Audio transcription via Contabo Whisper (CPU, fallback)
- *   POST /transcribe-fast — Audio transcription via Cloudflare Workers AI Whisper Turbo (GPU, primary)
+ *   POST /transcribe-fast — Audio transcription via Cloudflare Workers AI Whisper Turbo (GPU)
  *   POST /score           — Transcript scoring  (Llama structured JSON)
  *   POST /edit            — Intent parsing (natural language → structured edit actions)
  *
@@ -16,69 +15,42 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+// Per-IP rate limit check. Returns a 429 Response if over quota, else null.
+// Fails open on binding/limiter errors so we don't lock real users out.
+async function checkRateLimit(request, env) {
+  if (!env.RATE_LIMITER) return null;
+  const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+  try {
+    const { success } = await env.RATE_LIMITER.limit({ key: ip });
+    if (success) return null;
+  } catch (err) {
+    console.error('[rate-limit] limiter error:', err.message);
+    return null;
+  }
+  return Response.json(
+    { error: 'Too many requests. Please wait a moment.', code: 'RATE_LIMITED', retryAfter: 60 },
+    { status: 429, headers: { ...CORS_HEADERS, 'Retry-After': '60' } }
+  );
+}
+
 function jsonResponse(data, status = 200) {
   return Response.json(data, { status, headers: CORS_HEADERS });
 }
 
-const WHISPER_UPSTREAM = 'https://abstracts-feb-impacts-oldest.trycloudflare.com/transcribe';
-const UPSTREAM_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — long videos on CPU
-
-/* ─── Route: POST /transcribe ──────────────────────────────── */
-async function handleTranscribe(request) {
-  const audioData = await request.arrayBuffer();
-  const byteLength = audioData.byteLength;
-
-  if (!byteLength) {
-    return jsonResponse({ error: 'Empty audio data' }, 400);
+// Whisper Turbo expects base64-encoded audio (not an array of bytes like LLaVA).
+// Workers runtime has no Node Buffer; encode via chunked String.fromCharCode to
+// avoid the ~100k arg-count limit on large (~320 KB) WAV chunks.
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunkSize = 0x8000; // 32 KB
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
   }
-
-  console.log(`[transcribe] Proxying ${byteLength} bytes (${(byteLength / 1024).toFixed(1)} KB) to upstream Whisper`);
-
-  try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), UPSTREAM_TIMEOUT_MS);
-
-    const upstream = await fetch(WHISPER_UPSTREAM, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: audioData,
-      signal: ac.signal,
-    });
-
-    clearTimeout(timer);
-
-    if (!upstream.ok) {
-      const errBody = await upstream.text().catch(() => '');
-      console.error(`[transcribe] Upstream returned ${upstream.status}:`, errBody);
-      return jsonResponse(
-        { error: `Upstream Whisper error (${upstream.status})`, detail: errBody },
-        upstream.status >= 500 ? 502 : upstream.status
-      );
-    }
-
-    const data = await upstream.json();
-    console.log('[transcribe] Upstream OK, keys:', Object.keys(data));
-
-    // Flask server already returns { result: { text, words, language } }
-    // so pass through directly — no extra wrapping needed
-    return jsonResponse(data);
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      console.error(`[transcribe] Upstream timed out after ${UPSTREAM_TIMEOUT_MS / 1000}s`);
-      return jsonResponse({ error: 'Upstream Whisper server timed out' }, 504);
-    }
-    console.error(`[transcribe] Proxy failed:`, err.message);
-    return jsonResponse(
-      { error: `Failed to reach Whisper server: ${err.message}` },
-      502
-    );
-  }
+  return btoa(binary);
 }
 
 /* ─── Route: POST /transcribe-fast ─────────────────────────── */
-// Primary transcription path. Runs Whisper Turbo on Cloudflare GPUs
-// (~5-10x faster than the CPU-bound Contabo upstream). Falls through to
-// /transcribe on the client side if this returns 413/5xx or network fails.
 const FAST_MAX_BYTES = 25 * 1024 * 1024; // Workers AI input cap per request
 
 async function handleTranscribeFast(request, env) {
@@ -90,7 +62,7 @@ async function handleTranscribeFast(request, env) {
   }
 
   if (byteLength > FAST_MAX_BYTES) {
-    // Client should chunk smaller or fall back to /transcribe
+    // Client should send smaller chunks
     return jsonResponse(
       { error: `Audio exceeds ${FAST_MAX_BYTES / 1024 / 1024} MB limit`, size: byteLength },
       413
@@ -101,12 +73,10 @@ async function handleTranscribeFast(request, env) {
 
   try {
     const raw = await env.AI.run('@cf/openai/whisper-large-v3-turbo', {
-      // Workers AI expects a plain array of byte values for the audio field
-      audio: [...new Uint8Array(audioData)],
+      audio: arrayBufferToBase64(audioData),
     });
 
-    // Normalise to the shape the client already consumes for /transcribe:
-    //   { result: { text, words: [{word, start, end}], language } }
+    // Normalise to: { result: { text, words: [{word, start, end}], language } }
     const words = Array.isArray(raw?.words)
       ? raw.words.map(w => ({
           word: w.word ?? w.text ?? '',
@@ -124,10 +94,10 @@ async function handleTranscribeFast(request, env) {
     return jsonResponse({ result });
   } catch (err) {
     console.error('[transcribe-fast] Workers AI failed:', err.message);
-    // 502 so the client treats this as a transient upstream error and falls
-    // back to /transcribe (Contabo). Not 500 — we don't want the client to
-    // surface this as a hard error when a fallback exists.
-    return jsonResponse({ error: `Workers AI error: ${err.message}` }, 502);
+    return jsonResponse(
+      { error: 'Transcription service temporarily unavailable', code: 'WHISPER_UNAVAILABLE' },
+      502
+    );
   }
 }
 
@@ -151,7 +121,7 @@ async function handleScore(request, env) {
 /* ─── Route: POST /edit ────────────────────────────────────── */
 const VALID_ACTION_TYPES = new Set([
   'add_captions', 'remove_captions', 'remove_silence', 'cut_clip', 'split_clip',
-  'add_text', 'apply_filter', 'change_speed', 'add_music',
+  'add_text', 'apply_filter', 'change_speed', 'add_music', 'add_transition',
   // Phase 2 — ML-powered actions
   'remove_filler_words', 'detect_scenes', 'auto_highlight',
   'smart_crop', 'beat_sync', 'zoom_to_speaker', 'remove_boring',
@@ -172,12 +142,14 @@ You handle TWO types of user messages:
    - add_captions: style (classic|boxed|modern|minimal)
    - remove_captions: (no params) — deletes all existing caption clips from the timeline. Use this when the user says "remove captions", "delete captions", "get rid of captions", "no captions", or similar. Never map removal requests to add_captions.
    - remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
-   - cut_clip: from (seconds), to (seconds)
-   - split_clip: at (seconds)
+   - cut_clip: from (seconds), to (seconds). Always resolve to a number of seconds — e.g. "1:45" means 105.
+   - split_clip: at (seconds). Always resolve to a number of seconds — e.g. "0:26" means 26, "0.26" means 0.26 seconds.
+     If the user writes something like "0.26" on a video longer than a minute, treat it as AMBIGUOUS and respond with type:"chat" asking whether they meant 0:26 (26s) or 0.26s — do NOT guess.
    - add_text: text (string), position (top|center|bottom), duration (seconds)
    - apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
    - change_speed: speed (0.5|1|1.5|2|4)
    - add_music: genre (chill|epic|happy|sad|energetic)
+   - add_transition: name (fade|fadeblack|fadewhite|dissolve|wipeleft|wiperight|slideup|slidedown), duration (0.2-3.0, default 1.0). Applied between every pair of adjacent clips. If the user just says "add a transition" without naming one, respond with type:"chat" asking which of the 8 transition types they want.
    - remove_filler_words: fillers (optional array like ['um','uh','like','you know'])
    - detect_scenes: sensitivity (low|medium|high, default medium)
    - auto_highlight: duration (seconds, default 30)
@@ -187,6 +159,9 @@ You handle TWO types of user messages:
    - remove_boring: threshold (1-10 engagement score, default 4)
 
 Context about the video will be provided. Use it to make smart defaults.
+
+IMPORTANT — ASK INSTEAD OF GUESSING: if a request is missing details that would let you commit to a specific action (which clip, which transition type, which filter, ambiguous time notation, etc.), respond with type:"chat" asking one focused follow-up question rather than inventing a value. It is always better to ask than to do the wrong thing.
+
 Return ONLY valid JSON. No markdown fences, no explanation, no extra text.`;
 
 async function handleEdit(request, env) {
@@ -227,15 +202,26 @@ async function handleEdit(request, env) {
 
   const raw = result?.response || '';
 
-  // Parse JSON from the response, stripping any accidental markdown fences
+  // Two-tier parser. Llama 3.1 8B sometimes wraps JSON with prefix text,
+  // nested fences, or trailing explanation. Brace-slice handles all three;
+  // fence-strip is the fallback; else clean 502.
   let parsed;
   try {
-    const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-    parsed = JSON.parse(cleaned);
-  } catch (parseErr) {
-    // LLM returned unparseable text — treat it as a conversational reply
-    console.log('[edit] LLM returned non-JSON, treating as chat:', raw.slice(0, 120));
-    return jsonResponse({ type: 'chat', message: raw.trim() || "I'm not sure what you mean. Try something like 'add captions' or 'remove silence'." });
+    const first = raw.indexOf('{');
+    const last = raw.lastIndexOf('}');
+    if (first === -1 || last <= first) throw new Error('no JSON object braces found');
+    parsed = JSON.parse(raw.slice(first, last + 1));
+  } catch (tier1Err) {
+    try {
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch (tier2Err) {
+      console.error('[edit] LLM_PARSE_FAILED — raw response:', raw);
+      return jsonResponse(
+        { error: 'AI response could not be parsed. Please try rephrasing.', code: 'LLM_PARSE_FAILED' },
+        502
+      );
+    }
   }
 
   // Handle conversational response: {type: "chat", message: "..."}
@@ -282,6 +268,8 @@ async function handleFrameAnalysis(request, env) {
 
   if (image) {
     // Step 1: LLaVA describes the image
+    // NB: LLaVA's current schema accepts an array of byte values for `image`
+    // (unlike Whisper Turbo, which requires base64). Keep the spread form here.
     const imageBytes = new Uint8Array(image);
     const visionResult = await env.AI.run('@cf/llava-hf/llava-1.5-7b-hf', {
       prompt: 'Describe what is happening in this video frame in 1-2 sentences.',
@@ -337,9 +325,20 @@ export default {
       const url = new URL(request.url);
       const path = url.pathname.replace(/\/+$/, ''); // strip trailing slashes
 
+      // Rate-limit live AI routes. Skip /transcribe (410 stub — no compute cost).
+      // Empty path is the default frame-analysis (vision) handler.
+      const RATE_LIMITED_PATHS = new Set(['/transcribe-fast', '/edit', '/score', '']);
+      if (RATE_LIMITED_PATHS.has(path)) {
+        const limited = await checkRateLimit(request, env);
+        if (limited) return limited;
+      }
+
       switch (path) {
         case '/transcribe':
-          return await handleTranscribe(request);
+          return jsonResponse(
+            { error: 'Endpoint removed. Use /transcribe-fast instead.', code: 'ENDPOINT_DEPRECATED' },
+            410
+          );
         case '/transcribe-fast':
           return await handleTranscribeFast(request, env);
         case '/score':

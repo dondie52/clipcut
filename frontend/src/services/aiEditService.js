@@ -26,13 +26,93 @@ const FILTER_NAME_MAP = {
   sepia: 'Sepia',
 };
 
+// Valid transition names match TRANSITION_PRESETS in VideoEditor/constants.js
+const VALID_TRANSITIONS = ['fade', 'fadeblack', 'fadewhite', 'dissolve', 'wipeleft', 'wiperight', 'slideup', 'slidedown'];
+
+const TIME_TOKEN = String.raw`(?:\d+:\d+(?:\.\d+)?|\d*\.?\d+)`;
+
+// Parse "0.26" → 0.26, "1:45" → 105, "30s" → 30. Returns null if unparseable.
+function parseTimeToken(raw) {
+  if (typeof raw !== 'string') return null;
+  const t = raw.trim().replace(/\s*(?:s|sec|secs|seconds?)$/i, '');
+  if (t.includes(':')) {
+    const [m, s] = t.split(':');
+    const minutes = parseInt(m, 10);
+    const seconds = parseFloat(s);
+    if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) return null;
+    return minutes * 60 + seconds;
+  }
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Damerau-Levenshtein distance (allows 1-char transpositions). Used for
+// tolerant keyword matching of short, known targets like "split" / "transition".
+function editDistance(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost,
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1);
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+/**
+ * Normalise sloppy typing so the downstream regexes hit.
+ * Kept deliberately narrow — only fuzz the exact keywords we command on, and
+ * only fix punctuation mistypes that have an unambiguous correct form.
+ * For arbitrary rephrasings, let the Worker LLM take over.
+ */
+function normaliseTypos(prompt) {
+  // Semicolon is one key over from colon on QWERTY — "0;26" almost always means "0:26".
+  let out = prompt.replace(/(\d)\s*;\s*(\d)/g, '$1:$2');
+
+  // Fuzz-correct "split" and "transition(s)" token-by-token. Thresholds are tuned
+  // so "shift" (dist 2 to "split") is NOT coerced — only genuine near-misses hit.
+  out = out.replace(/\b[a-z]{3,14}\b/gi, (word) => {
+    const lower = word.toLowerCase();
+    if (lower === 'split' || lower === 'transition' || lower === 'transitions') return word;
+    // "split" — very short; require distance 1 to avoid grabbing real words.
+    if (lower.length >= 4 && lower.length <= 7 && editDistance(lower, 'split') === 1) return 'split';
+    // "transition(s)" — allow distance 2 (missing letter + transposition is common).
+    if (lower.length >= 7 && editDistance(lower, 'transitions') <= 2) return 'transitions';
+    if (lower.length >= 7 && editDistance(lower, 'transition') <= 2) return 'transition';
+    return word;
+  });
+
+  return out;
+}
+
 /**
  * Local intent parser — matches common editing commands to structured actions
- * without requiring a network call. Returns null if the prompt is ambiguous
- * and should be forwarded to the Worker.
+ * without requiring a network call.
+ *
+ * Returns one of:
+ *   - Array of action objects → execute them
+ *   - { chat: true, message: string } → the parser needs clarification from the user
+ *   - null → prompt is ambiguous to the local parser; fall through to the Worker
+ *
+ * The `context` arg is optional but lets the parser catch time-notation ambiguity
+ * (e.g. "split at 0.26" on a 5-minute video almost certainly meant 0:26 = 26s).
  */
-export function parseIntentLocally(prompt) {
-  const p = prompt.toLowerCase().trim();
+export function parseIntentLocally(prompt, context = {}) {
+  const p = normaliseTypos(prompt.toLowerCase().trim());
+  const videoDuration = Number(context.duration) || 0;
 
   // Pattern table: [regex, action builder]
   const patterns = [
@@ -63,8 +143,41 @@ export function parseIntentLocally(prompt) {
       const speed = parseFloat(m[1] || m[2]);
       return [{ type: 'change_speed', params: { speed } }];
     }],
-    [/\bsplit\s+(?:at\s+)?(\d+)\b/, (m) => [{ type: 'split_clip', params: { at: parseFloat(m[1]) } }]],
-    [/\bcut\s+(?:from\s+)?(\d+)\s*(?:to|-)\s*(\d+)/, (m) => [{ type: 'cut_clip', params: { from: parseFloat(m[1]), to: parseFloat(m[2]) } }]],
+    // Split accepts decimals (0.26) AND mm:ss (0:26) AND plain seconds ("30", "30s").
+    // `TIME_TOKEN` must come from the enclosing scope — patterns live in `parseIntentLocally`.
+    [new RegExp(String.raw`\bsplit\s+(?:at\s+|@\s*)?(${TIME_TOKEN})\s*(?:s|sec|secs|seconds?)?\b`), (m) => {
+      const raw = m[1];
+      const at = parseTimeToken(raw);
+      if (at === null) return null;
+      // Ambiguity heuristic: user wrote decimal notation like "0.26" on a video longer than 60s.
+      // They probably meant 0:26 (26s), not 0.26s. Ask rather than do the wrong thing.
+      const usedDotNotation = raw.includes('.') && !raw.includes(':');
+      const looksLikeClockStyle = /^\d+\.\d{2}$/.test(raw); // "0.26", "1.45"
+      if (usedDotNotation && looksLikeClockStyle && videoDuration >= 60 && at < 1) {
+        const [mm, ss] = raw.split('.');
+        const clockSeconds = parseInt(mm, 10) * 60 + parseInt(ss, 10);
+        return {
+          chat: true,
+          message: `Did you mean split at ${clockSeconds}s (${mm}:${ss}) or ${at}s? Reply with "split at 0:${ss}" for ${clockSeconds} seconds, or "split at ${at} seconds" for ${at}s.`,
+        };
+      }
+      return [{ type: 'split_clip', params: { at } }];
+    }],
+    [new RegExp(String.raw`\bcut\s+(?:from\s+)?(${TIME_TOKEN})\s*(?:to|-)\s*(${TIME_TOKEN})`), (m) => {
+      const from = parseTimeToken(m[1]);
+      const to = parseTimeToken(m[2]);
+      if (from === null || to === null) return null;
+      return [{ type: 'cut_clip', params: { from, to } }];
+    }],
+    // Transitions — match a named type, or ask which one if user just said "add transitions".
+    [/\badd\s+(?:a\s+|an\s+)?(fade\s*black|fade\s*white|fade|dissolve|wipe\s*left|wipe\s*right|slide\s*up|slide\s*down)\s*(?:transitions?)?\b/, (m) => {
+      const name = m[1].replace(/\s+/g, '').toLowerCase();
+      return [{ type: 'add_transition', params: { name } }];
+    }],
+    [/\badd\s+(?:a\s+|an\s+|some\s+)?transitions?\b/, () => ({
+      chat: true,
+      message: "Which transition would you like — fade, fade black, fade white, dissolve, wipe left, wipe right, slide up, or slide down? I'll apply it between every pair of adjacent clips.",
+    })],
     [/\b(?:apply\s+)?(?:a\s+)?(cinematic|vintage|bw|b&w|black\s+and\s+white|warm|cool|90s|sepia)\s*filter\b/, (m) => {
       return [{ type: 'apply_filter', params: { name: m[1].replace(/\s+/g, ' ') } }];
     }],
@@ -82,12 +195,66 @@ export function parseIntentLocally(prompt) {
     ];
   }
 
-  for (const [regex, builder] of patterns) {
-    const match = p.match(regex);
-    if (match) return builder(match);
+  // Compound: "split at X and add [Y] transitions". Run each clause through the
+  // single-clause matcher so decimal parsing and the clarifying-question path stay
+  // in one place. If either clause asks for clarification, surface that immediately.
+  if (/\bsplit\b/.test(p) && /\btransitions?\b/.test(p)) {
+    const clauses = p.split(/\s+and\s+(?:then\s+)?|,\s*/).map(s => s.trim()).filter(Boolean);
+    const collected = [];
+    for (const clause of clauses) {
+      const sub = parseIntentLocally(clause, context);
+      if (!sub) continue;
+      if (!Array.isArray(sub)) return sub; // chat/clarification — short-circuit
+      collected.push(...sub);
+    }
+    if (collected.length >= 2) return collected;
   }
 
+  for (const [regex, builder] of patterns) {
+    const match = p.match(regex);
+    if (match) {
+      const result = builder(match);
+      if (result) return result;
+    }
+  }
+
+  // Greeting / small-talk fallback. Handled locally so a missing VITE_TRANSCRIPT_WORKER_URL
+  // doesn't surface as a scary "AI proxy not configured" error for a simple "hi".
+  const chat = matchSmallTalk(p);
+  if (chat) return { chat: true, message: chat };
+
   return null; // ambiguous — fall through to Worker
+}
+
+/** Return a friendly reply if the prompt is clearly conversational, else null. */
+function matchSmallTalk(p) {
+  const trimmed = p.trim();
+  if (!trimmed) return null;
+
+  // Short greetings: "hi", "hey", "hello", "yo", "sup", "gm", optionally with punctuation.
+  if (/^(?:hi+|hey+|hello+|yo+|sup|gm|good\s+(?:morning|afternoon|evening))[\s!.?,]*$/i.test(trimmed)) {
+    return "Hi! I can split clips, add transitions, captions, filters and more. Try something like \"split at 0:26\" or \"add a fade transition\".";
+  }
+
+  // Thanks / bye
+  if (/^(?:thanks?|thank\s+you|ty|thx|cheers)[\s!.?,]*$/i.test(trimmed)) {
+    return "Anytime! Let me know what you want to edit next.";
+  }
+  if (/^(?:bye|goodbye|cya|see\s+ya|later)[\s!.?,]*$/i.test(trimmed)) {
+    return "See you later! Your project is auto-saved.";
+  }
+
+  // "what can you do" / "help" — give a capability overview.
+  if (/^(?:help|what\s+can\s+you\s+do|how\s+does\s+this\s+work|what\s+do\s+you\s+do)\??$/i.test(trimmed)) {
+    return "I can split/cut clips, add captions and transitions, remove silence or filler words, apply filters (cinematic, vintage, bw, warm, cool, 90s, sepia), change speed, make it vertical for TikTok, and more. Just describe what you want.";
+  }
+
+  // Bare "?" / "ok" / "okay"
+  if (/^(?:ok(?:ay)?|cool|nice|great|\?)[\s!.?,]*$/i.test(trimmed)) {
+    return "Ready when you are — what should I do with the video?";
+  }
+
+  return null;
 }
 
 /**
@@ -145,9 +312,11 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
  * falls back to the Worker /edit endpoint for ambiguous prompts.
  */
 async function parseIntent(prompt, context, history, onSlowResponse) {
-  // Try local parser first — handles all quick-action prompts instantly
-  const localActions = parseIntentLocally(prompt);
-  if (localActions) return localActions;
+  // Try local parser first — handles all quick-action prompts instantly.
+  // The local parser can also return { chat: true, message } for clarification —
+  // that shape is passed straight through to executeAiEdit, which renders it as chat.
+  const localResult = parseIntentLocally(prompt, context);
+  if (localResult) return localResult;
 
   // Fall back to Worker for complex / conversational prompts
   if (!WORKER_URL) {
@@ -252,6 +421,9 @@ async function executeAction(action, editor) {
 
     case 'split_clip':
       return executeSplitClip(action.params, editor);
+
+    case 'add_transition':
+      return executeAddTransition(action.params, editor);
 
     case 'add_text':
       return executeAddText(action.params, editor);
@@ -494,20 +666,74 @@ function executeCutClip(params, editor) {
 
 /* ─── Action: Split Clip ────────────────────────────────────── */
 function executeSplitClip(params, editor) {
-  const { clips, splitClip, selectedClipId } = editor;
+  const { clips, splitClip } = editor;
   const splitTime = params.at;
 
-  if (splitTime == null) throw new Error('Split requires a time position (e.g., "split at 30").');
+  if (splitTime == null || !Number.isFinite(splitTime)) {
+    throw new Error('Split requires a time position (e.g., "split at 30" or "split at 0:26").');
+  }
 
-  // Find the clip at the split time
-  const targetClip = clips.find(c =>
-    c.startTime <= splitTime && (c.startTime + c.duration) > splitTime
-  );
+  // Pick the clip that contains the split point. Prefer the lowest-track video clip
+  // so a caption overlay at the same time doesn't win over the actual media clip.
+  const candidates = clips
+    .filter(c => c.startTime <= splitTime && (c.startTime + c.duration) > splitTime && !c.isCaption)
+    .sort((a, b) => (a.track || 0) - (b.track || 0));
+  const targetClip = candidates[0];
 
-  if (!targetClip) throw new Error(`No clip found at ${splitTime}s to split.`);
+  if (!targetClip) {
+    const maxEnd = clips.reduce((m, c) => Math.max(m, c.startTime + c.duration), 0);
+    throw new Error(`No clip at ${splitTime}s — the timeline only reaches ${maxEnd.toFixed(1)}s.`);
+  }
 
-  splitClip(targetClip.id, splitTime);
+  // `splitClip(id, offset)` from VideoEditor.jsx expects an offset LOCAL to the clip,
+  // not an absolute timeline time. Previously this code passed the absolute time,
+  // which worked only when the clip started at t=0.
+  const localOffset = splitTime - targetClip.startTime;
+  if (localOffset <= 0.1 || localOffset >= targetClip.duration - 0.1) {
+    throw new Error(`Split point too close to the clip edge (${localOffset.toFixed(2)}s into a ${targetClip.duration.toFixed(1)}s clip).`);
+  }
+
+  splitClip(targetClip.id, localOffset);
   return `Split clip at ${splitTime}s`;
+}
+
+/* ─── Action: Add Transition ────────────────────────────────── */
+function executeAddTransition(params, editor) {
+  const { clips, setClips } = editor;
+  const raw = String(params.name || 'fade').replace(/\s+/g, '').toLowerCase();
+  if (!VALID_TRANSITIONS.includes(raw)) {
+    throw new Error(`Unknown transition "${params.name}". Try: ${VALID_TRANSITIONS.join(', ')}.`);
+  }
+  const duration = Math.max(0.2, Math.min(3.0, params.duration ?? 1.0));
+
+  // Transitions live on a clip and apply between it and the NEXT clip, so the final
+  // clip on each track has nothing to transition into — exclude those.
+  const videoClips = clips
+    .filter(c => c.type !== 'text' && c.type !== 'sticker' && !c.isCaption)
+    .sort((a, b) => (a.track || 0) - (b.track || 0) || a.startTime - b.startTime);
+
+  if (videoClips.length < 2) {
+    throw new Error('Need at least 2 clips on the timeline to add a transition between them.');
+  }
+
+  const lastOnTrack = new Map();
+  for (const c of videoClips) {
+    const t = c.track || 0;
+    const prev = lastOnTrack.get(t);
+    if (!prev || c.startTime > prev.startTime) lastOnTrack.set(t, c);
+  }
+  const skipIds = new Set([...lastOnTrack.values()].map(c => c.id));
+  const targetIds = new Set(videoClips.filter(c => !skipIds.has(c.id)).map(c => c.id));
+
+  if (targetIds.size === 0) {
+    throw new Error('No adjacent clips found to bridge with a transition.');
+  }
+
+  setClips(prev => prev.map(c =>
+    targetIds.has(c.id) ? { ...c, transition: raw, transitionDuration: duration } : c
+  ));
+
+  return `Added ${raw} transition between ${targetIds.size} pair${targetIds.size !== 1 ? 's' : ''} of clips`;
 }
 
 /* ─── Action: Add Text ──────────────────────────────────────── */
