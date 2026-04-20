@@ -2291,12 +2291,19 @@ const VideoEditor = () => {
           }
         }
 
-        // 2. Resolve all unique media in parallel
+        // 2. Resolve all unique media in parallel.
+        // NB: do NOT wrap resolveMedia() in an outer timeout here. Each internal
+        // stage already has its own timeout (IndexedDB 2s × 2, Supabase URL 5s,
+        // fetch 8s), so the inner worst case is ~17s — and Promise.race's
+        // fire-and-forget semantics mean a premature outer timeout lets the
+        // Supabase fetch complete in the background while the merge below runs
+        // with an empty mediaMap. The user then sees a "Supabase Storage HIT"
+        // log AFTER the clip has already been stamped "Media not found — re-import".
         setLoadSub(`Resolving ${uniqueMedia.size} media files...`);
         const resolveResults = await Promise.all(
           [...uniqueMedia.entries()].map(async ([mediaId, item]) => {
             if (cancelled) return null;
-            const resolved = await withTimeout(resolveMedia(item, cachedIdbEntries), 8000, { file: null, blobUrl: null });
+            const resolved = await resolveMedia(item, cachedIdbEntries);
             return { mediaId, resolved, meta: item };
           })
         );
