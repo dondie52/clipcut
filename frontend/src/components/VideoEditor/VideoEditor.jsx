@@ -2081,21 +2081,49 @@ const VideoEditor = () => {
       return { file, blobUrl };
     };
 
+    // Drafts (draft-*) and pre-migration local saves (local_*) never exist in
+    // Supabase — asking for them always yields PGRST116. Short-circuit the
+    // cloud call so the IndexedDB recovery path below is the first thing
+    // that runs for these IDs.
+    const isNonCloudId = /^(draft-|local_)/.test(projectId);
+    const emptyPData = () => ({
+      name: projectName || "Untitled Project",
+      project_data: { clips: [], mediaItems: [] },
+    });
+
     const restoreProject = async () => {
       setIsProcessing(true);
       setLoadMsg("Restoring media...");
       try {
         let pData = projectData;
         if (!pData) {
-          if (!isSupabaseConfigured()) {
+          if (isNonCloudId) {
+            console.log('[restore] Non-cloud projectId — skipping Supabase, going straight to IndexedDB recovery:', projectId);
+            pData = emptyPData();
+          } else if (!isSupabaseConfigured()) {
             pData = await loadProject(projectId, null);
           } else if (user?.id) {
-            pData = await loadProject(projectId, user.id);
+            try {
+              pData = await loadProject(projectId, user.id);
+            } catch (e) {
+              // PGRST116 = "0 rows" from .single(). The row never existed (draft
+              // that failed to rekey, deleted project still in URL). Fall
+              // through to IndexedDB recovery instead of losing the user's
+              // local media. Other errors (network, auth) still bubble up.
+              if (e?.code === 'PGRST116') {
+                console.warn('[restore] Supabase has no row for', projectId, '— attempting IndexedDB-only recovery');
+                pData = emptyPData();
+              } else {
+                throw e;
+              }
+            }
           }
         }
         if (!pData) {
-          notify("error", "Could not load project data");
-          return;
+          // localStorage also returned nothing — treat as empty project and
+          // let the IndexedDB scan below surface any orphaned media.
+          console.warn('[restore] No project data found for', projectId, '— attempting IndexedDB-only recovery');
+          pData = emptyPData();
         }
         if (cancelled) return;
 
