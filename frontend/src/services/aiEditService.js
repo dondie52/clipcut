@@ -5,7 +5,7 @@
  * intent parsing, then executes the returned actions against the editor state.
  */
 
-import { detectSilence, totalSilenceDuration } from './silenceDetector';
+import { detectSilence, totalSilenceDuration, intersectSilenceRanges } from './silenceDetector';
 import { FILTER_PRESETS } from '../components/VideoEditor/constants';
 import { getWorkerUrl, WORKER_URL_NOT_SET_ERROR } from './workerConfig';
 
@@ -581,16 +581,25 @@ async function executeRemoveSilence(params, editor) {
 
     const silentRanges = await detectSilence(file, { threshold, minDuration });
 
-    if (silentRanges.length === 0) {
+    // Silent ranges are in SOURCE time. Keep only the portion that falls inside
+    // this clip's trimmed window, then shift from source time to timeline time.
+    // Without this intersect step, silences in trimmed-away portions of the
+    // source would be treated as if they applied to the visible clip — producing
+    // inverted ranges and the notorious "saved -260.4s" bug.
+    const trimStart = clip.trimStart || 0;
+    const visible = intersectSilenceRanges(silentRanges, trimStart, trimStart + clip.duration, minDuration);
+
+    if (visible.length === 0) {
       newClips.push(clip);
       continue;
     }
 
-    // Calculate non-silent segments (the parts we keep)
-    const keepSegments = getKeepSegments(clip.startTime, clip.startTime + clip.duration, silentRanges.map(r => ({
-      start: clip.startTime + r.start,
-      end: clip.startTime + Math.min(r.end, clip.duration),
-    })));
+    const timelineSilent = visible.map(r => ({
+      start: clip.startTime + (r.start - trimStart),
+      end:   clip.startTime + (r.end   - trimStart),
+    }));
+
+    const keepSegments = getKeepSegments(clip.startTime, clip.startTime + clip.duration, timelineSilent);
 
     // Create new clips for each non-silent segment
     let offset = clip.startTime;
@@ -609,12 +618,8 @@ async function executeRemoveSilence(params, editor) {
       offset += segDuration;
     }
 
-    const silenceDuration = totalSilenceDuration(silentRanges.map(r => ({
-      start: r.start,
-      end: Math.min(r.end, clip.duration),
-    })));
-    totalRemoved += silenceDuration;
-    sectionsRemoved += silentRanges.length;
+    totalRemoved += totalSilenceDuration(visible);
+    sectionsRemoved += visible.length;
   }
 
   // Combine kept video clips + preserved non-video clips
