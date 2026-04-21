@@ -4,7 +4,8 @@
  * Licensed under the MIT License
  *
  * @module components/OnboardingStep2
- * @description Onboarding Step 2 — Skill level & purpose
+ * @description Onboarding Step 2 — Craft. "Warm Storybook" aesthetic.
+ *   State (skillLevel, purposes) and all handlers/analytics preserved.
  */
 
 import { useState } from "react";
@@ -12,446 +13,331 @@ import { trackEvent, analyticsEvents } from "../utils/analytics";
 import BotswanaStripe from "./shared/BotswanaStripe";
 
 const STEP2_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500&display=swap');
   :root {
-    --cc-bg: #0a0a0a;
-    --cc-bg-alt: #0d1117;
-    --cc-surface: #1a2332;
-    --cc-surface-raised: rgba(26,35,50,0.6);
-    --cc-border: rgba(255,255,255,0.06);
-    --cc-border-hover: rgba(255,255,255,0.1);
-    --cc-border-focus: rgba(117,170,219,0.45);
+    --cc-bg: #0c1220;
+    --cc-bg-alt: #0e1624;
+    --cc-card: #121a2a;
+    --cc-card-raised: #18212f;
+    --cc-border: rgba(255,255,255,0.07);
+    --cc-border-hover: rgba(255,255,255,0.14);
     --cc-accent: #75AADB;
     --cc-accent-hover: #8bbae3;
-    --cc-accent-soft: rgba(117,170,219,0.1);
-    --cc-accent-glow: rgba(117,170,219,0.06);
+    --cc-accent-soft: rgba(117,170,219,0.12);
     --cc-text: #ffffff;
-    --cc-text-secondary: rgba(255,255,255,0.6);
-    --cc-text-muted: rgba(255,255,255,0.35);
-    --cc-text-dim: rgba(255,255,255,0.2);
-    --cc-font: 'Spline Sans', sans-serif;
-    --cc-radius: 12px;
-    --cc-radius-sm: 8px;
+    --cc-text-secondary: rgba(255,255,255,0.74);
+    --cc-text-muted: rgba(255,255,255,0.46);
+    --cc-text-whisper: rgba(255,255,255,0.22);
+    --cc-font-sans: 'Spline Sans', sans-serif;
+    --cc-font-display: 'Outfit', 'Spline Sans', sans-serif;
+    --cc-font-serif: 'Instrument Serif', Georgia, serif;
+    --cc-font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
   }
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   .ob2-root {
     width: 100vw;
-    height: 100vh;
+    min-height: 100vh;
+    min-height: 100dvh;
     background: var(--cc-bg);
     display: flex;
     flex-direction: column;
     position: relative;
-    overflow: hidden;
-    font-family: var(--cc-font);
+    overflow-x: hidden;
+    font-family: var(--cc-font-sans);
     color: var(--cc-text);
   }
-
   .ob2-root::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
+    content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
     opacity: 0.025;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    background-size: 128px 128px;
   }
-
   .ob2-root::after {
-    content: '';
-    position: fixed;
-    bottom: -20%;
-    left: -10%;
-    width: 500px;
-    height: 500px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(117,170,219,0.035) 0%, transparent 65%);
-    z-index: 0;
-    pointer-events: none;
+    content: ''; position: fixed; z-index: 0; pointer-events: none;
+    top: -15%; right: -12%; width: 720px; height: 720px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(117,170,219,0.09) 0%, rgba(117,170,219,0.02) 40%, transparent 70%);
+    filter: blur(24px);
   }
 
-  /* —— Header —— */
+  .ob2-bg-num {
+    position: absolute; z-index: 0; pointer-events: none; user-select: none;
+    top: 50%; left: -8%; transform: translateY(-50%);
+    font-family: var(--cc-font-serif);
+    font-style: italic;
+    font-size: clamp(240px, 36vw, 520px);
+    line-height: 0.9;
+    color: var(--cc-accent);
+    opacity: 0.05;
+    letter-spacing: -0.04em;
+  }
+
+  /* Header — shared vocabulary with Step 1 */
   .ob2-header {
-    width: 100%;
-    padding: 20px 32px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    width: 100%; padding: 22px 36px;
+    display: flex; align-items: center; justify-content: space-between;
     border-bottom: 1px solid var(--cc-border);
-    position: relative;
-    z-index: 2;
-    opacity: 0;
-    animation: ob2FadeDown 0.6s ease forwards;
+    position: relative; z-index: 2;
+    opacity: 0; animation: ob2-fade-down 0.6s ease forwards;
   }
-
-  .ob2-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
+  .ob2-brand { display: flex; align-items: baseline; gap: 10px; }
+  .ob2-brand-mono {
+    font-family: var(--cc-font-serif);
+    font-style: italic; font-size: 26px;
+    color: var(--cc-accent); line-height: 1;
   }
-
-  .ob2-logo-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
-    background: linear-gradient(135deg, var(--cc-accent), #5a8cbf);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
+  .ob2-brand-name {
+    font-family: var(--cc-font-display);
+    font-size: 16px; font-weight: 700; letter-spacing: -0.02em; color: var(--cc-text);
   }
-
-  .ob2-logo-badge {
-    position: absolute;
-    bottom: -2px;
-    right: -4px;
-    font-size: 11px;
-    color: var(--cc-text);
-    background: var(--cc-bg);
-    border-radius: 50%;
-    padding: 1px;
-    line-height: 1;
-  }
-
-  .ob2-logo-name { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
-
   .ob2-progress { display: flex; align-items: center; gap: 16px; }
-  .ob2-dots { display: flex; gap: 8px; }
-
-  .ob2-dot {
-    width: 32px; height: 4px; border-radius: 2px;
-    background: var(--cc-border); transition: all 0.4s ease;
-    position: relative; overflow: hidden;
+  .ob2-progress-strokes { display: flex; align-items: center; gap: 6px; }
+  .ob2-stroke {
+    width: 40px; height: 5px; border-radius: 999px;
+    background: rgba(255,255,255,0.06); position: relative; overflow: hidden;
   }
-  .ob2-dot.active { background: var(--cc-accent); box-shadow: 0 0 12px rgba(117,170,219,0.35); }
-  .ob2-dot.active::after {
+  .ob2-stroke.is-filled {
+    background: linear-gradient(90deg, #4a7fb5 0%, #75AADB 50%, #8bbae3 100%);
+    box-shadow: 0 0 12px rgba(117,170,219,0.35);
+  }
+  .ob2-stroke.is-active {
+    background: linear-gradient(90deg, #4a7fb5 0%, #75AADB 100%);
+    box-shadow: 0 0 14px rgba(117,170,219,0.45);
+  }
+  .ob2-stroke.is-active::after {
     content: ''; position: absolute; inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
-    animation: ob2Shimmer 2.5s ease-in-out infinite;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+    animation: ob2-shimmer 2.6s ease-in-out infinite;
   }
-  .ob2-dot.done { background: var(--cc-accent); opacity: 0.45; }
-  .ob2-step-label { font-size: 12px; font-weight: 500; color: var(--cc-text-muted); }
+  .ob2-step-label {
+    font-family: var(--cc-font-mono);
+    font-size: 10.5px; font-weight: 500; letter-spacing: 0.14em;
+    color: var(--cc-text-muted); text-transform: uppercase;
+  }
 
-  /* —— Main —— */
+  /* Main */
   .ob2-main {
     flex: 1;
     display: flex;
+    justify-content: center;
+    padding: 56px 32px 80px;
     position: relative;
     z-index: 1;
-    overflow-y: auto;
   }
+  .ob2-container { width: 100%; max-width: 780px; }
 
-  /* Decorative side strip */
-  .ob2-side-decor {
-    width: 64px;
-    min-width: 64px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding-top: 72px;
-    gap: 12px;
-    opacity: 0;
-    animation: ob2FadeRight 0.8s ease 0.15s forwards;
-  }
-
-  .ob2-side-line {
-    width: 1px;
-    height: 50px;
-    background: linear-gradient(to bottom, var(--cc-accent), transparent);
-    opacity: 0.3;
-  }
-
-  .ob2-side-num {
-    font-size: 48px;
-    font-weight: 800;
-    color: var(--cc-accent);
-    opacity: 0.06;
-    line-height: 1;
-  }
-
-  .ob2-content {
-    flex: 1;
-    max-width: 820px;
-    padding: 48px 40px 60px 0;
-  }
-
-  /* Heading */
   .ob2-heading {
-    margin-bottom: 44px;
-    opacity: 0;
-    animation: ob2FadeUp 0.7s ease 0.1s forwards;
+    text-align: center;
+    margin-bottom: 48px;
+    opacity: 0; animation: ob2-fade-up 0.7s ease 0.12s forwards;
   }
-
   .ob2-eyebrow {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: var(--cc-accent);
-    margin-bottom: 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    font-family: var(--cc-font-mono);
+    font-size: 11px; font-weight: 500; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--cc-accent);
+    margin-bottom: 18px; display: inline-flex; align-items: center; gap: 10px;
   }
-
-  .ob2-eyebrow::after {
-    content: '';
-    flex: 1;
-    max-width: 80px;
-    height: 1px;
-    background: linear-gradient(to right, var(--cc-accent), transparent);
-    opacity: 0.3;
+  .ob2-eyebrow::before, .ob2-eyebrow::after {
+    content: ''; width: 22px; height: 1px; background: var(--cc-accent); opacity: 0.5;
   }
-
   .ob2-title {
-    font-size: 38px;
-    font-weight: 800;
-    line-height: 1.1;
-    letter-spacing: -1px;
-    margin-bottom: 10px;
+    font-family: var(--cc-font-display);
+    font-size: clamp(32px, 4.6vw, 44px);
+    font-weight: 600; line-height: 1.05; letter-spacing: -0.035em;
+    margin-bottom: 14px; color: var(--cc-text);
   }
-
+  .ob2-title-em {
+    font-family: var(--cc-font-serif);
+    font-style: italic; font-weight: 400; color: var(--cc-accent);
+  }
   .ob2-subtitle {
-    font-size: 15px;
-    color: var(--cc-text-secondary);
-    line-height: 1.5;
+    font-size: 15px; color: var(--cc-text-secondary);
+    line-height: 1.55; max-width: 48ch; margin: 0 auto;
   }
 
   /* Sections */
   .ob2-section {
-    margin-bottom: 44px;
-    opacity: 0;
-    animation: ob2FadeUp 0.7s ease 0.25s forwards;
+    margin-bottom: 40px;
+    opacity: 0; animation: ob2-fade-up 0.7s ease forwards;
   }
-
-  .ob2-section:nth-child(3) { animation-delay: 0.4s; }
+  .ob2-section:nth-child(1) { animation-delay: 0.22s; }
+  .ob2-section:nth-child(2) { animation-delay: 0.32s; }
 
   .ob2-section-title {
-    font-size: 16px;
-    font-weight: 700;
-    color: var(--cc-text);
-    margin-bottom: 18px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    font-family: var(--cc-font-mono);
+    font-size: 10.5px; font-weight: 500;
+    letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--cc-text-muted); margin-bottom: 14px;
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  .ob2-section-title::before {
+    content: ''; width: 18px; height: 1px; background: var(--cc-text-muted); opacity: 0.5;
   }
 
-  .ob2-section-title::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--cc-border);
-  }
-
-  /* Skill cards */
+  /* Skill cards — large, tactile, softly rounded */
   .ob2-skills-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
   }
-
   .ob2-skill-card {
-    position: relative;
-    padding: 26px 18px;
-    border-radius: var(--cc-radius);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 14px; padding: 24px 16px;
+    border-radius: 14px;
     border: 1px solid var(--cc-border);
-    background: var(--cc-bg-alt);
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 14px;
-    transition: all 0.25s ease;
-    outline: none;
+    background: var(--cc-card);
+    cursor: pointer; outline: none;
+    position: relative;
+    transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1), border-color 220ms ease, background 220ms ease, box-shadow 260ms ease;
   }
-
   .ob2-skill-card:hover {
+    transform: translateY(-3px);
     border-color: var(--cc-border-hover);
-    background: var(--cc-surface);
+    background: var(--cc-card-raised);
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
   }
-
+  .ob2-skill-card:focus-visible { outline: 2px solid var(--cc-accent); outline-offset: 3px; }
   .ob2-skill-card.selected {
     border-color: var(--cc-accent);
-    background: var(--cc-accent-soft);
-    box-shadow: 0 0 20px rgba(117,170,219,0.08);
-  }
-
-  .ob2-skill-card:focus-visible {
-    outline: 2px solid var(--cc-accent);
-    outline-offset: 2px;
-  }
-
-  .ob2-skill-icon {
-    width: 52px;
-    height: 52px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(117,170,219,0.06);
-    transition: all 0.25s ease;
-  }
-
-  .ob2-skill-card.selected .ob2-skill-icon {
-    background: var(--cc-accent);
-  }
-
-  .ob2-skill-card.selected .ob2-skill-icon .material-symbols-outlined {
-    color: white !important;
-  }
-
-  .ob2-skill-label {
-    font-size: 15px;
-    font-weight: 600;
-    text-align: center;
+    background: linear-gradient(145deg, rgba(117,170,219,0.14), rgba(117,170,219,0.04));
+    box-shadow: 0 14px 36px rgba(117,170,219,0.18);
   }
 
   .ob2-skill-check {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 2px solid var(--cc-border);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
+    position: absolute; top: 10px; right: 10px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid rgba(255,255,255,0.16);
+    display: flex; align-items: center; justify-content: center;
+    transition: background 200ms ease, border-color 200ms ease;
   }
-
   .ob2-skill-card.selected .ob2-skill-check {
-    border-color: var(--cc-accent);
     background: var(--cc-accent);
+    border-color: var(--cc-accent);
   }
 
-  /* Purpose chips */
-  .ob2-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
+  .ob2-skill-icon {
+    width: 54px; height: 54px; border-radius: 16px;
+    background: var(--cc-accent-soft);
+    display: flex; align-items: center; justify-content: center;
+    transition: background 200ms ease;
+  }
+  .ob2-skill-card.selected .ob2-skill-icon {
+    background: rgba(255,255,255,0.12);
   }
 
-  .ob2-chip {
-    padding: 11px 22px;
-    border-radius: 99px;
-    border: 1px solid var(--cc-border);
-    background: var(--cc-bg-alt);
-    color: var(--cc-text-muted);
-    font-family: var(--cc-font);
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.25s ease;
-    outline: none;
-  }
-
-  .ob2-chip:hover {
-    border-color: var(--cc-border-hover);
+  .ob2-skill-label {
+    font-family: var(--cc-font-display);
+    font-size: 16px; font-weight: 600; letter-spacing: -0.005em;
     color: var(--cc-text);
   }
 
-  .ob2-chip.selected {
-    border-color: var(--cc-accent);
-    background: var(--cc-accent-soft);
-    color: var(--cc-accent);
-    font-weight: 600;
+  /* Purpose chips — soft, pill-shaped */
+  .ob2-chips {
+    display: flex; flex-wrap: wrap; gap: 8px;
   }
-
-  .ob2-chip:focus-visible {
-    outline: 2px solid var(--cc-accent);
-    outline-offset: 2px;
+  .ob2-chip {
+    padding: 11px 18px;
+    background: var(--cc-card);
+    border: 1px solid var(--cc-border);
+    color: var(--cc-text-secondary);
+    font-family: var(--cc-font-sans);
+    font-size: 13.5px; font-weight: 500; letter-spacing: -0.005em;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 180ms ease, border-color 180ms ease, color 180ms ease, transform 160ms ease;
+  }
+  .ob2-chip:hover {
+    border-color: var(--cc-border-hover);
+    color: var(--cc-text);
+    transform: translateY(-1px);
+  }
+  .ob2-chip.selected {
+    background: var(--cc-accent);
+    border-color: var(--cc-accent);
+    color: #0a0a0a;
+    font-weight: 600;
+    box-shadow: 0 4px 14px rgba(117,170,219,0.25);
   }
 
   /* Actions */
   .ob2-actions {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-    padding-top: 8px;
-    opacity: 0;
-    animation: ob2FadeUp 0.7s ease 0.55s forwards;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 14px; margin-top: 16px;
+    opacity: 0; animation: ob2-fade-up 0.7s ease 0.46s forwards;
   }
 
   .ob2-btn-primary {
-    padding: 16px 48px;
+    padding: 16px 36px;
     border: none;
-    border-radius: var(--cc-radius-sm);
-    font-family: var(--cc-font);
-    font-size: 16px;
-    font-weight: 700;
+    border-radius: 10px;
+    font-family: var(--cc-font-display);
+    font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
     cursor: pointer;
-    transition: all 0.25s ease;
-    position: relative;
-    overflow: hidden;
-    background: var(--cc-accent);
-    color: var(--cc-bg);
+    background: var(--cc-accent); color: #0a0a0a;
+    display: inline-flex; align-items: center; gap: 10px;
+    transition: background 200ms ease, box-shadow 260ms ease, transform 140ms ease;
+    box-shadow: 0 10px 28px rgba(117,170,219,0.22), inset 0 -2px 0 rgba(0,0,0,0.15);
+    min-width: 220px;
+    justify-content: center;
   }
-
-  .ob2-btn-primary::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
-    transform: translateX(-100%);
-    transition: transform 0.5s ease;
-  }
-
   .ob2-btn-primary:hover {
     background: var(--cc-accent-hover);
-    box-shadow: 0 6px 24px rgba(117,170,219,0.2);
-    transform: translateY(-1px);
+    box-shadow: 0 14px 40px rgba(117,170,219,0.32), inset 0 -2px 0 rgba(0,0,0,0.15);
+    transform: translateY(-2px);
   }
-
-  .ob2-btn-primary:hover::before { transform: translateX(100%); }
-
-  .ob2-skip-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
+  .ob2-btn-primary:active { transform: translateY(0); }
+  .ob2-btn-primary .arrow {
+    font-family: var(--cc-font-serif);
+    font-style: italic; font-size: 20px;
+    transition: transform 220ms ease;
   }
+  .ob2-btn-primary:hover .arrow { transform: translateX(4px); }
 
+  .ob2-skip-row { display: flex; align-items: center; gap: 12px; }
   .ob2-btn-ghost {
     background: none; border: none; cursor: pointer;
-    font-family: var(--cc-font); font-size: 13px; font-weight: 500;
-    color: var(--cc-text-muted); padding: 4px 0;
-    transition: color 0.2s ease; text-decoration: none;
+    font-family: var(--cc-font-sans);
+    font-size: 13px; font-weight: 500; color: var(--cc-text-muted);
+    padding: 6px 12px; transition: color 160ms ease;
+    text-decoration: none;
   }
   .ob2-btn-ghost:hover { color: var(--cc-accent); }
 
   .ob2-btn-skip-all {
     background: none; border: none; cursor: pointer;
-    font-family: var(--cc-font); font-size: 12px; font-weight: 400;
-    color: var(--cc-text-dim); padding: 4px 0;
-    transition: color 0.2s ease; text-decoration: none;
+    font-family: var(--cc-font-mono);
+    font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--cc-text-whisper); padding: 4px 8px;
+    transition: color 160ms ease; text-decoration: none;
   }
   .ob2-btn-skip-all:hover { color: var(--cc-text-muted); }
-
-  .ob2-skip-dot {
-    width: 3px; height: 3px; border-radius: 50%;
-    background: var(--cc-text-dim);
-  }
+  .ob2-skip-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--cc-text-whisper); }
 
   /* Animations */
-  @keyframes ob2FadeUp { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes ob2FadeDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes ob2FadeRight { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
-  @keyframes ob2Shimmer { 0% { transform: translateX(-100%); } 50% { transform: translateX(100%); } 100% { transform: translateX(100%); } }
+  @keyframes ob2-fade-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes ob2-fade-down { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes ob2-shimmer { 0% { transform: translateX(-100%); } 60% { transform: translateX(100%); } 100% { transform: translateX(100%); } }
 
   @media (max-width: 768px) {
-    .ob2-side-decor { display: none; }
-    .ob2-content { padding: 32px 20px 60px; }
-    .ob2-title { font-size: 28px; }
     .ob2-skills-grid { grid-template-columns: 1fr; gap: 10px; }
-    .ob2-skill-card { flex-direction: row; padding: 16px 18px; gap: 14px; }
-    .ob2-skill-icon { width: 42px; height: 42px; }
+    .ob2-skill-card { flex-direction: row; padding: 16px 18px; gap: 16px; }
+    .ob2-skill-icon { width: 44px; height: 44px; border-radius: 12px; }
     .ob2-skill-check { top: 50%; transform: translateY(-50%); right: 14px; }
-    .ob2-btn-primary { width: 100%; }
-    .ob2-actions { align-items: center; }
+    .ob2-bg-num { display: none; }
+  }
+
+  @media (max-width: 640px) {
+    .ob2-header { padding: 16px 20px; }
+    .ob2-main { padding: 36px 20px 60px; }
+    .ob2-title { font-size: 28px; }
+    .ob2-btn-primary { width: 100%; max-width: 320px; }
     .ob2-step-label { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ob2-header, .ob2-heading, .ob2-section, .ob2-actions {
+      opacity: 1 !important; animation: none !important;
+    }
+    .ob2-stroke.is-active::after { animation: none; }
   }
 `;
 
@@ -463,17 +349,17 @@ const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
     setPurposes((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
 
   const skills = [
-    { id: "beginner", label: "Beginner", icon: "potted_plant" },
+    { id: "beginner",     label: "Beginner",     icon: "potted_plant" },
     { id: "intermediate", label: "Intermediate", icon: "local_fire_department" },
-    { id: "pro", label: "Pro", icon: "rocket_launch" },
+    { id: "pro",          label: "Pro",          icon: "rocket_launch" },
   ];
 
   const purposeOptions = [
-    { id: "youtube", label: "YouTube" },
-    { id: "tiktok", label: "TikTok / Reels" },
-    { id: "school", label: "School & Education" },
-    { id: "business", label: "Business" },
-    { id: "personal", label: "Personal" },
+    { id: "youtube",   label: "YouTube" },
+    { id: "tiktok",    label: "TikTok / Reels" },
+    { id: "school",    label: "School & Education" },
+    { id: "business",  label: "Business" },
+    { id: "personal",  label: "Personal" },
     { id: "freelance", label: "Freelance / Client Work" },
   ];
 
@@ -481,35 +367,33 @@ const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
     <div className="ob2-root">
       <style>{STEP2_CSS}</style>
 
+      <span className="ob2-bg-num" aria-hidden="true">02</span>
+
       <header className="ob2-header">
         <div className="ob2-brand">
-          <div className="ob2-logo-icon">
-            <span className="material-symbols-outlined" style={{ fontSize: "18px", color: "white", fontVariationSettings: "'FILL' 1" }}>movie</span>
-            <span className="ob2-logo-badge material-symbols-outlined">content_cut</span>
-          </div>
-          <span className="ob2-logo-name">ClipCut</span>
+          <span className="ob2-brand-mono" aria-hidden="true">CC</span>
+          <span className="ob2-brand-name">ClipCut</span>
         </div>
         <div className="ob2-progress">
-          <div className="ob2-dots">
-            <div className="ob2-dot done" />
-            <div className="ob2-dot active" />
-            <div className="ob2-dot" />
+          <div className="ob2-progress-strokes" aria-hidden="true">
+            <div className="ob2-stroke is-filled" />
+            <div className="ob2-stroke is-active" />
+            <div className="ob2-stroke" />
           </div>
-          <span className="ob2-step-label">Step 2 of 3</span>
+          <span className="ob2-step-label">Step 2 · of 3</span>
         </div>
       </header>
 
       <main className="ob2-main">
-        <div className="ob2-side-decor">
-          <div className="ob2-side-line" />
-          <div className="ob2-side-num">02</div>
-        </div>
-
-        <div className="ob2-content">
+        <div className="ob2-container">
           <div className="ob2-heading">
-            <div className="ob2-eyebrow">Your Craft</div>
-            <h1 className="ob2-title">How will you use ClipCut?</h1>
-            <p className="ob2-subtitle">This helps us tailor the interface and surface the right tools for you.</p>
+            <div className="ob2-eyebrow">Your craft</div>
+            <h1 className="ob2-title">
+              How will you use <span className="ob2-title-em">ClipCut?</span>
+            </h1>
+            <p className="ob2-subtitle">
+              This helps us tailor the interface and surface the right tools at the right time.
+            </p>
           </div>
 
           <section className="ob2-section">
@@ -518,14 +402,22 @@ const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
               {skills.map((s) => {
                 const sel = skillLevel === s.id;
                 return (
-                  <div key={s.id} className={`ob2-skill-card ${sel ? "selected" : ""}`} role="radio" aria-checked={sel} tabIndex={0}
+                  <div
+                    key={s.id}
+                    className={`ob2-skill-card ${sel ? "selected" : ""}`}
+                    role="radio"
+                    aria-checked={sel}
+                    tabIndex={0}
                     onClick={() => setSkillLevel(s.id)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSkillLevel(s.id); } }}>
-                    <div className="ob2-skill-check">
-                      {sel && <span className="material-symbols-outlined" style={{ fontSize: "12px", color: "#0a0a0a", fontVariationSettings: "'FILL' 1" }}>check</span>}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSkillLevel(s.id); } }}
+                  >
+                    <div className="ob2-skill-check" aria-hidden="true">
+                      {sel && (
+                        <span className="material-symbols-outlined" style={{ fontSize: "13px", color: "#0a0a0a", fontVariationSettings: "'FILL' 1" }}>check</span>
+                      )}
                     </div>
                     <div className="ob2-skill-icon">
-                      <span className="material-symbols-outlined" style={{ fontSize: "26px", color: sel ? "white" : "var(--cc-accent)" }}>{s.icon}</span>
+                      <span className="material-symbols-outlined" style={{ fontSize: "26px", color: sel ? "#ffffff" : "var(--cc-accent)" }}>{s.icon}</span>
                     </div>
                     <span className="ob2-skill-label">{s.label}</span>
                   </div>
@@ -538,7 +430,12 @@ const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
             <h3 className="ob2-section-title">What are you creating for?</h3>
             <div className="ob2-chips">
               {purposeOptions.map((p) => (
-                <button key={p.id} className={`ob2-chip ${purposes.includes(p.id) ? "selected" : ""}`} aria-pressed={purposes.includes(p.id)} onClick={() => togglePurpose(p.id)}>
+                <button
+                  key={p.id}
+                  className={`ob2-chip ${purposes.includes(p.id) ? "selected" : ""}`}
+                  aria-pressed={purposes.includes(p.id)}
+                  onClick={() => togglePurpose(p.id)}
+                >
                   {p.label}
                 </button>
               ))}
@@ -546,11 +443,29 @@ const OnboardingStep2 = ({ onContinue, onSkip, onSkipAll }) => {
           </section>
 
           <div className="ob2-actions">
-            <button className="ob2-btn-primary" onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "2" }); onContinue?.(); }}>Continue</button>
+            <button
+              className="ob2-btn-primary"
+              onClick={() => { trackEvent(analyticsEvents.onboardingContinue, { step: "2" }); onContinue?.(); }}
+            >
+              Continue
+              <span className="arrow" aria-hidden="true">→</span>
+            </button>
             <div className="ob2-skip-row">
-              <a href="#" className="ob2-btn-ghost" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2" }); onSkip?.(); }}>Skip this step</a>
-              <div className="ob2-skip-dot" />
-              <a href="#" className="ob2-btn-skip-all" onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2", action: "skip_all" }); onSkipAll?.(); }}>Skip onboarding</a>
+              <a
+                href="#"
+                className="ob2-btn-ghost"
+                onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2" }); onSkip?.(); }}
+              >
+                Skip this step
+              </a>
+              <div className="ob2-skip-dot" aria-hidden="true" />
+              <a
+                href="#"
+                className="ob2-btn-skip-all"
+                onClick={(e) => { e.preventDefault(); trackEvent(analyticsEvents.onboardingSkip, { step: "2", action: "skip_all" }); onSkipAll?.(); }}
+              >
+                Skip onboarding
+              </a>
             </div>
           </div>
         </div>
