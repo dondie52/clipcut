@@ -179,16 +179,20 @@ export function remapPhrasesToTimeline(phrases, videoClips) {
 }
 
 /**
- * Find all timeline clips that reference the same underlying source as
- * `sourceEntry` (a media-library item or a timeline clip). Prefers mediaId
- * equality — split clips share mediaId, so this picks up every fragment.
+ * Finds timeline clips referencing the same source as sourceEntry.
+ *
+ * @param {object} sourceEntry — either a timeline clip (has both
+ *   id and mediaId; mediaId identifies the source) or a
+ *   media-library item (has only id; id identifies the source).
+ *   mediaId takes precedence when both are present.
+ * @param {object[]} clips — current timeline clips
  */
 export function findClipsForSource(sourceEntry, clips) {
   if (!sourceEntry || !Array.isArray(clips)) return [];
   const isTranscribable = (c) =>
     c && !c.isCaption && c.type !== 'text' && c.type !== 'sticker' && c.type !== 'audio';
 
-  const sourceMediaId = sourceEntry.id || sourceEntry.mediaId;
+  const sourceMediaId = sourceEntry.mediaId || sourceEntry.id;
   if (sourceMediaId) {
     return clips.filter(c => isTranscribable(c) && c.mediaId === sourceMediaId);
   }
