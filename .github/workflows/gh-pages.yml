@@ -43,6 +43,8 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TRANSCRIPT_WORKER_URL: ${{ secrets.VITE_TRANSCRIPT_WORKER_URL }}
+          VITE_AI_WORKER_URL: ${{ secrets.VITE_AI_WORKER_URL }}
 
       - name: Deploy to gh-pages
         uses: JamesIves/github-pages-deploy-action@v4
