@@ -4,7 +4,11 @@
  * Licensed under the MIT License
  *
  * @module components/Dashboard
- * @description Main dashboard — project management, quick actions, advisor panel
+ * @description Main dashboard — "Studio Desk" aesthetic. Projects live on a
+ *   refined workbench: index-card tiles, linen texture, JetBrains Mono for
+ *   all metadata, Botswana blue reserved exclusively for active states and
+ *   primary actions. Right rail is a vertical timeline (advisor), not a
+ *   boxed panel. All business logic preserved.
  */
 
 import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
@@ -21,504 +25,1189 @@ const ADVISOR_DISMISSED_KEY = "clipcut-dashboard-advisor-dismissed";
 
 /* ========== CSS ========== */
 const DASH_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,300..600&display=swap');
+
   :root {
     --cc-bg: #0a0a0a;
     --cc-bg-alt: #0d1117;
-    --cc-surface: #1a2332;
-    --cc-surface-raised: rgba(26,35,50,0.35);
+    --cc-felt: #0b0f16;
+    --cc-surface: #11161f;
+    --cc-surface-raised: #141a24;
+    --cc-card: #10151d;
     --cc-border: rgba(255,255,255,0.06);
-    --cc-border-hover: rgba(255,255,255,0.1);
+    --cc-border-strong: rgba(255,255,255,0.14);
+    --cc-hairline: rgba(255,255,255,0.08);
     --cc-accent: #75AADB;
     --cc-accent-hover: #8bbae3;
     --cc-accent-soft: rgba(117,170,219,0.1);
     --cc-accent-glow: rgba(117,170,219,0.06);
+    --cc-danger: #ef4444;
+    --cc-danger-soft: rgba(239,68,68,0.1);
+    --cc-warn: #f5b84e;
+    --cc-success: #6ec07a;
     --cc-text: #ffffff;
-    --cc-text-secondary: rgba(255,255,255,0.6);
-    --cc-text-muted: rgba(255,255,255,0.35);
-    --cc-text-dim: rgba(255,255,255,0.2);
+    --cc-text-secondary: rgba(255,255,255,0.72);
+    --cc-text-muted: rgba(255,255,255,0.44);
+    --cc-text-whisper: rgba(255,255,255,0.24);
     --cc-font: 'Spline Sans', sans-serif;
+    --cc-font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    --cc-font-serif: 'Fraunces', Georgia, serif;
   }
 
   *, *::before, *::after { box-sizing: border-box; }
 
   .dash-root {
-    width: 100%; height: 100vh; background: var(--cc-bg);
-    font-family: var(--cc-font); display: flex;
-    overflow: hidden; color: var(--cc-text);
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    background: var(--cc-bg);
+    font-family: var(--cc-font);
+    display: flex;
+    overflow: hidden;
+    color: var(--cc-text);
     position: relative;
   }
 
-  /* Film grain overlay */
+  /* Grain overlay — film-studio atmosphere. */
   .dash-root::before {
     content: '';
     position: fixed;
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    opacity: 0.02;
+    opacity: 0.025;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 128px 128px;
   }
 
-  /* Entrance animation for main content */
-  .dash-content {
-    animation: dashFadeIn 0.5s ease forwards;
-  }
-
-  @keyframes dashFadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
   /* ---- Sidebar ---- */
   .sidebar {
-    width: 200px; min-width: 200px; background: #0e1218;
-    border-right: 1px solid rgba(255,255,255,0.06);
-    display: flex; flex-direction: column;
+    width: 216px;
+    min-width: 216px;
+    background: var(--cc-felt);
+    border-right: 1px solid var(--cc-border);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 5;
   }
+
   .sidebar-logo {
-    padding: 20px 20px 20px; display: flex; align-items: center; gap: 10px;
+    padding: 22px 22px 18px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    border-bottom: 1px solid var(--cc-border);
   }
-  .sidebar-logo-icon {
-    width: 30px; height: 30px; border-radius: 8px;
-    background: linear-gradient(135deg, #75AADB, #5a8cbf);
-    display: flex; align-items: center; justify-content: center;
+  .sidebar-logo-monogram {
+    font-family: var(--cc-font-serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 28px;
+    line-height: 1;
+    color: var(--cc-accent);
+    font-variation-settings: "opsz" 144;
   }
+  .sidebar-logo-mark {
+    font-size: 15px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: var(--cc-text);
+  }
+  .sidebar-logo-version {
+    margin-left: auto;
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    color: var(--cc-text-whisper);
+    letter-spacing: 0.04em;
+  }
+
   .sidebar-user {
-    padding: 0 16px 16px; display: flex; align-items: center; gap: 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 12px;
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid var(--cc-border);
   }
   .sidebar-avatar {
-    width: 30px; height: 30px; border-radius: 50%;
-    background: linear-gradient(135deg, #75AADB, #4a7fb5);
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-    font-size: 12px; font-weight: 700; color: white;
+    width: 34px;
+    height: 34px;
+    border-radius: 3px;
+    background: linear-gradient(135deg, var(--cc-accent) 0%, #4a7fb5 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 13px;
+    font-weight: 700;
+    color: #0a0a0a;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
   }
-  .sidebar-nav { flex: 1; padding: 8px 8px; }
+
+  .sidebar-user-meta {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .sidebar-user-name {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--cc-text);
+  }
+  .sidebar-user-plan {
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    color: var(--cc-text-muted);
+    text-transform: uppercase;
+  }
+
+  .sidebar-section-label {
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    color: var(--cc-text-whisper);
+    text-transform: uppercase;
+    padding: 18px 22px 10px;
+  }
+
+  .sidebar-nav { flex: 1; padding: 0 12px; display: flex; flex-direction: column; gap: 1px; }
+
   .nav-item {
-    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
-    border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
-    color: rgba(255,255,255,0.45); transition: all 0.15s ease;
-    border: none; background: none; width: 100%; text-align: left;
-    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--cc-text-muted);
+    transition: color 140ms ease, background 140ms ease;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    min-height: 36px;
+    font-family: inherit;
+    position: relative;
   }
-  .nav-item:hover { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.75); }
-  .nav-item.active { background: rgba(117,170,219,0.1); color: white; font-weight: 600; }
-  .nav-item .material-symbols-outlined { font-size: 20px; }
-  .nav-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 6px 14px; }
+  .nav-item:hover { background: rgba(255,255,255,0.03); color: var(--cc-text-secondary); }
+  .nav-item.active {
+    color: var(--cc-text);
+    background: rgba(117,170,219,0.08);
+    font-weight: 600;
+  }
+  .nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: var(--cc-accent);
+  }
+  .nav-item .material-symbols-outlined { font-size: 18px; }
+
+  .nav-divider {
+    height: 1px;
+    background: var(--cc-border);
+    margin: 10px 12px;
+  }
+
   .sidebar-logout {
-    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
-    margin: 0 8px 8px; border-radius: 8px; cursor: pointer;
-    font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.45);
-    border: none; background: none; width: calc(100% - 16px); text-align: left;
-    min-height: 38px; transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    margin: 6px 12px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--cc-text-muted);
+    border: none;
+    background: none;
+    text-align: left;
+    min-height: 36px;
+    transition: color 140ms ease, background 140ms ease;
+    font-family: inherit;
   }
-  .sidebar-logout:hover { background: rgba(239,68,68,0.08); color: #f87171; }
-  .sidebar-logout .material-symbols-outlined { font-size: 20px; }
+  .sidebar-logout:hover { background: rgba(239,68,68,0.08); color: var(--cc-danger); }
+  .sidebar-logout .material-symbols-outlined { font-size: 18px; }
+
   .sidebar-footer {
-    padding: 14px 16px; border-top: 1px solid rgba(255,255,255,0.06);
-    font-size: 10px; color: rgba(255,255,255,0.25);
+    padding: 14px 22px 18px;
+    border-top: 1px solid var(--cc-border);
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    color: var(--cc-text-whisper);
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   /* ---- Content wrapper ---- */
   .dash-content {
-    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     min-width: 0;
+    position: relative;
+    z-index: 1;
+    background: var(--cc-bg);
   }
 
-  /* ---- Top Bar ---- */
-  .top-bar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 18px 28px 0; flex-shrink: 0;
+  /* Linen / felt pattern — layered horizontal pinstripes behind content.
+     Subliminal only; provides the "workbench" feel without being obvious. */
+  .dash-content::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        transparent 0,
+        transparent 39px,
+        rgba(255,255,255,0.015) 39px,
+        rgba(255,255,255,0.015) 40px
+      ),
+      repeating-linear-gradient(
+        90deg,
+        transparent 0,
+        transparent 39px,
+        rgba(255,255,255,0.008) 39px,
+        rgba(255,255,255,0.008) 40px
+      );
   }
-  .top-bar h1 {
-    font-size: 22px; font-weight: 800; margin: 0; letter-spacing: -0.3px;
-    line-height: 1.3;
+
+  .dash-content > * { position: relative; z-index: 1; }
+
+  /* ---- Top ribbon ---- */
+  .dash-ribbon {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 22px 36px 20px;
+    border-bottom: 1px solid var(--cc-border);
+    background: rgba(10,10,10,0.6);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
   }
-  .top-bar-sub {
-    font-size: 12px; color: rgba(255,255,255,0.45); margin: 2px 0 0;
+
+  .dash-ribbon-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .dash-ribbon-block { min-width: 0; }
+
+  .dash-greeting {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    margin: 0;
+    color: var(--cc-text);
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
   }
-  .top-bar-actions { display: flex; align-items: center; gap: 6px; }
+  .dash-greeting-name {
+    font-family: var(--cc-font-serif);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--cc-accent);
+    font-variation-settings: "opsz" 72;
+  }
+
+  .dash-ribbon-sub {
+    font-family: var(--cc-font-mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    color: var(--cc-text-muted);
+    margin: 4px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-transform: uppercase;
+  }
+  .dash-ribbon-sub > span { display: inline-flex; align-items: center; gap: 6px; }
+  .dash-ribbon-sub .dot {
+    width: 4px;
+    height: 4px;
+    background: var(--cc-text-whisper);
+    border-radius: 50%;
+  }
+
+  .dash-ribbon-actions { display: flex; align-items: center; gap: 6px; }
+
+  .ribbon-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 2px;
+    background: transparent;
+    border: 1px solid var(--cc-border);
+    color: var(--cc-text-secondary);
+    font-family: var(--cc-font-mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    cursor: default;
+  }
+  .ribbon-pill-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--cc-success);
+    box-shadow: 0 0 6px rgba(110, 192, 122, 0.5);
+  }
+
   .icon-btn {
-    width: 34px; height: 34px; border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.06);
-    background: rgba(26,35,50,0.3); display: flex;
-    align-items: center; justify-content: center;
-    cursor: pointer; transition: all 0.15s ease;
-    color: rgba(255,255,255,0.4);
+    width: 36px;
+    height: 36px;
+    border-radius: 3px;
+    border: 1px solid var(--cc-border);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+    color: var(--cc-text-muted);
   }
   .icon-btn:hover {
-    background: rgba(26,35,50,0.6); color: rgba(255,255,255,0.8);
-    border-color: rgba(255,255,255,0.1);
+    background: var(--cc-surface);
+    color: var(--cc-text);
+    border-color: var(--cc-border-strong);
   }
 
   /* ---- Scrollable body ---- */
   .dash-body {
-    flex: 1; overflow-y: auto; overflow-x: hidden;
-    padding: 20px 28px 40px;
-    scrollbar-width: thin; scrollbar-color: #1e293b transparent;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 28px 36px 48px;
+    scrollbar-width: thin;
+    scrollbar-color: #1e293b transparent;
   }
-  .dash-body::-webkit-scrollbar { width: 6px; }
-  .dash-body::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+  .dash-body::-webkit-scrollbar { width: 8px; }
+  .dash-body::-webkit-scrollbar-thumb { background: var(--cc-surface); border-radius: 4px; }
+  .dash-body::-webkit-scrollbar-thumb:hover { background: var(--cc-border-strong); }
 
   /* ---- Two-column layout ---- */
   .dash-layout {
-    display: grid; grid-template-columns: 1fr 256px; gap: 28px;
+    display: grid;
+    grid-template-columns: 1fr 288px;
+    gap: 48px;
     align-items: start;
+    max-width: 1440px;
+    margin: 0 auto;
   }
-  .dash-layout--single {
-    grid-template-columns: 1fr;
-  }
+  .dash-layout--single { grid-template-columns: 1fr; }
   .dash-main { min-width: 0; }
 
-  /* ---- Stats Row ---- */
-  .stats-row {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
-    margin-bottom: 20px;
+  /* ---- Stats rail (horizontal tape) ---- */
+  .stats-rail {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin-bottom: 32px;
+    border: 1px solid var(--cc-border);
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--cc-surface);
   }
-  .stat-card {
-    display: flex; align-items: center; gap: 12px;
-    padding: 14px 16px; border-radius: 10px;
-    background: rgba(26,35,50,0.35); border: 1px solid rgba(255,255,255,0.05);
-    transition: border-color 0.15s ease;
+  .stat-cell {
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-right: 1px solid var(--cc-border);
   }
-  .stat-card:hover { border-color: rgba(255,255,255,0.08); }
-  .stat-icon {
-    width: 34px; height: 34px; border-radius: 8px;
-    background: rgba(117,170,219,0.12); display: flex;
-    align-items: center; justify-content: center; flex-shrink: 0;
+  .stat-cell:last-child { border-right: none; }
+
+  .stat-label {
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--cc-text-whisper);
   }
   .stat-value {
-    font-size: 17px; font-weight: 700; display: block; line-height: 1.2;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--cc-text);
+    line-height: 1.1;
   }
-  .stat-label {
-    font-size: 10px; color: rgba(255,255,255,0.45); display: block;
-    margin-top: 1px; letter-spacing: 0.2px;
+  .stat-value-mono {
+    font-family: var(--cc-font-mono);
+    font-size: 17px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
   }
 
-  /* ---- Section Labels ---- */
-  .section-label {
-    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4);
-    text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px;
+  /* ---- Section heading ---- */
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--cc-border);
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0;
+    color: var(--cc-text);
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .section-title-mono {
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--cc-text-whisper);
+    text-transform: uppercase;
+  }
+  .section-title-count {
+    font-family: var(--cc-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--cc-text-whisper);
+    letter-spacing: 0.06em;
   }
 
-  /* ---- Quick Actions ---- */
-  .quick-actions {
-    display: grid; grid-template-columns: 1fr; gap: 10px;
-    margin-bottom: 24px; max-width: 400px;
+  /* ---- Toolbelt (quick actions as a row of tool tiles) ---- */
+  .toolbelt {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+    margin-bottom: 36px;
   }
-  .quick-action {
-    display: flex; align-items: center; gap: 12px; padding: 14px 16px;
-    border-radius: 10px; cursor: pointer;
-    border: 1px solid rgba(255,255,255,0.06);
-    background: rgba(26,35,50,0.35); color: rgba(255,255,255,0.8);
-    font-family: inherit; font-size: 13px; font-weight: 600;
-    transition: all 0.2s ease; position: relative;
+  @media (min-width: 640px) { .toolbelt { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 1024px) { .toolbelt { grid-template-columns: repeat(3, 1fr); } }
+
+  .tool {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px 18px;
+    border-radius: 3px;
+    cursor: pointer;
+    border: 1px solid var(--cc-border);
+    background: var(--cc-card);
+    color: var(--cc-text-secondary);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+    transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+    position: relative;
+    overflow: hidden;
   }
-  .quick-action:hover {
-    background: rgba(26,35,50,0.6); border-color: rgba(255,255,255,0.1);
-    transform: translateY(-1px); box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  .tool:hover {
+    transform: translateY(-2px);
+    border-color: var(--cc-border-strong);
+    background: var(--cc-surface);
+    color: var(--cc-text);
   }
-  .quick-action--primary {
-    background: linear-gradient(135deg, rgba(117,170,219,0.15) 0%, rgba(117,170,219,0.08) 100%);
-    border-color: rgba(117,170,219,0.2); color: white;
+  .tool--primary {
+    background: linear-gradient(135deg, rgba(117,170,219,0.14), rgba(117,170,219,0.04));
+    border-color: rgba(117,170,219,0.3);
+    color: var(--cc-text);
   }
-  .quick-action--primary:hover {
-    background: linear-gradient(135deg, rgba(117,170,219,0.22) 0%, rgba(117,170,219,0.12) 100%);
-    border-color: rgba(117,170,219,0.35);
-    box-shadow: 0 4px 20px rgba(117,170,219,0.1);
+  .tool--primary:hover {
+    background: linear-gradient(135deg, rgba(117,170,219,0.2), rgba(117,170,219,0.08));
+    border-color: var(--cc-accent);
+    box-shadow: 0 12px 36px rgba(117,170,219,0.12);
   }
-  .qa-icon {
-    width: 34px; height: 34px; border-radius: 8px;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  .tool-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 3px;
     background: rgba(117,170,219,0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
-  .quick-action--primary .qa-icon { background: rgba(255,255,255,0.1); }
+  .tool--primary .tool-icon {
+    background: var(--cc-accent);
+    color: #0a0a0a;
+  }
+  .tool-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .tool-title { font-size: 13px; font-weight: 600; letter-spacing: -0.005em; color: inherit; }
+  .tool-subtitle { font-size: 11px; color: var(--cc-text-muted); line-height: 1.4; }
+  .tool--primary .tool-subtitle { color: rgba(255,255,255,0.65); }
 
-  /* ---- Projects Section ---- */
-  .projects-header {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 12px;
-  }
+  /* ---- Projects header / search ---- */
   .proj-search {
-    position: relative; width: 180px;
+    position: relative;
+    width: 240px;
   }
   .proj-search input {
-    width: 100%; background: rgba(26,35,50,0.4);
-    border: 1px solid rgba(255,255,255,0.06);
-    border-radius: 7px; padding: 6px 10px 6px 30px; color: white;
-    font-size: 12px; outline: none; font-family: inherit;
+    width: 100%;
+    background: var(--cc-surface);
+    border: 1px solid var(--cc-border);
+    border-radius: 3px;
+    padding: 8px 12px 8px 32px;
+    color: var(--cc-text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 180ms ease, background 180ms ease;
   }
-  .proj-search input::placeholder { color: rgba(255,255,255,0.2); }
-  .proj-search input:focus { border-color: rgba(117,170,219,0.35); }
+  .proj-search input::placeholder { color: var(--cc-text-whisper); }
+  .proj-search input:focus {
+    border-color: var(--cc-accent);
+    background: var(--cc-surface-raised);
+  }
   .proj-search .material-symbols-outlined {
-    position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
-    font-size: 15px; color: rgba(255,255,255,0.2);
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 16px;
+    color: var(--cc-text-whisper);
+    pointer-events: none;
   }
 
+  /* ---- Projects grid (index cards) ---- */
   .projects-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-    gap: 14px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+    gap: 20px;
   }
+
   .project-card {
-    cursor: pointer; transition: all 0.2s ease; border-radius: 10px;
+    cursor: pointer;
+    transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+    border-radius: 3px;
+    position: relative;
   }
-  .project-card:hover { transform: translateY(-2px); }
-  .project-card:hover .project-thumb {
-    border-color: rgba(117,170,219,0.25);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-  }
+  .project-card:hover { transform: translateY(-3px); }
   .project-card:hover .del-btn { opacity: 1 !important; }
+
   .project-thumb {
-    width: 100%; aspect-ratio: 16/10; border-radius: 10px; overflow: hidden;
-    background: #111820; border: 1px solid rgba(255,255,255,0.05);
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.2s ease; position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--cc-card);
+    border: 1px solid var(--cc-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 220ms ease, box-shadow 220ms ease;
+    position: relative;
   }
-  .project-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .project-info { padding: 8px 2px 0; }
+  .project-card:hover .project-thumb {
+    border-color: var(--cc-accent);
+    box-shadow:
+      0 12px 32px rgba(0,0,0,0.45),
+      0 0 0 3px rgba(117,170,219,0.08);
+  }
+
+  /* Index-card pinhole in top-left corner */
+  .project-thumb::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.55);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+    z-index: 3;
+  }
+
+  .project-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .project-thumb-fallback {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #111820, #0d1319);
+  }
+
+  /* Dashed tear-off stripe at the top of the card info, like a note pad */
+  .project-info {
+    padding: 10px 2px 0;
+    position: relative;
+  }
+  .project-info::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 6px;
+    right: 6px;
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      to right,
+      var(--cc-hairline) 0,
+      var(--cc-hairline) 4px,
+      transparent 4px,
+      transparent 8px
+    );
+  }
   .project-info .name {
-    font-size: 13px; font-weight: 600; margin: 0 0 2px; color: white;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-family: var(--cc-font-serif);
+    font-weight: 400;
+    font-optical-sizing: auto;
+    font-variation-settings: "opsz" 36;
+    font-size: 16px;
+    letter-spacing: -0.01em;
+    margin: 6px 0 4px;
+    color: var(--cc-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
   }
-  .project-info .meta { font-size: 11px; color: rgba(255,255,255,0.5); margin: 0; }
+  .project-info .meta {
+    font-family: var(--cc-font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--cc-text-muted);
+    margin: 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .project-info .meta .sep {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: var(--cc-text-whisper);
+  }
+  .project-info .meta .res {
+    color: var(--cc-accent);
+    font-weight: 500;
+  }
+
   .del-btn {
-    position: absolute; top: 6px; right: 6px;
-    width: 28px; height: 28px; border-radius: 6px;
-    background: rgba(239,68,68,0.85); border: none;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; opacity: 0; transition: opacity 0.15s ease;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 3px;
+    background: rgba(239,68,68,0.9);
+    border: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 180ms ease;
+    z-index: 3;
   }
   .del-btn:hover { background: #ef4444; }
 
-  /* ---- Context Menu ---- */
+  .project-rename-input {
+    background: var(--cc-accent-soft);
+    border: 1px solid var(--cc-accent);
+    border-radius: 3px;
+    padding: 4px 8px;
+    color: var(--cc-text);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: var(--cc-font-serif);
+    width: 100%;
+    outline: none;
+    margin: 6px 0 4px;
+  }
+
+  .project-rename-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  /* ---- Context menu ---- */
   .ctx-menu {
-    position: fixed; z-index: 5000;
-    background: #1a2332; border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 8px; padding: 4px 0; min-width: 160px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    animation: dashFadeIn 0.12s ease;
+    position: fixed;
+    z-index: 5000;
+    background: var(--cc-surface);
+    border: 1px solid var(--cc-border-strong);
+    border-radius: 3px;
+    padding: 4px 0;
+    min-width: 180px;
+    box-shadow: 0 14px 40px rgba(0,0,0,0.6);
   }
   .ctx-menu-item {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 14px; font-size: 12px; color: rgba(255,255,255,0.8);
-    cursor: pointer; background: none; border: none; width: 100%;
-    font-family: inherit; text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    font-size: 12px;
+    color: var(--cc-text-secondary);
+    cursor: pointer;
+    background: none;
+    border: none;
+    width: 100%;
+    font-family: inherit;
+    text-align: left;
   }
-  .ctx-menu-item:hover { background: rgba(117,170,219,0.1); color: white; }
-  .ctx-menu-item--danger { color: #ef4444; }
-  .ctx-menu-item--danger:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
-  .ctx-menu-sep { height: 1px; background: rgba(255,255,255,0.06); margin: 4px 0; }
+  .ctx-menu-item:hover { background: var(--cc-accent-soft); color: var(--cc-text); }
+  .ctx-menu-item--danger { color: var(--cc-danger); }
+  .ctx-menu-item--danger:hover { background: var(--cc-danger-soft); color: var(--cc-danger); }
+  .ctx-menu-sep { height: 1px; background: var(--cc-border); margin: 4px 0; }
 
-  /* ---- Empty State ---- */
+  /* ---- Empty state ---- */
   .empty-state {
-    padding: 48px 24px; border-radius: 12px;
-    background: rgba(26,35,50,0.2);
-    border: 1px dashed rgba(255,255,255,0.06);
+    padding: 56px 28px;
+    border-radius: 3px;
+    background: var(--cc-card);
+    border: 1px dashed var(--cc-border-strong);
     text-align: center;
+    position: relative;
+  }
+  .empty-state::before {
+    content: '§';
+    position: absolute;
+    top: 18px;
+    left: 22px;
+    font-family: var(--cc-font-serif);
+    font-style: italic;
+    font-size: 28px;
+    color: var(--cc-accent);
+    opacity: 0.6;
   }
   .empty-icon {
-    width: 60px; height: 60px; border-radius: 14px; margin: 0 auto 16px;
-    background: rgba(117,170,219,0.1); display: flex;
-    align-items: center; justify-content: center;
+    width: 58px;
+    height: 58px;
+    border-radius: 3px;
+    margin: 0 auto 18px;
+    background: var(--cc-accent-soft);
+    border: 1px solid rgba(117,170,219,0.22);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
   .empty-state h3 {
-    font-size: 17px; font-weight: 700; margin: 0 0 6px; color: rgba(255,255,255,0.9);
+    font-family: var(--cc-font-serif);
+    font-weight: 400;
+    font-size: 26px;
+    letter-spacing: -0.02em;
+    margin: 0 0 8px;
+    color: var(--cc-text);
+  }
+  .empty-state h3 .em {
+    font-style: italic;
+    color: var(--cc-accent);
   }
   .empty-state p {
-    font-size: 12px; color: rgba(255,255,255,0.5); margin: 0 auto 20px;
-    line-height: 1.6; max-width: 300px;
+    font-size: 13px;
+    color: var(--cc-text-muted);
+    margin: 0 auto 20px;
+    line-height: 1.6;
+    max-width: 360px;
   }
-  .empty-actions { display: flex; gap: 8px; justify-content: center; }
+  .empty-actions { display: flex; gap: 10px; justify-content: center; }
   .empty-btn {
-    display: inline-flex; align-items: center; gap: 7px; padding: 10px 22px;
-    border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;
-    font-family: inherit; transition: all 0.15s ease; border: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 22px;
+    border-radius: 2px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 180ms ease, box-shadow 220ms ease;
+    border: 1px solid transparent;
+    letter-spacing: -0.005em;
   }
-  .empty-btn--primary { background: #75AADB; color: #0a0a0a; }
-  .empty-btn--primary:hover { background: #8bb9e4; }
+  .empty-btn--primary { background: var(--cc-accent); color: #0a0a0a; }
+  .empty-btn--primary:hover {
+    background: var(--cc-accent-hover);
+    box-shadow: 0 8px 24px rgba(117,170,219,0.22);
+  }
   .empty-btn--ghost {
-    background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.6);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: transparent;
+    color: var(--cc-text-secondary);
+    border-color: var(--cc-border-strong);
   }
-  .empty-btn--ghost:hover { background: rgba(255,255,255,0.08); color: white; }
+  .empty-btn--ghost:hover {
+    background: var(--cc-surface);
+    color: var(--cc-text);
+  }
   .empty-hint {
-    margin-top: 18px; font-size: 11px; color: rgba(255,255,255,0.25);
+    margin-top: 20px !important;
+    font-family: var(--cc-font-mono);
+    font-size: 10.5px !important;
+    color: var(--cc-text-whisper) !important;
+    letter-spacing: 0.04em;
     line-height: 1.5;
   }
 
-  /* ---- Advisor Panel ---- */
-  .advisor-panel { position: sticky; top: 0; }
-  .advisor-label-row {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; margin-bottom: 12px;
+  /* ---- Advisor rail (vertical timeline) ---- */
+  .advisor-rail {
+    position: sticky;
+    top: 0;
+    padding: 4px 0;
+    position: relative;
   }
-  .advisor-label {
-    display: flex; align-items: center; gap: 6px; margin-bottom: 0;
-    font-size: 11px; font-weight: 600; color: rgba(255,255,255,0.4);
-    text-transform: uppercase; letter-spacing: 0.8px;
+
+  .advisor-rail-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--cc-border);
+    margin-bottom: 22px;
+  }
+  .advisor-rail-title {
+    font-family: var(--cc-font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    color: var(--cc-text-whisper);
+    text-transform: uppercase;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .advisor-rail-title::before {
+    content: '';
+    width: 20px;
+    height: 1px;
+    background: var(--cc-text-whisper);
+    display: inline-block;
   }
   .advisor-dismiss {
-    flex-shrink: 0; width: 28px; height: 28px; border-radius: 6px;
-    border: none; background: rgba(255,255,255,0.06);
-    color: rgba(255,255,255,0.4); cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.15s ease, color 0.15s ease;
+    width: 26px;
+    height: 26px;
+    border-radius: 3px;
+    border: 1px solid var(--cc-border);
+    background: transparent;
+    color: var(--cc-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
   }
   .advisor-dismiss:hover {
-    background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.8);
+    background: var(--cc-surface);
+    color: var(--cc-text);
+    border-color: var(--cc-border-strong);
   }
-  .advisor-item {
-    padding: 14px; border-radius: 10px; margin-bottom: 10px;
-    background: rgba(26,35,50,0.35); border: 1px solid rgba(255,255,255,0.05);
-    border-left: 3px solid transparent;
-  }
-  .advisor-item--warning {
-    border-left-color: #f59e0b;
-    background: rgba(26,35,50,0.4);
-  }
-  .advisor-item--info { border-left-color: #75AADB; }
-  .advisor-item--success { border-left-color: #22c55e; }
-  .advisor-item-header {
-    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
-  }
-  .advisor-item h4 {
-    font-size: 12px; font-weight: 600; margin: 0; color: rgba(255,255,255,0.9);
-  }
-  .advisor-item p {
-    font-size: 11px; color: rgba(255,255,255,0.4); margin: 0;
-    line-height: 1.5;
-  }
-  .advisor-item p + .advisor-action { margin-top: 10px; }
-  .advisor-action {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 10px; border-radius: 5px; font-size: 11px;
-    font-weight: 600; cursor: pointer; font-family: inherit;
-    transition: all 0.15s ease; border: none;
-  }
-  .advisor-action--warning {
-    background: rgba(245,158,11,0.1); color: #f59e0b;
-  }
-  .advisor-action--warning:hover { background: rgba(245,158,11,0.18); }
-  .advisor-action--info {
-    background: rgba(117,170,219,0.1); color: #75AADB;
-  }
-  .advisor-action--info:hover { background: rgba(117,170,219,0.18); }
 
-  .advisor-checklist { list-style: none; padding: 0; margin: 8px 0 0; }
-  .advisor-checklist li {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 11px; color: rgba(255,255,255,0.4);
-    padding: 3px 0;
+  /* Vertical spine connecting the timeline entries */
+  .advisor-timeline {
+    position: relative;
+    padding-left: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
   }
-  .advisor-checklist li.done { color: rgba(34,197,94,0.7); }
-  .advisor-checklist li.done .material-symbols-outlined { color: #22c55e; }
+  .advisor-timeline::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: repeating-linear-gradient(
+      to bottom,
+      var(--cc-border) 0,
+      var(--cc-border) 4px,
+      transparent 4px,
+      transparent 8px
+    );
+  }
+
+  .advisor-entry {
+    position: relative;
+    padding-left: 6px;
+  }
+  .advisor-entry::before {
+    content: '';
+    position: absolute;
+    left: -22px;
+    top: 4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--cc-bg);
+    border: 1.5px solid var(--cc-text-whisper);
+    box-sizing: border-box;
+  }
+  .advisor-entry--warning::before { border-color: var(--cc-warn); }
+  .advisor-entry--info::before    { border-color: var(--cc-accent); }
+  .advisor-entry--success::before { border-color: var(--cc-success); background: var(--cc-success); }
+
+  .advisor-entry-time {
+    font-family: var(--cc-font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cc-text-whisper);
+    margin-bottom: 6px;
+    display: block;
+  }
+
+  .advisor-entry-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0 0 6px;
+    color: var(--cc-text);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .advisor-entry-body {
+    font-size: 12px;
+    color: var(--cc-text-muted);
+    line-height: 1.55;
+    margin: 0;
+  }
+
+  .advisor-entry-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    margin-top: 10px;
+    border-radius: 2px;
+    font-size: 11px;
+    font-family: var(--cc-font-mono);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 160ms ease;
+  }
+  .advisor-entry-action--warning {
+    background: rgba(245, 184, 78, 0.1);
+    color: var(--cc-warn);
+    border-color: rgba(245, 184, 78, 0.22);
+  }
+  .advisor-entry-action--warning:hover { background: rgba(245, 184, 78, 0.18); }
+  .advisor-entry-action--info {
+    background: var(--cc-accent-soft);
+    color: var(--cc-accent);
+    border-color: rgba(117,170,219,0.22);
+  }
+  .advisor-entry-action--info:hover { background: rgba(117,170,219,0.18); }
+
+  .advisor-checklist {
+    list-style: none;
+    padding: 0;
+    margin: 10px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .advisor-checklist li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--cc-text-muted);
+  }
+  .advisor-checklist li.done { color: rgba(110, 192, 122, 0.78); text-decoration: line-through; text-decoration-color: rgba(110, 192, 122, 0.3); }
+  .advisor-checklist li.done .material-symbols-outlined { color: var(--cc-success); }
   .advisor-checklist li .material-symbols-outlined { font-size: 14px; }
 
-  /* ---- Error Banner ---- */
+  /* ---- Error banner ---- */
   .error-banner {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 14px; border-radius: 8px; margin-bottom: 14px;
-    background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.12);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-radius: 3px;
+    margin-bottom: 20px;
+    background: rgba(239, 68, 68, 0.06);
+    border: 1px solid rgba(239, 68, 68, 0.18);
+    border-left: 3px solid var(--cc-danger);
   }
-  .error-banner > span { flex: 1; font-size: 12px; color: rgba(255,255,255,0.6); }
+  .error-banner > span { flex: 1; font-size: 12px; color: var(--cc-text-secondary); }
   .error-retry {
-    background: rgba(117,170,219,0.1); border: 1px solid rgba(117,170,219,0.2);
-    border-radius: 6px; padding: 5px 12px; color: #75AADB; font-size: 11px;
-    font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap;
+    background: var(--cc-accent-soft);
+    border: 1px solid rgba(117,170,219,0.25);
+    border-radius: 2px;
+    padding: 6px 14px;
+    color: var(--cc-accent);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--cc-font-mono);
+    letter-spacing: 0.04em;
+    cursor: pointer;
   }
   .error-retry:hover { background: rgba(117,170,219,0.18); }
 
-  /* ---- Loading shimmer ---- */
+  /* ---- Skeleton ---- */
   @keyframes shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
   }
   .skel {
     background: linear-gradient(90deg, #111820 25%, #1a2332 50%, #111820 75%);
-    background-size: 200% 100%; animation: shimmer 1.5s ease-in-out infinite;
+    background-size: 200% 100%;
+    animation: shimmer 1.6s ease-in-out infinite;
   }
 
-  /* ---- Botswana stripe ---- */
+  /* ---- Bottom Botswana stripe ---- */
   .bw-stripe {
-    position: fixed; bottom: 0; left: 0; right: 0; height: 3px;
-    display: flex; z-index: 50;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    display: flex;
+    z-index: 50;
   }
   .bw-stripe div { flex: 1; }
 
-  /* ---- Mobile sidebar overlay ---- */
+  /* ---- Mobile ---- */
   .sidebar-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-    z-index: 499; opacity: 0; pointer-events: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 499;
+    opacity: 0;
+    pointer-events: none;
     transition: opacity 0.3s ease;
   }
   .sidebar-overlay.visible { opacity: 1; pointer-events: auto; }
 
-  /* ---- Mobile bottom nav ---- */
   .mobile-bottom-nav {
-    position: fixed; bottom: 0; left: 0; right: 0;
-    height: 56px; background: #0e1218;
-    border-top: 1px solid rgba(255,255,255,0.06);
-    display: none; align-items: center; justify-content: space-around;
-    z-index: 400; padding-bottom: env(safe-area-inset-bottom, 0);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 58px;
+    background: var(--cc-felt);
+    border-top: 1px solid var(--cc-border);
+    display: none;
+    align-items: center;
+    justify-content: space-around;
+    z-index: 400;
+    padding-bottom: env(safe-area-inset-bottom, 0);
   }
   .mobile-bottom-nav button {
-    display: flex; flex-direction: column; align-items: center; gap: 2px;
-    background: none; border: none; color: rgba(255,255,255,0.45);
-    font-size: 10px; font-family: inherit; font-weight: 500;
-    cursor: pointer; padding: 8px 16px; min-height: 44px; min-width: 44px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--cc-text-muted);
+    font-size: 10px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 8px 16px;
+    min-height: 44px;
+    min-width: 44px;
     transition: color 0.15s ease;
   }
-  .mobile-bottom-nav button.active { color: #75AADB; }
+  .mobile-bottom-nav button.active { color: var(--cc-accent); }
   .mobile-bottom-nav button .material-symbols-outlined { font-size: 22px; }
 
-  /* ---- Mobile hamburger ---- */
   .hamburger-btn {
-    width: 38px; height: 38px; border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.06);
-    background: rgba(26,35,50,0.3); display: none;
-    align-items: center; justify-content: center;
-    cursor: pointer; color: rgba(255,255,255,0.6);
-    margin-right: 12px; flex-shrink: 0;
+    width: 38px;
+    height: 38px;
+    border-radius: 3px;
+    border: 1px solid var(--cc-border);
+    background: transparent;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--cc-text-secondary);
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+
+  .sidebar-close-btn {
+    position: absolute;
+    top: 16px;
+    right: 12px;
+    width: 30px;
+    height: 30px;
+    border-radius: 3px;
+    border: 1px solid var(--cc-border);
+    background: transparent;
+    color: var(--cc-text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   @media (max-width: 767px) {
-    .dash-root { height: 100dvh; height: 100vh; }
     .sidebar {
-      position: fixed; left: -260px; top: 0; bottom: 0; z-index: 500;
-      width: 240px; min-width: 240px;
+      position: fixed;
+      left: -260px;
+      top: 0;
+      bottom: 0;
+      z-index: 500;
+      width: 240px;
+      min-width: 240px;
       transition: left 0.3s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .sidebar.sidebar-open { left: 0; }
-    .sidebar-close-btn {
-      position: absolute; top: 16px; right: 12px;
-      width: 30px; height: 30px; border-radius: 6px;
-      border: none; background: rgba(255,255,255,0.06);
-      color: rgba(255,255,255,0.5); cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-    }
     .hamburger-btn { display: flex; }
     .mobile-bottom-nav { display: flex; }
-    .dash-layout { grid-template-columns: 1fr; gap: 16px; }
-    .advisor-panel { display: none; }
-    .stats-row { grid-template-columns: 1fr; }
-    .quick-actions { grid-template-columns: 1fr; }
-    .top-bar { padding: 14px 16px 0; }
-    .top-bar h1 { font-size: 18px; }
-    .dash-body { padding: 16px 16px 80px; }
-    .projects-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-    .project-thumb { aspect-ratio: 4/3; }
-    .projects-header { flex-direction: column; align-items: stretch; gap: 8px; }
+    .dash-layout { grid-template-columns: 1fr; gap: 28px; }
+    .advisor-rail { display: none; }
+    .stats-rail { grid-template-columns: 1fr 1fr; }
+    .stat-cell:nth-child(2n) { border-right: none; }
+    .stat-cell:nth-child(-n+2) { border-bottom: 1px solid var(--cc-border); }
+    .toolbelt { grid-template-columns: 1fr; }
+    .dash-ribbon { padding: 16px 18px; }
+    .dash-greeting { font-size: 16px; gap: 8px; }
+    .dash-body { padding: 20px 18px 90px; }
+    .projects-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
     .proj-search { width: 100%; }
-    .empty-state { padding: 32px 16px; }
-    .bw-stripe { bottom: 56px; }
+    .section-head { flex-direction: column; align-items: stretch; gap: 10px; }
+    .empty-state { padding: 40px 18px; }
+    .bw-stripe { bottom: 58px; }
   }
 
   @media (max-width: 400px) {
-    .projects-grid { grid-template-columns: repeat(2, 1fr); }
-    .stats-row { gap: 8px; }
-    .top-bar h1 { font-size: 14px; }
+    .projects-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    .stats-rail { grid-template-columns: 1fr; }
+    .stat-cell { border-right: none !important; border-bottom: 1px solid var(--cc-border); }
+    .stat-cell:last-child { border-bottom: none; }
+    .dash-greeting { font-size: 15px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .project-card, .tool, .skel { transition: none; animation: none; }
   }
 `;
 
@@ -533,9 +1222,10 @@ const I = ({ i, s = 20, c, fill = false, style: sx }) => (
 
 /* ========== NAV ITEMS ========== */
 const NAV_ITEMS = [
-  { id: "home", icon: "home", label: "Home", fill: true },
+  { id: "home",      icon: "home",            label: "Home",      fill: true,  route: null },
+  { id: "templates", icon: "collections",     label: "Templates", fill: false, route: "/templates" },
   { id: "divider" },
-  { id: "settings", icon: "settings", label: "Settings" },
+  { id: "settings",  icon: "settings",        label: "Settings",  fill: false, route: "/settings" },
 ];
 
 /* ========== HELPERS ========== */
@@ -572,6 +1262,11 @@ function formatJoinDate(dateStr) {
   return new Date(dateStr).toLocaleDateString("en-US", { month: "short", year: "numeric" });
 }
 
+function formatTodayStamp() {
+  const d = new Date();
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase();
+}
+
 /* ========== SIDEBAR ========== */
 const Sidebar = memo(({ user, activeNav, onNav, onNavigate, onLogout, isOpen, onClose }) => {
   const displayName = user?.user_metadata?.full_name
@@ -587,23 +1282,20 @@ const Sidebar = memo(({ user, activeNav, onNav, onNavigate, onLogout, isOpen, on
         </button>
       )}
       <div className="sidebar-logo">
-        <div className="sidebar-logo-icon">
-          <I i="content_cut" s={16} c="white" />
-        </div>
-        <span style={{ fontSize: "16px", fontWeight: 700 }}>ClipCut</span>
+        <span className="sidebar-logo-monogram" aria-hidden="true">CC</span>
+        <span className="sidebar-logo-mark">ClipCut</span>
+        <span className="sidebar-logo-version">v0.1</span>
       </div>
 
       <div className="sidebar-user">
         <div className="sidebar-avatar">{initial}</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: "12px", fontWeight: 600, margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-            {displayName}
-          </p>
-          <p style={{ fontSize: "10px", color: "rgba(255,255,255,0.25)", margin: 0 }}>
-            Free Plan
-          </p>
+        <div className="sidebar-user-meta">
+          <p className="sidebar-user-name">{displayName}</p>
+          <span className="sidebar-user-plan">Free · Open Source</span>
         </div>
       </div>
+
+      <div className="sidebar-section-label">Workspace</div>
 
       <nav className="sidebar-nav">
         {NAV_ITEMS.map((item) =>
@@ -615,10 +1307,10 @@ const Sidebar = memo(({ user, activeNav, onNav, onNavigate, onLogout, isOpen, on
               className={`nav-item ${activeNav === item.id ? "active" : ""}`}
               onClick={() => {
                 onNav(item.id);
-                if (item.id === "settings") onNavigate("/settings");
+                if (item.route) onNavigate(item.route);
               }}
             >
-              <I i={item.icon} s={20} fill={item.fill && activeNav === item.id} />
+              <I i={item.icon} s={18} fill={item.fill && activeNav === item.id} />
               <span style={{ flex: 1 }}>{item.label}</span>
             </button>
           )
@@ -626,11 +1318,14 @@ const Sidebar = memo(({ user, activeNav, onNav, onNavigate, onLogout, isOpen, on
       </nav>
 
       <button className="sidebar-logout" onClick={onLogout}>
-        <I i="logout" s={20} />
+        <I i="logout" s={18} />
         <span style={{ flex: 1 }}>Log out</span>
       </button>
 
-      <div className="sidebar-footer">v0.1.0 beta</div>
+      <div className="sidebar-footer">
+        <span>v0.1.0 · BETA</span>
+        <span>GBE</span>
+      </div>
     </aside>
   );
 });
@@ -669,7 +1364,6 @@ const Dashboard = () => {
     setAdvisorDismissed(true);
   }, []);
 
-  // Derived state
   const displayName = user?.user_metadata?.full_name
     || user?.email?.split("@")[0]
     || "Creator";
@@ -682,8 +1376,6 @@ const Dashboard = () => {
     return sorted[0]?.savedAt;
   }, [projects]);
 
-  // Load projects from cloud or localStorage
-  /** Derive a project name from clip data when the project is still "Untitled Project". */
   const deriveProjectName = useCallback((p) => {
     if (p.name && p.name !== "Untitled Project") return p.name;
     const clips = p.project_data?.clips || [];
@@ -700,7 +1392,6 @@ const Dashboard = () => {
     try {
       const cloudProjects = await listCloudProjects(user?.id);
 
-      // Check for localStorage projects stranded by failed saves or expired sessions
       let localOnly = [];
       try {
         const localProjects = listProjectsFromLocalStorage();
@@ -710,7 +1401,6 @@ const Dashboard = () => {
 
       const allProjects = [...cloudProjects, ...localOnly];
 
-      // Background migration: push stranded local projects to Supabase
       if (user?.id && localOnly.length > 0 && !migrationTriggeredRef.current) {
         migrationTriggeredRef.current = true;
         migrateLocalProjectsToCloud(user.id)
@@ -723,7 +1413,6 @@ const Dashboard = () => {
           .catch(err => logger.warn("Local project migration failed", { error: err }));
       }
 
-      // Auto-fix "Untitled Project" names from clip data and persist to DB
       const renamePromises = [];
       for (const p of allProjects) {
         const derived = deriveProjectName(p);
@@ -736,7 +1425,6 @@ const Dashboard = () => {
           }
         }
       }
-      // Fire-and-forget: update names in background
       if (renamePromises.length > 0) Promise.all(renamePromises);
 
       const formattedProjects = allProjects.map(p => ({
@@ -762,7 +1450,6 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadProjects();
-    // Debounce focus-triggered reloads: ignore if last load was < 30s ago
     let lastLoadTime = Date.now();
     const handleFocus = () => {
       if (Date.now() - lastLoadTime < 30000) return;
@@ -810,7 +1497,6 @@ const Dashboard = () => {
     if (window.confirm("Are you sure you want to delete this project?")) {
       try {
         await deleteCloudProject(projectId, user?.id);
-        // Also clean up any localStorage entries (no-op if not present)
         try {
           localStorage.removeItem(`clipcut_project_${projectId}`);
           localStorage.removeItem(`clipcut_autosave_${projectId}`);
@@ -846,8 +1532,7 @@ const Dashboard = () => {
     setRenamingId(null);
   }, [renameValue, projects, user?.id]);
 
-  // Context menu state
-  const [ctxMenu, setCtxMenu] = useState(null); // { x, y, project }
+  const [ctxMenu, setCtxMenu] = useState(null);
 
   const handleContextMenu = useCallback((e, project) => {
     e.preventDefault();
@@ -857,7 +1542,6 @@ const Dashboard = () => {
 
   const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
 
-  // Close context menu when clicking anywhere
   useEffect(() => {
     if (!ctxMenu) return;
     const handler = () => setCtxMenu(null);
@@ -894,6 +1578,8 @@ const Dashboard = () => {
   const hasProjects = !isLoading && filteredProjects.length > 0;
   const showEmpty = !isLoading && !loadError && filteredProjects.length === 0;
 
+  const todayStamp = formatTodayStamp();
+
   return (
     <div className="dash-root">
       <style>{DASH_CSS}</style>
@@ -907,7 +1593,6 @@ const Dashboard = () => {
         onChange={handleFileSelect}
       />
 
-      {/* Mobile sidebar overlay */}
       <div
         className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
         onClick={() => setSidebarOpen(false)}
@@ -924,9 +1609,9 @@ const Dashboard = () => {
       />
 
       <div className="dash-content">
-        {/* ===== TOP BAR ===== */}
-        <header className="top-bar">
-          <div style={{ display: 'flex', alignItems: 'center' }}>
+        {/* ===== TOP RIBBON ===== */}
+        <header className="dash-ribbon">
+          <div className="dash-ribbon-left">
             <button
               className="hamburger-btn"
               onClick={() => setSidebarOpen(v => !v)}
@@ -934,16 +1619,32 @@ const Dashboard = () => {
             >
               <I i="menu" s={20} />
             </button>
-            <div>
-              <h1>{getGreeting()}, {displayName}</h1>
-              <p className="top-bar-sub">Workspace overview</p>
+            <div className="dash-ribbon-block">
+              <h1 className="dash-greeting">
+                {getGreeting()},
+                <span className="dash-greeting-name">{displayName}.</span>
+              </h1>
+              <p className="dash-ribbon-sub">
+                <span>{todayStamp}</span>
+                <span className="dot" />
+                <span>Workspace</span>
+                <span className="dot" />
+                <span>{isLoading ? "Syncing…" : `${projects.length} project${projects.length !== 1 ? "s" : ""}`}</span>
+              </p>
             </div>
           </div>
-          <div className="top-bar-actions">
+          <div className="dash-ribbon-actions">
+            {!isMobile && (
+              <span className="ribbon-pill" title="Cloud sync status">
+                <span className="ribbon-pill-dot" aria-hidden="true" />
+                Cloud · Live
+              </span>
+            )}
             <button
               className="icon-btn"
               onClick={loadProjects}
               title="Refresh projects"
+              aria-label="Refresh"
             >
               <I i="refresh" s={18} />
             </button>
@@ -951,6 +1652,7 @@ const Dashboard = () => {
               className="icon-btn"
               onClick={() => navigate("/settings")}
               title="Settings"
+              aria-label="Settings"
             >
               <I i="settings" s={18} />
             </button>
@@ -961,60 +1663,91 @@ const Dashboard = () => {
         <div className="dash-body">
           <div className={`dash-layout ${!isMobile && advisorDismissed ? "dash-layout--single" : ""}`}>
 
-            {/* ===== LEFT: MAIN CONTENT ===== */}
+            {/* ===== LEFT: MAIN ===== */}
             <div className="dash-main">
 
-              {/* Stats Row */}
-              <div className="stats-row">
-                <div className="stat-card">
-                  <div className="stat-icon">
-                    <I i="folder" s={18} c="#75AADB" />
-                  </div>
-                  <div>
-                    <span className="stat-value">{isLoading ? "—" : projects.length}</span>
-                    <span className="stat-label">Projects</span>
-                  </div>
+              {/* Stats tape */}
+              <div className="stats-rail" aria-label="Workspace statistics">
+                <div className="stat-cell">
+                  <span className="stat-label">Projects</span>
+                  <span className="stat-value stat-value-mono">
+                    {isLoading ? "—" : String(projects.length).padStart(2, "0")}
+                  </span>
                 </div>
-                <div className="stat-card">
-                  <div className="stat-icon">
-                    <I i="schedule" s={18} c="#75AADB" />
-                  </div>
-                  <div>
-                    <span className="stat-value">{isLoading ? "—" : relativeTime(lastEdited)}</span>
-                    <span className="stat-label">Last edited</span>
-                  </div>
+                <div className="stat-cell">
+                  <span className="stat-label">Last edited</span>
+                  <span className="stat-value stat-value-mono">{isLoading ? "—" : relativeTime(lastEdited)}</span>
                 </div>
-                <div className="stat-card">
-                  <div className="stat-icon">
-                    <I i="calendar_month" s={18} c="#75AADB" />
-                  </div>
-                  <div>
-                    <span className="stat-value">{formatJoinDate(user?.created_at)}</span>
-                    <span className="stat-label">Member since</span>
-                  </div>
+                <div className="stat-cell">
+                  <span className="stat-label">Member since</span>
+                  <span className="stat-value stat-value-mono">{formatJoinDate(user?.created_at)}</span>
+                </div>
+                <div className="stat-cell">
+                  <span className="stat-label">Plan</span>
+                  <span className="stat-value stat-value-mono">FREE · ∞</span>
                 </div>
               </div>
 
-              {/* Quick Actions */}
-              <div className="section-label">Quick Actions</div>
-              <div className="quick-actions">
-                <button className="quick-action quick-action--primary" onClick={handleNewProject}>
-                  <div className="qa-icon">
-                    <I i="add" s={20} c="white" />
+              {/* Toolbelt */}
+              <div className="section-head">
+                <h2 className="section-title">
+                  <span className="section-title-mono">§ 01 —</span>
+                  Quick actions
+                </h2>
+              </div>
+              <div className="toolbelt">
+                <button className="tool tool--primary" onClick={handleNewProject}>
+                  <div className="tool-icon">
+                    <I i="add" s={22} c="#0a0a0a" />
                   </div>
-                  <span>New Project</span>
+                  <div className="tool-body">
+                    <span className="tool-title">New project</span>
+                    <span className="tool-subtitle">Import media and start editing</span>
+                  </div>
+                </button>
+                <button
+                  className="tool"
+                  onClick={() => {
+                    setActiveNav("templates");
+                    navigate("/templates");
+                  }}
+                >
+                  <div className="tool-icon">
+                    <I i="collections" s={20} c="#75AADB" />
+                  </div>
+                  <div className="tool-body">
+                    <span className="tool-title">Browse templates</span>
+                    <span className="tool-subtitle">Community works — fork and remix</span>
+                  </div>
+                </button>
+                <button className="tool" onClick={() => navigate("/long-to-shorts")}>
+                  <div className="tool-icon">
+                    <I i="crop_portrait" s={20} c="#75AADB" />
+                  </div>
+                  <div className="tool-body">
+                    <span className="tool-title">Long → Shorts</span>
+                    <span className="tool-subtitle">Auto-crop a long video for TikTok</span>
+                  </div>
                 </button>
               </div>
 
               {/* Projects */}
-              <div className="projects-header">
-                <div className="section-label" style={{ margin: 0 }}>Your Projects</div>
+              <div className="section-head">
+                <h2 className="section-title">
+                  <span className="section-title-mono">§ 02 —</span>
+                  Your projects
+                  {!isLoading && projects.length > 0 && (
+                    <span className="section-title-count">
+                      {filteredProjects.length} of {projects.length}
+                    </span>
+                  )}
+                </h2>
                 {projects.length > 0 && (
                   <div className="proj-search">
                     <I i="search" />
                     <input
                       type="text"
-                      placeholder="Search..."
+                      placeholder="Search projects…"
                       aria-label="Search projects"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
@@ -1023,31 +1756,28 @@ const Dashboard = () => {
                 )}
               </div>
 
-              {/* Error banner */}
               {loadError && (
                 <div className="error-banner">
                   <I i="cloud_off" s={18} c="#ef4444" />
                   <span>{loadError}</span>
-                  <button className="error-retry" onClick={loadProjects}>Retry</button>
+                  <button className="error-retry" onClick={loadProjects}>RETRY</button>
                 </div>
               )}
 
-              {/* Loading skeleton */}
               {isLoading && !loadError && (
                 <div className="projects-grid">
                   {[1, 2, 3, 4, 5, 6].map(i => (
                     <div key={i} className="project-card" style={{ pointerEvents: "none" }}>
                       <div className="project-thumb skel" />
                       <div className="project-info">
-                        <div style={{ width: "65%", height: "12px", borderRadius: "4px", background: "#1a2332", marginBottom: "5px" }} />
-                        <div style={{ width: "35%", height: "10px", borderRadius: "4px", background: "#151b24" }} />
+                        <div style={{ width: "65%", height: "14px", borderRadius: "2px", background: "#1a2332", marginTop: "10px", marginBottom: "6px" }} />
+                        <div style={{ width: "40%", height: "10px", borderRadius: "2px", background: "#151b24" }} />
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
-              {/* Projects grid */}
               {hasProjects && (
                 <div className="projects-grid">
                   {filteredProjects.map((project) => (
@@ -1062,16 +1792,11 @@ const Dashboard = () => {
                           <img
                             src={project.thumbnail}
                             alt={project.name}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                             onError={() => setFailedThumbs(prev => new Set(prev).add(project.id))}
                           />
                         ) : (
-                          <div style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            width: '100%', height: '100%', position: 'absolute', inset: 0,
-                            background: 'linear-gradient(135deg, #111820, #0e1218)',
-                          }}>
-                            <I i="movie" s={32} c="rgba(117,170,219,0.35)" />
+                          <div className="project-thumb-fallback">
+                            <I i="movie" s={34} c="rgba(117,170,219,0.35)" />
                           </div>
                         )}
                         <button
@@ -1087,6 +1812,7 @@ const Dashboard = () => {
                         {renamingId === project.id ? (
                           <input
                             autoFocus
+                            className="project-rename-input"
                             value={renameValue}
                             onChange={(e) => setRenameValue(e.target.value)}
                             onBlur={() => handleFinishRename(project.id)}
@@ -1095,15 +1821,9 @@ const Dashboard = () => {
                               if (e.key === 'Escape') setRenamingId(null);
                             }}
                             onClick={(e) => e.stopPropagation()}
-                            style={{
-                              background: 'rgba(117,170,219,0.1)', border: '1px solid rgba(117,170,219,0.3)',
-                              borderRadius: '4px', padding: '2px 6px', color: 'white',
-                              fontSize: '13px', fontWeight: 600, fontFamily: 'inherit',
-                              width: '100%', outline: 'none',
-                            }}
                           />
                         ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
+                          <div className="project-rename-row">
                             <p
                               className="name"
                               onClick={(e) => handleStartRename(e, project)}
@@ -1126,7 +1846,9 @@ const Dashboard = () => {
                           </div>
                         )}
                         <p className="meta">
-                          {project.resolution} · {formatEditTime(project.savedAt)}
+                          <span className="res">{project.resolution}</span>
+                          <span className="sep" aria-hidden="true" />
+                          <span>{formatEditTime(project.savedAt)}</span>
                         </p>
                       </div>
                     </div>
@@ -1134,7 +1856,6 @@ const Dashboard = () => {
                 </div>
               )}
 
-              {/* Right-click context menu */}
               {ctxMenu && (
                 <div className="ctx-menu" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
                   <button className="ctx-menu-item" onClick={() => { handleStartRename({ stopPropagation: () => {} }, ctxMenu.project); closeCtxMenu(); }}>
@@ -1150,101 +1871,127 @@ const Dashboard = () => {
                 </div>
               )}
 
-              {/* Empty state */}
               {showEmpty && (
                 <div className="empty-state">
                   <div className="empty-icon">
-                    <I i="movie_edit" s={26} c="rgba(117,170,219,0.5)" />
+                    <I i="movie_edit" s={26} c="rgba(117,170,219,0.75)" />
                   </div>
-                  <h3>Start your first project</h3>
+                  <h3>
+                    A clean <span className="em">canvas.</span>
+                  </h3>
                   <p>
-                    Import a video, image, or audio file to create your first project
-                    and start editing.
+                    Import a video, image, or audio file to start your first project —
+                    or begin from a community template.
                   </p>
                   <div className="empty-actions">
                     <button className="empty-btn empty-btn--primary" onClick={handleNewProject}>
                       <I i="add" s={16} c="#0a0a0a" />
-                      Import Media
+                      Import media
+                    </button>
+                    <button className="empty-btn empty-btn--ghost" onClick={() => navigate("/templates")}>
+                      <I i="collections" s={16} />
+                      Browse templates
                     </button>
                   </div>
                   <p className="empty-hint">
-                    Supports MP4, WebM, MP3, WAV, PNG, JPG and more
+                    SUPPORTS · MP4 · WEBM · MP3 · WAV · PNG · JPG
                   </p>
                 </div>
               )}
             </div>
 
-            {/* ===== RIGHT: ADVISOR PANEL ===== */}
-            {!isMobile && !advisorDismissed && <aside className="advisor-panel">
-              <div className="advisor-label-row">
-                <div className="advisor-label">
-                  <I i="assistant" s={14} c="rgba(255,255,255,0.25)" />
-                  Advisor
+            {/* ===== RIGHT: ADVISOR TIMELINE ===== */}
+            {!isMobile && !advisorDismissed && (
+              <aside className="advisor-rail" aria-label="Workspace advisor">
+                <div className="advisor-rail-head">
+                  <span className="advisor-rail-title">Advisor</span>
+                  <button
+                    type="button"
+                    className="advisor-dismiss"
+                    onClick={dismissAdvisor}
+                    aria-label="Dismiss advisor panel"
+                    title="Hide advisor"
+                  >
+                    <I i="close" s={16} />
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  className="advisor-dismiss"
-                  onClick={dismissAdvisor}
-                  aria-label="Dismiss advisor panel"
-                  title="Hide advisor"
-                >
-                  <I i="close" s={18} />
-                </button>
-              </div>
 
-              {/* Security */}
-              <div className="advisor-item advisor-item--warning">
-                <div className="advisor-item-header">
-                  <I i="shield" s={16} c="#f59e0b" />
-                  <h4>Account Security</h4>
-                </div>
-                <p>
-                  Strengthen your account by reviewing your security settings.
-                </p>
-                <button
-                  className="advisor-action advisor-action--warning"
-                  onClick={() => navigate("/settings")}
-                >
-                  <I i="arrow_forward" s={12} c="#f59e0b" />
-                  Review Settings
-                </button>
-              </div>
+                <div className="advisor-timeline">
+                  <div className="advisor-entry advisor-entry--warning">
+                    <span className="advisor-entry-time">Security · Pending</span>
+                    <h4 className="advisor-entry-title">
+                      <I i="shield" s={14} c="#f5b84e" />
+                      Review account security
+                    </h4>
+                    <p className="advisor-entry-body">
+                      Strengthen your account by enabling 2-factor authentication and a
+                      recovery email.
+                    </p>
+                    <button
+                      className="advisor-entry-action advisor-entry-action--warning"
+                      onClick={() => navigate("/settings")}
+                    >
+                      Open settings
+                      <I i="arrow_forward" s={12} c="#f5b84e" />
+                    </button>
+                  </div>
 
-              {/* Getting started / Activity */}
-              {projects.length === 0 && !isLoading ? (
-                <div className="advisor-item advisor-item--info">
-                  <div className="advisor-item-header">
-                    <I i="rocket_launch" s={16} c="#75AADB" />
-                    <h4>Getting Started</h4>
+                  {projects.length === 0 && !isLoading ? (
+                    <div className="advisor-entry advisor-entry--info">
+                      <span className="advisor-entry-time">Getting started</span>
+                      <h4 className="advisor-entry-title">
+                        <I i="rocket_launch" s={14} c="#75AADB" />
+                        First steps
+                      </h4>
+                      <ul className="advisor-checklist">
+                        <li className="done">
+                          <I i="check_circle" s={14} fill />
+                          <span>Create account</span>
+                        </li>
+                        <li>
+                          <I i="radio_button_unchecked" s={14} c="rgba(255,255,255,0.22)" />
+                          <span>Import your first media file</span>
+                        </li>
+                        <li>
+                          <I i="radio_button_unchecked" s={14} c="rgba(255,255,255,0.22)" />
+                          <span>Edit and export a project</span>
+                        </li>
+                      </ul>
+                    </div>
+                  ) : projects.length > 0 ? (
+                    <div className="advisor-entry advisor-entry--success">
+                      <span className="advisor-entry-time">Workspace · Active</span>
+                      <h4 className="advisor-entry-title">
+                        <I i="check_circle" s={14} c="#6ec07a" />
+                        Everything in sync
+                      </h4>
+                      <p className="advisor-entry-body">
+                        {projects.length} project{projects.length !== 1 ? "s" : ""} · last edit {relativeTime(lastEdited)}.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  <div className="advisor-entry advisor-entry--info">
+                    <span className="advisor-entry-time">Community</span>
+                    <h4 className="advisor-entry-title">
+                      <I i="collections" s={14} c="#75AADB" />
+                      Explore templates
+                    </h4>
+                    <p className="advisor-entry-body">
+                      Browse works from creators across Botswana. Fork, remix, and
+                      publish back to the catalog when you're ready.
+                    </p>
+                    <button
+                      className="advisor-entry-action advisor-entry-action--info"
+                      onClick={() => navigate("/templates")}
+                    >
+                      Open catalog
+                      <I i="arrow_forward" s={12} c="#75AADB" />
+                    </button>
                   </div>
-                  <ul className="advisor-checklist">
-                    <li className="done">
-                      <I i="check_circle" s={14} fill />
-                      <span>Create account</span>
-                    </li>
-                    <li>
-                      <I i="radio_button_unchecked" s={14} c="rgba(255,255,255,0.2)" />
-                      <span>Import your first media file</span>
-                    </li>
-                    <li>
-                      <I i="radio_button_unchecked" s={14} c="rgba(255,255,255,0.2)" />
-                      <span>Edit and export a project</span>
-                    </li>
-                  </ul>
                 </div>
-              ) : projects.length > 0 ? (
-                <div className="advisor-item advisor-item--success">
-                  <div className="advisor-item-header">
-                    <I i="check_circle" s={16} c="#22c55e" />
-                    <h4>Workspace Active</h4>
-                  </div>
-                  <p>
-                    {projects.length} project{projects.length !== 1 ? "s" : ""} in your workspace.
-                    Last edited {relativeTime(lastEdited)}.
-                  </p>
-                </div>
-              ) : null}
-            </aside>}
+              </aside>
+            )}
 
           </div>
         </div>
@@ -1260,6 +2007,10 @@ const Dashboard = () => {
           <button onClick={handleNewProject}>
             <I i="add_circle" s={22} c="#75AADB" />
             <span>New</span>
+          </button>
+          <button className={activeNav === 'templates' ? 'active' : ''} onClick={() => { setActiveNav('templates'); navigate('/templates'); }}>
+            <I i="collections" s={22} />
+            <span>Templates</span>
           </button>
           <button className={activeNav === 'settings' ? 'active' : ''} onClick={() => navigate('/settings')}>
             <I i="settings" s={22} />
