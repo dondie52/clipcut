@@ -468,12 +468,16 @@ async function executeAddCaptions(params, editor) {
   }
 
   // Dynamic import to keep bundle small
-  const { generateCaptionClips } = await import('./captionGenerator');
+  const { generateCaptionClips, findClipsForSource } = await import('./captionGenerator');
 
   const file = videoClip.file || (videoClip.blobUrl ? await fetch(videoClip.blobUrl).then(r => r.blob()) : null);
   if (!file) throw new Error('Cannot access video file for transcription.');
 
-  const captionClips = await generateCaptionClips(file, getWorkerUrl(), style, () => {});
+  // Caption every timeline clip that references this source — handles splits
+  // and deletes. `findClipsForSource` matches by mediaId when present (survives
+  // splits) and falls back to file/blobUrl identity otherwise.
+  const videoClipsForSource = findClipsForSource(videoClip, clips);
+  const captionClips = await generateCaptionClips(file, getWorkerUrl(), style, () => {}, videoClipsForSource);
 
   if (captionClips.length === 0) {
     return 'No speech detected for captions';

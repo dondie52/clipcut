@@ -5,6 +5,7 @@ import {
   CAPTION_STYLES,
   generateCaptionClips,
   parseManualTranscript,
+  findClipsForSource,
 } from '../../services/captionGenerator';
 
 const STYLE_KEYS = Object.keys(CAPTION_STYLES);
@@ -90,6 +91,13 @@ const CaptionsPanel = memo(function CaptionsPanel({
       // Check for cancellation before starting
       if (ac.signal.aborted) return;
 
+      // Caption only the audio the user kept on the timeline — any clip
+      // referencing this source gets captions mapped into its trimmed window.
+      // If the source is only in the media library (no timeline clip yet),
+      // `videoClipsForSource` is empty and captions fall back to source-time
+      // positioning, matching the old behavior.
+      const videoClipsForSource = findClipsForSource(videoSourceEntry, clips);
+
       const captionClips = await generateCaptionClips(
         videoSource,
         WORKER_URL,
@@ -98,6 +106,7 @@ const CaptionsPanel = memo(function CaptionsPanel({
           if (ac.signal.aborted) return;
           setProgress({ stage, pct, detail: detail || null });
         },
+        videoClipsForSource,
       );
 
       if (ac.signal.aborted) return;
@@ -128,7 +137,7 @@ const CaptionsPanel = memo(function CaptionsPanel({
       setIsGenerating(false);
       setAbortController(null);
     }
-  }, [videoSource, hasWorker, selectedStyle, onSetClips, videoFromMedia, videoFromClip]);
+  }, [videoSource, hasWorker, selectedStyle, onSetClips, videoFromMedia, videoFromClip, videoSourceEntry, clips]);
 
   const handleManualGenerate = useCallback(() => {
     if (!manualText.trim()) return;

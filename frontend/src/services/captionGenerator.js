@@ -116,6 +116,68 @@ export function groupWordsIntoCaptions(words) {
   return phrases;
 }
 
+// ─── Source→Timeline Remap ────────────────────────────────────
+
+/**
+ * Remap source-time phrases onto the timeline by intersecting each phrase
+ * with every clip's trimmed window, then shifting into timeline time.
+ *
+ * A clip's visible source range is `[trimStart, trimStart + duration]`.
+ * Phrases outside that range (audio that was trimmed or split away) are
+ * dropped. A single phrase that straddles the window edge is clipped.
+ *
+ * If `videoClips` is empty/undefined, phrases are returned unchanged — this
+ * preserves the old behavior of treating source time as timeline time for
+ * callers that haven't opted in yet (e.g. captions generated from a media
+ * library item with no timeline presence).
+ *
+ * @param {Array<{text: string, start: number, end: number}>} phrases — source-time
+ * @param {Array<{trimStart?: number, duration: number, startTime: number}>} videoClips
+ * @returns {Array<{text: string, start: number, end: number}>} timeline-time
+ */
+export function remapPhrasesToTimeline(phrases, videoClips) {
+  if (!videoClips || videoClips.length === 0) return phrases;
+  const out = [];
+  for (const clip of videoClips) {
+    const trimStart = clip.trimStart || 0;
+    const trimEnd = trimStart + clip.duration;
+    for (const p of phrases) {
+      if (p.end <= trimStart || p.start >= trimEnd) continue;
+      const srcStart = Math.max(p.start, trimStart);
+      const srcEnd = Math.min(p.end, trimEnd);
+      out.push({
+        text: p.text,
+        start: clip.startTime + (srcStart - trimStart),
+        end: clip.startTime + (srcEnd - trimStart),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Find all timeline clips that reference the same underlying source as
+ * `sourceEntry` (a media-library item or a timeline clip). Prefers mediaId
+ * equality — split clips share mediaId, so this picks up every fragment.
+ */
+export function findClipsForSource(sourceEntry, clips) {
+  if (!sourceEntry || !Array.isArray(clips)) return [];
+  const isTranscribable = (c) =>
+    c && !c.isCaption && c.type !== 'text' && c.type !== 'sticker' && c.type !== 'audio';
+
+  const sourceMediaId = sourceEntry.id || sourceEntry.mediaId;
+  if (sourceMediaId) {
+    return clips.filter(c => isTranscribable(c) && c.mediaId === sourceMediaId);
+  }
+  if (sourceEntry.file) {
+    return clips.filter(c => isTranscribable(c) && c.file === sourceEntry.file);
+  }
+  if (sourceEntry.blobUrl) {
+    return clips.filter(c => isTranscribable(c) && c.blobUrl === sourceEntry.blobUrl);
+  }
+  return [];
+}
+
 // ─── Clip Generation ──────────────────────────────────────────
 
 /**
@@ -152,15 +214,20 @@ export function phrasesToClips(phrases, styleKey = 'classic') {
 // ─── Auto-Generate Pipeline ───────────────────────────────────
 
 /**
- * Full auto-caption pipeline: extract audio -> transcribe -> group -> clips.
+ * Full auto-caption pipeline: extract audio -> transcribe -> group -> remap -> clips.
  *
  * @param {File|Blob|string} videoFile — video file, blob, or blob URL (FFmpeg writeFile accepts all)
  * @param {string} workerUrl — Cloudflare Workers AI Whisper endpoint
  * @param {string} styleKey — key from CAPTION_STYLES
  * @param {Function} onProgress — (stage: string, pct: number) => void
+ * @param {Array<{trimStart?: number, duration: number, startTime: number}>} [videoClips]
+ *   Timeline clips that reference this source. When provided, phrases are
+ *   intersected with each clip's trimmed window and shifted into timeline time,
+ *   so captions only appear on audio the user actually kept. When omitted,
+ *   source time is treated as timeline time (old behavior).
  * @returns {Promise<Array>} caption clip objects
  */
-export async function generateCaptionClips(videoFile, workerUrl, styleKey, onProgress) {
+export async function generateCaptionClips(videoFile, workerUrl, styleKey, onProgress, videoClips) {
   // Dynamic import to avoid loading transcriptService when not needed
   const { transcribeVideo } = await import('./transcriptService');
 
@@ -176,8 +243,9 @@ export async function generateCaptionClips(videoFile, workerUrl, styleKey, onPro
   }
 
   onProgress?.('grouping', 90);
-  const phrases = groupWordsIntoCaptions(words);
-  console.log('[Captions] Grouped into', phrases.length, 'caption phrases');
+  const sourcePhrases = groupWordsIntoCaptions(words);
+  const phrases = remapPhrasesToTimeline(sourcePhrases, videoClips);
+  console.log('[Captions] Grouped into', sourcePhrases.length, 'source phrases →', phrases.length, 'timeline phrases');
   const clips = phrasesToClips(phrases, styleKey);
   console.log('[Captions] Generated', clips.length, 'caption clips');
 
