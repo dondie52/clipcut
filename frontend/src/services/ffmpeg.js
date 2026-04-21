@@ -20,7 +20,7 @@ let ffmpegInstance = null;
 let loadingPromise = null;
 let moduleLoadingPromise = null;
 
-const DEFAULT_FFMPEG_CORE_BASE_URL = '/ffmpeg';
+const DEFAULT_FFMPEG_CORE_BASE_URL = `${import.meta.env.BASE_URL || '/'}ffmpeg`.replace(/\/{2,}/g, '/');
 const FFMPEG_CORE_BASE_URL = (import.meta.env?.VITE_FFMPEG_CORE_BASE_URL || DEFAULT_FFMPEG_CORE_BASE_URL).replace(/\/+$/, '');
 
 /**
