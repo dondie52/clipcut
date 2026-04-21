@@ -126,6 +126,22 @@ export function groupWordsIntoCaptions(words) {
  * Phrases outside that range (audio that was trimmed or split away) are
  * dropped. A single phrase that straddles the window edge is clipped.
  *
+ * Fragments shorter than 0.15s (e.g. a word whose trailing edge barely
+ * crosses a clip boundary) are dropped — they'd be unreadable anyway and
+ * would trigger the MIN_CAPTION_DURATION stretch downstream, pushing the
+ * caption past the clip's end.
+ *
+ * Each emitted phrase carries an internal `maxEnd` field equal to the
+ * timeline-time end of its containing clip. This is consumed by
+ * `phrasesToClips` to cap the MIN_CAPTION_DURATION readability stretch so
+ * captions never extend past the video they belong to. `maxEnd` is an
+ * implementation detail of the pipeline, not part of the public phrase
+ * shape documented by `groupWordsIntoCaptions`.
+ *
+ * A phrase that intersects multiple clips (e.g. spans a deleted middle
+ * segment) is attached to the FIRST matching clip only, to avoid rendering
+ * the same caption text twice across a gap.
+ *
  * If `videoClips` is empty/undefined, phrases are returned unchanged — this
  * preserves the old behavior of treating source time as timeline time for
  * callers that haven't opted in yet (e.g. captions generated from a media
@@ -133,22 +149,29 @@ export function groupWordsIntoCaptions(words) {
  *
  * @param {Array<{text: string, start: number, end: number}>} phrases — source-time
  * @param {Array<{trimStart?: number, duration: number, startTime: number}>} videoClips
- * @returns {Array<{text: string, start: number, end: number}>} timeline-time
+ * @returns {Array<{text: string, start: number, end: number, maxEnd?: number}>} timeline-time
  */
 export function remapPhrasesToTimeline(phrases, videoClips) {
   if (!videoClips || videoClips.length === 0) return phrases;
+  const MIN_FRAGMENT = 0.15;
   const out = [];
+  const claimed = new Set();
   for (const clip of videoClips) {
     const trimStart = clip.trimStart || 0;
     const trimEnd = trimStart + clip.duration;
+    const timelineClipEnd = clip.startTime + clip.duration;
     for (const p of phrases) {
+      if (claimed.has(p)) continue;
       if (p.end <= trimStart || p.start >= trimEnd) continue;
       const srcStart = Math.max(p.start, trimStart);
       const srcEnd = Math.min(p.end, trimEnd);
+      if (srcEnd - srcStart < MIN_FRAGMENT) continue;
+      claimed.add(p);
       out.push({
         text: p.text,
         start: clip.startTime + (srcStart - trimStart),
         end: clip.startTime + (srcEnd - trimStart),
+        maxEnd: timelineClipEnd,
       });
     }
   }
@@ -190,14 +213,23 @@ export function findClipsForSource(sourceEntry, clips) {
 export function phrasesToClips(phrases, styleKey = 'classic') {
   const style = CAPTION_STYLES[styleKey] || CAPTION_STYLES.classic;
 
-  return phrases.map(phrase => ({
+  return phrases.map(phrase => {
+    // Readability stretch: short phrases get padded to MIN_CAPTION_DURATION so
+    // the caption stays on screen long enough to read. Capped by phrase.maxEnd
+    // (set by remapPhrasesToTimeline = containing clip's timeline end) so the
+    // caption never extends past the clip's last visible frame. Floor at 0.1s
+    // in case maxEnd happens to fall inside the phrase's natural span.
+    const preferredEnd = Math.max(phrase.start + MIN_CAPTION_DURATION, phrase.end);
+    const cappedEnd = phrase.maxEnd != null ? Math.min(preferredEnd, phrase.maxEnd) : preferredEnd;
+    const duration = Math.max(0.1, cappedEnd - phrase.start);
+    return ({
     ...DEFAULT_CLIP_PROPERTIES,
     id: captionId(),
     type: 'text',
     name: 'Caption',
     text: phrase.text,
     startTime: phrase.start,
-    duration: Math.max(MIN_CAPTION_DURATION, phrase.end - phrase.start),
+    duration,
     track: CAPTION_TRACK,
     isCaption: true,
     // Apply style
@@ -208,7 +240,8 @@ export function phrasesToClips(phrases, styleKey = 'classic') {
     textBgColor: style.textBgColor,
     textAlign: style.textAlign,
     textFontFamily: style.textFontFamily,
-  }));
+    });
+  });
 }
 
 // ─── Auto-Generate Pipeline ───────────────────────────────────
