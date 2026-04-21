@@ -42,6 +42,9 @@ coverage/
 # Misc
 .cursor/
 
+# Design-iteration screenshots (not deliverables)
+landing-*.png
+
 # Claude Code / Agents / MCP local state
 .agents/
 .claude/skills/
