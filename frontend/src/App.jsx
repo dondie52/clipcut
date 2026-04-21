@@ -29,6 +29,7 @@ const Dashboard = lazy(() => import('./components/Dashboard.jsx'))
 const VideoEditor = lazy(() => import('./components/VideoEditor/VideoEditor.jsx'))
 const LongToShorts = lazy(() => import('./components/LongToShorts/LongToShorts.jsx'))
 const TemplateLibrary = lazy(() => import('./components/TemplateLibrary.jsx'))
+const Settings = lazy(() => import('./components/Settings.jsx'))
 const RouteLoadingFallback = () => (
   <div style={{
     display: 'flex',
@@ -308,6 +309,16 @@ const AppContent = () => {
               <ProtectedRoute>
                 <ErrorBoundary name="templates" message="Template library failed to load" onReset={() => navigate('/templates')}>
                   <TemplateLibrary />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary name="settings" message="Settings failed to load" onReset={() => navigate('/settings')}>
+                  <Settings />
                 </ErrorBoundary>
               </ProtectedRoute>
             }
