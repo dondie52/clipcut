@@ -32,59 +32,599 @@ function isIOSDevice() {
 
 /* ========== CSS ANIMATIONS ========== */
 const TOP_BAR_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
   }
-  
+
   @keyframes slideUp {
     from { opacity: 0; transform: translateY(20px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  
+
+  @keyframes hud-led-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+
+  @keyframes hud-scan {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  @keyframes hud-tick {
+    0%, 90%, 100% { transform: scaleY(1); }
+    95% { transform: scaleY(0.72); }
+  }
+
   .export-modal-backdrop {
     animation: fadeIn 0.2s ease;
   }
-  
+
   .export-modal-content {
     animation: slideUp 0.3s ease;
   }
-  
+
   .export-btn {
     transition: all 0.15s ease;
   }
-  
+
   .export-btn:hover:not(:disabled) {
     background: #5a8cbf !important;
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(117, 170, 219, 0.3);
   }
-  
+
   .export-btn:active:not(:disabled) {
     transform: translateY(0) scale(0.98);
   }
-  
+
   .resolution-option {
     transition: all 0.15s ease;
   }
-  
+
   .resolution-option:hover {
     background: rgba(117, 170, 219, 0.1) !important;
     border-color: rgba(117, 170, 219, 0.3) !important;
   }
-  
+
   .title-input {
     transition: all 0.15s ease;
   }
-  
+
   .title-input:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.1);
   }
-  
+
   .title-input:focus {
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(117, 170, 219, 0.5);
+  }
+
+  /* ========== BROADCAST HUD EXPORT MODAL ========== */
+  .hud-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(3, 6, 12, 0.88);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 3500;
+    backdrop-filter: blur(6px) saturate(0.9);
+    -webkit-backdrop-filter: blur(6px) saturate(0.9);
+    animation: fadeIn 0.2s ease;
+  }
+
+  .hud-console {
+    background: #080b11;
+    border: 1px solid rgba(117,170,219,0.25);
+    border-radius: 3px;
+    width: 480px;
+    max-width: 92vw;
+    max-height: 88vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    color: #e4e8ef;
+    font-family: 'Spline Sans', sans-serif;
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,0.03) inset,
+      0 32px 80px rgba(0,0,0,0.72),
+      0 0 60px rgba(117,170,219,0.08);
+    animation: slideUp 0.32s cubic-bezier(0.2, 0.7, 0.2, 1);
+    position: relative;
+  }
+
+  /* subtle horizontal scan-line sheen on the console */
+  .hud-console::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(117,170,219,0.6), transparent);
+    animation: hud-scan 4s linear infinite;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .hud-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    background: linear-gradient(180deg, #0b1018 0%, #080b11 100%);
+    border-bottom: 1px solid rgba(117,170,219,0.18);
+    flex-shrink: 0;
+  }
+
+  .hud-head-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  .hud-head-led {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #75AADB;
+    box-shadow: 0 0 10px rgba(117,170,219,0.8), inset 0 0 3px rgba(255,255,255,0.4);
+    animation: hud-led-pulse 1.8s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  .hud-head-led--amber { background: #f5b84e; box-shadow: 0 0 10px rgba(245,184,78,0.8), inset 0 0 3px rgba(255,255,255,0.4); }
+  .hud-head-led--green { background: #6ec07a; box-shadow: 0 0 10px rgba(110,192,122,0.8), inset 0 0 3px rgba(255,255,255,0.4); animation: none; }
+
+  .hud-head-title {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #cbd5e1;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hud-head-title .sep { color: rgba(255,255,255,0.2); }
+  .hud-head-title .ch-id { color: #75AADB; }
+
+  .hud-head-close {
+    width: 28px; height: 28px;
+    border-radius: 2px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: transparent;
+    color: rgba(255,255,255,0.55);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+  }
+  .hud-head-close:hover {
+    background: rgba(239,68,68,0.1);
+    color: #ef4444;
+    border-color: rgba(239,68,68,0.3);
+  }
+
+  .hud-body {
+    padding: 18px;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ---- Section rows (label + content) ---- */
+  .hud-row { display: flex; flex-direction: column; gap: 8px; }
+  .hud-row-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .hud-label {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(117,170,219,0.65);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hud-label::before {
+    content: '';
+    width: 14px;
+    height: 1px;
+    background: rgba(117,170,219,0.45);
+    display: inline-block;
+  }
+
+  /* ---- Segmented control (format, tab, fps) ---- */
+  .hud-segment {
+    display: flex;
+    gap: 0;
+    background: #04060b;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .hud-segment button {
+    flex: 1;
+    background: transparent;
+    border: none;
+    padding: 8px 10px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.42);
+    cursor: pointer;
+    transition: background 140ms ease, color 140ms ease;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    text-transform: uppercase;
+  }
+  .hud-segment button:last-child { border-right: none; }
+  .hud-segment button:hover { color: rgba(255,255,255,0.85); background: rgba(255,255,255,0.03); }
+  .hud-segment button.is-active {
+    background: rgba(117,170,219,0.16);
+    color: #75AADB;
+    box-shadow: inset 0 -2px 0 #75AADB;
+  }
+
+  /* ---- Signal table (resolution / preset rows) ---- */
+  .hud-table {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+    background: #04060b;
+  }
+  .hud-row-item {
+    display: grid;
+    grid-template-columns: 18px 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    cursor: pointer;
+    text-align: left;
+    font-family: inherit;
+    transition: background 140ms ease;
+    color: rgba(255,255,255,0.75);
+  }
+  .hud-row-item:last-child { border-bottom: none; }
+  .hud-row-item:hover { background: rgba(117,170,219,0.05); }
+  .hud-row-item.is-active {
+    background: rgba(117,170,219,0.12);
+    color: #ffffff;
+  }
+
+  .hud-row-led {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1.5px solid rgba(255,255,255,0.2);
+    box-sizing: border-box;
+  }
+  .hud-row-item.is-active .hud-row-led {
+    background: #75AADB;
+    border-color: #75AADB;
+    box-shadow: 0 0 8px rgba(117,170,219,0.7);
+  }
+
+  .hud-row-name {
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+  }
+  .hud-row-item.is-active .hud-row-name { font-weight: 600; color: #fff; }
+
+  .hud-row-spec {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: rgba(255,255,255,0.4);
+    white-space: nowrap;
+  }
+
+  .hud-row-sub {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    color: rgba(255,255,255,0.34);
+    letter-spacing: 0.04em;
+    grid-column: 2 / 4;
+    margin-top: 2px;
+  }
+
+  /* ---- Filename input ---- */
+  .hud-input {
+    width: 100%;
+    background: #04060b;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 2px;
+    padding: 10px 12px;
+    color: #ffffff;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    outline: none;
+    transition: border-color 160ms ease, background 160ms ease;
+    box-sizing: border-box;
+  }
+  .hud-input::placeholder { color: rgba(255,255,255,0.22); }
+  .hud-input:focus {
+    border-color: #75AADB;
+    background: #060a12;
+    box-shadow: 0 0 0 2px rgba(117,170,219,0.12);
+  }
+
+  /* ---- Summary / status strip ---- */
+  .hud-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 14px;
+    background: rgba(117,170,219,0.06);
+    border: 1px solid rgba(117,170,219,0.22);
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  }
+  .hud-summary-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #75AADB;
+    box-shadow: 0 0 8px rgba(117,170,219,0.6);
+    flex-shrink: 0;
+  }
+  .hud-summary-text {
+    font-size: 11px;
+    color: #75AADB;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .hud-summary-note {
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.42);
+    margin-top: 3px;
+    letter-spacing: 0.02em;
+    line-height: 1.45;
+    font-family: 'Spline Sans', sans-serif;
+    text-transform: none;
+    font-weight: 400;
+  }
+  .hud-summary-note--warn { color: #f5b84e; }
+
+  /* ---- Footer button row ---- */
+  .hud-actions {
+    display: flex;
+    gap: 10px;
+    padding: 14px 18px;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    background: #04060b;
+    flex-shrink: 0;
+  }
+
+  .hud-btn {
+    padding: 11px 18px;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 160ms ease, box-shadow 220ms ease, transform 120ms ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .hud-btn--primary {
+    background: #75AADB;
+    color: #04060b;
+    flex: 1;
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.25), 0 0 0 1px rgba(117,170,219,0.5);
+  }
+  .hud-btn--primary:hover {
+    background: #8bbae3;
+    box-shadow: inset 0 -2px 0 rgba(0,0,0,0.25), 0 0 0 1px #8bbae3, 0 10px 28px rgba(117,170,219,0.35);
+  }
+  .hud-btn--primary:active { transform: translateY(1px); }
+
+  .hud-btn--ghost {
+    background: transparent;
+    color: rgba(255,255,255,0.55);
+    border-color: rgba(255,255,255,0.1);
+  }
+  .hud-btn--ghost:hover {
+    background: rgba(255,255,255,0.04);
+    color: #fff;
+    border-color: rgba(255,255,255,0.2);
+  }
+
+  .hud-btn--danger {
+    background: transparent;
+    color: #ef4444;
+    border-color: rgba(239,68,68,0.3);
+  }
+  .hud-btn--danger:hover {
+    background: rgba(239,68,68,0.1);
+    border-color: #ef4444;
+  }
+
+  /* ---- Progress state ---- */
+  .hud-progress {
+    padding: 8px 4px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .hud-big-readout {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 64px;
+    font-weight: 500;
+    line-height: 1;
+    color: #75AADB;
+    text-align: center;
+    letter-spacing: -0.03em;
+    text-shadow: 0 0 24px rgba(117,170,219,0.35);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-big-readout .pct {
+    font-size: 28px;
+    color: rgba(117,170,219,0.55);
+    margin-left: 4px;
+  }
+
+  .hud-op-label {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.72);
+    text-align: center;
+  }
+  .hud-op-sub {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.42);
+    text-align: center;
+    letter-spacing: 0.04em;
+    margin-top: 4px;
+  }
+
+  /* Film-strip progress bar with sprocket holes */
+  .hud-filmstrip {
+    position: relative;
+    height: 26px;
+    background: #02040a;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .hud-filmstrip-fill {
+    position: absolute;
+    inset: 0;
+    width: 0;
+    background: linear-gradient(90deg, #4a7fb5 0%, #75AADB 60%, #8bbae3 100%);
+    transition: width 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 0 24px rgba(117,170,219,0.35);
+  }
+  .hud-filmstrip-fill::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0; width: 2px;
+    background: #ffffff;
+    opacity: 0.5;
+    box-shadow: 0 0 12px rgba(255,255,255,0.7);
+  }
+  .hud-filmstrip-perf {
+    position: absolute;
+    left: 0; right: 0;
+    height: 5px;
+    display: flex;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .hud-filmstrip-perf--top    { top: 0;    background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent); }
+  .hud-filmstrip-perf--bottom { bottom: 0; background: linear-gradient(to top, rgba(0,0,0,0.6), transparent); }
+  .hud-filmstrip-perf > span {
+    flex: 1;
+    margin: 1px 3px;
+    background: rgba(255,255,255,0.4);
+    border-radius: 1px;
+    animation: hud-tick 1.6s ease-in-out infinite;
+    transform-origin: center;
+  }
+
+  .hud-telemetry {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 2px;
+    background: #04060b;
+  }
+  .hud-telemetry-cell {
+    padding: 10px 12px;
+    border-right: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .hud-telemetry-cell:last-child { border-right: none; }
+  .hud-telemetry-label {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.28);
+  }
+  .hud-telemetry-value {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 13px;
+    color: #e4e8ef;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---- Complete state ---- */
+  .hud-complete {
+    padding: 24px 8px 8px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+  }
+  .hud-complete-stamp {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    border: 1px solid rgba(110, 192, 122, 0.4);
+    background: rgba(110, 192, 122, 0.08);
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #6ec07a;
+  }
+  .hud-complete-stamp .led {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #6ec07a;
+    box-shadow: 0 0 10px rgba(110,192,122,0.75);
+  }
+  .hud-complete-title {
+    font-size: 20px;
+    font-weight: 600;
+    color: #ffffff;
+    letter-spacing: -0.01em;
+    margin: 6px 0 0;
+  }
+  .hud-complete-file {
+    font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 0.04em;
   }
   
   .menu-btn {
@@ -236,214 +776,332 @@ const ExportModal = memo(({
     onExport(settings, { format: exportFormat, quality: qualityPreset?.crf, fps: exportFps, filename: exportFilename || projectName });
   };
 
-  // Settings form
+  // Settings form — Broadcast HUD layout
   const renderSettings = () => (
     <>
-      {/* Format */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Format</label>
-        <PillGroup items={FORMAT_OPTIONS} selected={exportFormat} onSelect={setExportFormat} />
-      </div>
+      <div className="hud-body">
+        {/* Format */}
+        <div className="hud-row">
+          <span className="hud-label">Container · Codec</span>
+          <div className="hud-segment" role="radiogroup" aria-label="Output format">
+            {FORMAT_OPTIONS.map(f => (
+              <button
+                key={f.key}
+                className={exportFormat === f.key ? 'is-active' : ''}
+                onClick={() => setExportFormat(f.key)}
+                role="radio"
+                aria-checked={exportFormat === f.key}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
-      {/* Tab switcher: Resolution vs Platform */}
-      <div style={{ marginBottom: '14px' }}>
-        <PillGroup items={[{ key: 'resolution', label: 'Resolution' }, { key: 'platform', label: 'Platform' }]} selected={exportTab} onSelect={setExportTab} />
-      </div>
-
-      {exportTab === 'resolution' ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }} role="radiogroup">
-          {Object.entries(resolutions).map(([key, { label, width, height }]) => (
-            <button key={key} onClick={() => setSelectedResolution(key)} className="resolution-option" style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-              background: selectedResolution === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
-              border: selectedResolution === key ? '1.5px solid #75aadb' : '1px solid rgba(255,255,255,0.06)',
-            }} role="radio" aria-checked={selectedResolution === key}>
-              <div>
-                <span style={{ fontSize: '12px', color: selectedResolution === key ? '#75aadb' : 'white', fontWeight: selectedResolution === key ? 600 : 400 }}>{label}</span>
-                <span style={{ fontSize: '10px', color: '#4a5568', marginLeft: '6px' }}>{width}&times;{height}</span>
-              </div>
-              {selectedResolution === key && <Icon i="check_circle" s={16} c="#75aadb" />}
+        {/* Target (resolution vs platform) */}
+        <div className="hud-row">
+          <span className="hud-label">Target</span>
+          <div className="hud-segment" role="radiogroup" aria-label="Target mode">
+            <button
+              className={exportTab === 'resolution' ? 'is-active' : ''}
+              onClick={() => setExportTab('resolution')}
+              role="radio"
+              aria-checked={exportTab === 'resolution'}
+            >
+              By Resolution
             </button>
-          ))}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '14px' }} role="radiogroup">
-          {Object.entries(exportPresets).map(([key, p]) => (
-            <button key={key} onClick={() => setSelectedPreset(key)} style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '10px 12px', borderRadius: '6px', cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-              background: selectedPreset === key ? 'rgba(117,170,219,0.15)' : 'rgba(255,255,255,0.03)',
-              border: selectedPreset === key ? '1.5px solid #75aadb' : '1px solid rgba(255,255,255,0.06)',
-            }} role="radio" aria-checked={selectedPreset === key}>
-              <div>
-                <div style={{ fontSize: '12px', color: selectedPreset === key ? '#75aadb' : 'white', fontWeight: selectedPreset === key ? 600 : 400 }}>{p.label}</div>
-                <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '1px' }}>{p.description} · {p.width}&times;{p.height}</div>
-              </div>
-              {selectedPreset === key && <Icon i="check_circle" s={16} c="#75aadb" />}
+            <button
+              className={exportTab === 'platform' ? 'is-active' : ''}
+              onClick={() => setExportTab('platform')}
+              role="radio"
+              aria-checked={exportTab === 'platform'}
+            >
+              By Platform
             </button>
-          ))}
+          </div>
         </div>
-      )}
 
-      {/* Quality + FPS row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '14px' }}>
-        <div>
-          <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Quality</label>
-          <PillGroup items={QUALITY_PRESETS} selected={exportQuality} onSelect={setExportQuality} />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Frame Rate</label>
-          <PillGroup items={FPS_OPTIONS.map(f => ({ key: f, label: `${f}fps` }))} selected={exportFps} onSelect={setExportFps} />
-        </div>
-      </div>
-
-      {/* Filename */}
-      <div style={{ marginBottom: '14px' }}>
-        <label style={{ display: 'block', fontSize: '9px', color: '#64748b', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 600 }}>Filename</label>
-        <input
-          type="text"
-          value={exportFilename}
-          onChange={(e) => setExportFilename(e.target.value)}
-          style={{
-            width: '100%', background: 'rgba(26,35,50,0.6)', border: '1px solid rgba(117,170,219,0.08)',
-            borderRadius: '6px', padding: '8px 10px', color: 'white', fontSize: '12px',
-            outline: 'none', fontFamily: "'Spline Sans', sans-serif", boxSizing: 'border-box',
-          }}
-          aria-label="Export filename"
-        />
-      </div>
-
-      {/* Summary */}
-      <div style={{
-        padding: '10px 14px', background: 'rgba(117,170,219,0.06)', borderRadius: '6px',
-        marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px',
-        border: '1px solid rgba(117,170,219,0.1)',
-      }}>
-        <Icon i="info" s={14} c="#5a8cbf" />
-        <div>
-          <span style={{ fontSize: '11px', color: '#75aadb', fontWeight: 500 }}>{summaryLine}</span>
-          {exportFormat === 'webm' && !isIOS && (
-            <div style={{ fontSize: '9px', color: '#4a5568', marginTop: '2px' }}>WebM plays on most devices. For iPhone Photos app compatibility, use MP4.</div>
-          )}
-          {exportFormat === 'webm' && isIOS && (
-            <div style={{ fontSize: '9px', color: '#f59e0b', marginTop: '2px' }}>
-              ⚠️ WebM may not play in iPhone Photos. Open the saved file in VLC or CapCut, or choose MP4 instead.
+        {/* Signal table */}
+        <div className="hud-row">
+          <span className="hud-label">Signal</span>
+          {exportTab === 'resolution' ? (
+            <div className="hud-table" role="radiogroup" aria-label="Resolution">
+              {Object.entries(resolutions).map(([key, { label, width, height }]) => {
+                const active = selectedResolution === key;
+                return (
+                  <button
+                    key={key}
+                    className={`hud-row-item ${active ? 'is-active' : ''}`}
+                    onClick={() => setSelectedResolution(key)}
+                    role="radio"
+                    aria-checked={active}
+                  >
+                    <span className="hud-row-led" aria-hidden="true" />
+                    <span className="hud-row-name">{label}</span>
+                    <span className="hud-row-spec">{width}×{height}</span>
+                    <span className="hud-row-spec" style={{ color: active ? '#75AADB' : 'rgba(255,255,255,0.34)' }}>
+                      {Math.round((width * height) / 10000) / 100}MP
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          )}
-          {exportFormat === 'mp4' && (
-            <div style={{ fontSize: '9px', color: '#f59e0b', marginTop: '2px' }}>
-              MP4 export requires a connection to our encoding server. That server isn't available right now — exporting as WebM instead. Plays on most devices; for iPhone Photos use MP4 when the server is back online.
+          ) : (
+            <div className="hud-table" role="radiogroup" aria-label="Platform">
+              {Object.entries(exportPresets).map(([key, p]) => {
+                const active = selectedPreset === key;
+                return (
+                  <button
+                    key={key}
+                    className={`hud-row-item ${active ? 'is-active' : ''}`}
+                    onClick={() => setSelectedPreset(key)}
+                    role="radio"
+                    aria-checked={active}
+                    style={{ gridTemplateColumns: '18px 1fr auto' }}
+                  >
+                    <span className="hud-row-led" aria-hidden="true" />
+                    <span className="hud-row-name">
+                      {p.label}
+                      <span className="hud-row-sub" style={{ gridColumn: 'unset', display: 'block', marginTop: 3 }}>
+                        {p.description}
+                      </span>
+                    </span>
+                    <span className="hud-row-spec">{p.width}×{p.height}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* Quality + FPS */}
+        <div className="hud-row-split">
+          <div className="hud-row">
+            <span className="hud-label">Quality (CRF)</span>
+            <div className="hud-segment" role="radiogroup" aria-label="Quality">
+              {QUALITY_PRESETS.map(q => (
+                <button
+                  key={q.key}
+                  className={exportQuality === q.key ? 'is-active' : ''}
+                  onClick={() => setExportQuality(q.key)}
+                  role="radio"
+                  aria-checked={exportQuality === q.key}
+                  title={`CRF ${q.crf}`}
+                >
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="hud-row">
+            <span className="hud-label">Frame Rate</span>
+            <div className="hud-segment" role="radiogroup" aria-label="Frame rate">
+              {FPS_OPTIONS.map(f => (
+                <button
+                  key={f}
+                  className={exportFps === f ? 'is-active' : ''}
+                  onClick={() => setExportFps(f)}
+                  role="radio"
+                  aria-checked={exportFps === f}
+                >
+                  {f}fps
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Filename */}
+        <div className="hud-row">
+          <span className="hud-label">Filename</span>
+          <input
+            type="text"
+            className="hud-input"
+            value={exportFilename}
+            onChange={(e) => setExportFilename(e.target.value)}
+            aria-label="Export filename"
+            placeholder="clipcut-export"
+          />
+        </div>
+
+        {/* Summary strip */}
+        <div className="hud-summary" role="status">
+          <span className="hud-summary-dot" aria-hidden="true" />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div className="hud-summary-text">
+              Ready · {summaryLine}
+            </div>
+            {exportFormat === 'webm' && !isIOS && (
+              <div className="hud-summary-note">
+                WebM plays on most devices. For iPhone Photos compatibility, choose MP4.
+              </div>
+            )}
+            {exportFormat === 'webm' && isIOS && (
+              <div className="hud-summary-note hud-summary-note--warn">
+                WebM may not play in iPhone Photos. Open the saved file in VLC or CapCut, or choose MP4 instead.
+              </div>
+            )}
+            {exportFormat === 'mp4' && (
+              <div className="hud-summary-note hud-summary-note--warn">
+                MP4 export routes through our encoding server, which is offline right now — falling back to WebM. Switch back once the server is available.
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Export + Cancel buttons */}
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button onClick={onClose} style={{
-          flex: '0 0 auto', padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-        }}>Cancel</button>
-        <button onClick={handleExport} className="export-btn" style={{
-          flex: 1, padding: '10px', background: '#75aadb', border: 'none', borderRadius: '8px',
-          color: '#0a0a0a', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontFamily: "'Spline Sans', sans-serif",
-        }}>
-          <Icon i="download" s={16} c="#0a0a0a" />
-          Export
+      <div className="hud-actions">
+        <button type="button" className="hud-btn hud-btn--ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="hud-btn hud-btn--primary export-btn" onClick={handleExport}>
+          <Icon i="download" s={14} c="#04060b" />
+          Render · Export
         </button>
       </div>
     </>
   );
 
-  // Progress view
-  const renderProgress = () => (
-    <div style={{ textAlign: 'center', padding: '20px 0' }}>
-      <div style={{ width: '70px', height: '70px', margin: '0 auto 20px', borderRadius: '50%', background: 'rgba(117,170,219,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
-        <Icon i="movie_edit" s={32} c="#75aadb" />
-        <div style={{ position: 'absolute', inset: 0, border: '3px solid transparent', borderTopColor: '#75aadb', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+  // Progress view — render-farm HUD
+  const renderProgress = () => {
+    const pct = Math.max(0, Math.min(100, Math.round(progress)));
+    return (
+      <div className="hud-body">
+        <div className="hud-progress">
+          <div className="hud-big-readout" aria-live="polite" aria-atomic="true">
+            {String(pct).padStart(2, '0')}<span className="pct">%</span>
+          </div>
+          <div>
+            <div className="hud-op-label">{operationLabel || 'Rendering'}</div>
+            {subMessage && <div className="hud-op-sub">{subMessage}</div>}
+          </div>
+
+          <div className="hud-filmstrip" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={pct}>
+            <div className="hud-filmstrip-perf hud-filmstrip-perf--top" aria-hidden="true">
+              {Array.from({ length: 24 }).map((_, i) => <span key={i} style={{ animationDelay: `${(i * 0.05).toFixed(2)}s` }} />)}
+            </div>
+            <div className="hud-filmstrip-fill" style={{ width: `${pct}%` }} />
+            <div className="hud-filmstrip-perf hud-filmstrip-perf--bottom" aria-hidden="true">
+              {Array.from({ length: 24 }).map((_, i) => <span key={i} style={{ animationDelay: `${(i * 0.05 + 0.1).toFixed(2)}s` }} />)}
+            </div>
+          </div>
+
+          <div className="hud-telemetry" aria-label="Telemetry">
+            <div className="hud-telemetry-cell">
+              <span className="hud-telemetry-label">Format</span>
+              <span className="hud-telemetry-value">{exportFormat.toUpperCase()}</span>
+            </div>
+            <div className="hud-telemetry-cell">
+              <span className="hud-telemetry-label">Signal</span>
+              <span className="hud-telemetry-value">
+                {exportTab === 'platform'
+                  ? (exportPresets[selectedPreset]?.label || '—')
+                  : selectedResolution.toUpperCase()}
+              </span>
+            </div>
+            <div className="hud-telemetry-cell">
+              <span className="hud-telemetry-label">Frame Rate</span>
+              <span className="hud-telemetry-value">{exportFps}fps</span>
+            </div>
+          </div>
+        </div>
       </div>
-      <p style={{ color: 'white', fontSize: '16px', fontWeight: 500, margin: '0 0 6px' }}>{operationLabel}</p>
-      <p style={{ color: '#64748b', fontSize: '12px', margin: '0 0 24px' }}>Please wait while your video is being processed</p>
-      <div style={{ height: '8px', background: 'rgba(255,255,255,0.1)', borderRadius: '4px', overflow: 'hidden', marginBottom: '12px' }}>
-        <div style={{ height: '100%', width: `${progress}%`, background: 'linear-gradient(90deg, #75aadb, #5a8cbf)', borderRadius: '4px', transition: 'width 0.3s ease' }} />
+    );
+  };
+
+  const renderProgressActions = () => (
+    onCancel ? (
+      <div className="hud-actions" style={{ justifyContent: 'center' }}>
+        <button type="button" className="hud-btn hud-btn--danger" onClick={onCancel}>
+          Abort render
+        </button>
       </div>
-      <p style={{ color: '#75aadb', fontSize: '18px', fontWeight: 700, margin: '0 0 6px', fontFamily: 'monospace' }}>{Math.round(progress)}%</p>
-      {subMessage && <p style={{ color: '#64748b', fontSize: '11px', margin: '0 0 20px', fontFamily: 'monospace' }}>{subMessage}</p>}
-      {onCancel && (
-        <button onClick={onCancel} style={{
-          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '8px',
-          padding: '9px 28px', color: '#ef4444', cursor: 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: "'Spline Sans', sans-serif",
-        }}>Cancel Export</button>
-      )}
-    </div>
+    ) : null
   );
 
   // Completion view
   const renderComplete = () => (
-    <div style={{ textAlign: 'center', padding: '20px 0' }}>
-      <div style={{ width: '70px', height: '70px', margin: '0 auto 20px', borderRadius: '50%', background: 'rgba(34,197,94,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <Icon i="check_circle" s={40} c="#22c55e" />
-      </div>
-      <p style={{ color: 'white', fontSize: '16px', fontWeight: 600, margin: '0 0 6px' }}>Export Complete</p>
-      {exportResult?.size && (
-        <p style={{ color: '#64748b', fontSize: '12px', margin: '0 0 20px' }}>
-          File size: {(exportResult.size / (1024 * 1024)).toFixed(1)} MB
-        </p>
-      )}
-      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-        <button onClick={onClose} style={{
-          padding: '10px 20px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: '8px', color: '#94a3b8', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-        }}>Close</button>
-        {onExportAnother && (
-          <button onClick={onExportAnother} style={{
-            padding: '10px 20px', background: 'rgba(117,170,219,0.1)', border: '1px solid rgba(117,170,219,0.2)',
-            borderRadius: '8px', color: '#75aadb', fontSize: '12px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Spline Sans', sans-serif",
-          }}>Export Another</button>
-        )}
-        {onDownload && (
-          <button onClick={onDownload} className="export-btn" style={{
-            padding: '10px 24px', background: '#75aadb', border: 'none', borderRadius: '8px',
-            color: '#0a0a0a', fontSize: '13px', fontWeight: 700, cursor: 'pointer',
-            display: 'flex', alignItems: 'center', gap: '6px', fontFamily: "'Spline Sans', sans-serif",
-          }}>
-            <Icon i="download" s={16} c="#0a0a0a" />
-            Download
-          </button>
+    <div className="hud-body">
+      <div className="hud-complete">
+        <div className="hud-complete-stamp">
+          <span className="led" aria-hidden="true" />
+          Export complete · Signal locked
+        </div>
+        <h3 className="hud-complete-title">Your file is ready.</h3>
+        {exportResult?.size && (
+          <span className="hud-complete-file">
+            {(exportResult.size / (1024 * 1024)).toFixed(1)} MB · {exportFormat.toUpperCase()}
+          </span>
         )}
       </div>
     </div>
   );
 
+  const renderCompleteActions = () => (
+    <div className="hud-actions">
+      <button type="button" className="hud-btn hud-btn--ghost" onClick={onClose}>
+        Close
+      </button>
+      {onExportAnother && (
+        <button type="button" className="hud-btn hud-btn--ghost" onClick={onExportAnother}>
+          Export another
+        </button>
+      )}
+      {onDownload && (
+        <button type="button" className="hud-btn hud-btn--primary export-btn" onClick={onDownload}>
+          <Icon i="download" s={14} c="#04060b" />
+          Download
+        </button>
+      )}
+    </div>
+  );
+
+  const headLedClass = exportResult
+    ? 'hud-head-led hud-head-led--green'
+    : isExporting
+      ? 'hud-head-led hud-head-led--amber'
+      : 'hud-head-led';
+
+  const headStatus = exportResult
+    ? 'Complete'
+    : isExporting
+      ? 'Rendering'
+      : 'Standby';
+
   return (
     <div
-      className="export-modal-backdrop"
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3500, backdropFilter: 'blur(4px)' }}
+      className="hud-backdrop"
       onClick={handleBackdropClick}
       role="dialog" aria-modal="true" aria-labelledby="export-modal-title"
     >
       <style>{TOP_BAR_CSS}</style>
-      <div id="export-modal" className="export-modal-content" style={{
-        background: '#1a2332', borderRadius: '12px', padding: '24px', width: '440px', maxWidth: '90vw',
-        maxHeight: '85vh', overflowY: 'auto',
-        border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
-      }}>
-        {/* Header */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-          <h2 id="export-modal-title" style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: 'white', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Icon i="download" s={20} c="#75aadb" />
-            Export Video
-          </h2>
+      <div id="export-modal" className="hud-console">
+        <div className="hud-head">
+          <div className="hud-head-left">
+            <span className={headLedClass} aria-hidden="true" />
+            <h2 id="export-modal-title" className="hud-head-title">
+              <span>CC · EXPORT</span>
+              <span className="sep">//</span>
+              <span className="ch-id">{headStatus.toUpperCase()}</span>
+            </h2>
+          </div>
           {!isExporting && !exportResult && (
-            <button onClick={onClose} style={{ ...styles.ghost, padding: '6px', borderRadius: '6px', display: 'flex' }} aria-label="Close export dialog" title="Close (Escape)">
-              <Icon i="close" s={18} c="#94a3b8" />
+            <button
+              onClick={onClose}
+              className="hud-head-close"
+              aria-label="Close export dialog"
+              title="Close (Escape)"
+            >
+              <Icon i="close" s={16} c="currentColor" />
             </button>
           )}
         </div>
 
         {exportResult ? renderComplete() : isExporting ? renderProgress() : renderSettings()}
+
+        {!isExporting && !exportResult && null /* settings renders its own actions */}
+        {isExporting && renderProgressActions()}
+        {exportResult && renderCompleteActions()}
       </div>
     </div>
   );
