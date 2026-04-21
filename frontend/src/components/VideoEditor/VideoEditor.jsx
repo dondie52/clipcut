@@ -1790,9 +1790,28 @@ const VideoEditor = () => {
     pb.seek(t);
   }, [pb]);
 
+  // Declared above onTimeUpdate so the latter can call it when the video
+  // element crosses the current clip's trimmed end.
+  const onEnded = useCallback(() => {
+    if (!pb.currentClip) { pb.setIsPlaying(false); return; }
+    const vc = clips.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
+    const next = vc.find(c => c.startTime > pb.currentClip.startTime);
+    next && pb.isPlaying ? pb.seek(next.startTime) : pb.setIsPlaying(false);
+  }, [pb, clips]);
+
   const onTimeUpdate = useCallback((t) => {
     if (pb.currentClip) {
       const trimStart = pb.currentClip.trimStart || 0;
+      // The video element holds the full source file. A clip says "play
+      // from trimStart for `duration`", but nothing in the <video> enforces
+      // that — without this check, playback runs past the clip's trimmed
+      // end into source frames that aren't on the timeline. When we cross
+      // the boundary, hand off to onEnded (seeks next clip or stops).
+      const clipSourceEnd = trimStart + pb.currentClip.duration;
+      if (pb.isPlaying && t >= clipSourceEnd - 0.01) {
+        onEnded();
+        return;
+      }
       const timelineTime = pb.currentClip.startTime + (t - trimStart);
       if (pb.isPlaying) {
         // Video element is authoritative during playback — always accept its time
@@ -1803,14 +1822,7 @@ const VideoEditor = () => {
     } else if (!pb.isPlaying) {
       pb.setCurrentTime(t);
     }
-  }, [pb]);
-
-  const onEnded = useCallback(() => {
-    if (!pb.currentClip) { pb.setIsPlaying(false); return; }
-    const vc = clips.filter(c => c.type !== "audio").sort((a, b) => a.startTime - b.startTime);
-    const next = vc.find(c => c.startTime > pb.currentClip.startTime);
-    next && pb.isPlaying ? pb.seek(next.startTime) : pb.setIsPlaying(false);
-  }, [pb, clips]);
+  }, [pb, onEnded]);
 
   // ---- Handle video format errors ----
   const handleVideoFormatError = useCallback(async (blobUrl) => {
