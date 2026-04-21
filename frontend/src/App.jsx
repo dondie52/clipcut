@@ -28,6 +28,7 @@ const OnboardingStep3 = lazy(() => import('./components/OnboardingStep3.jsx'))
 const Dashboard = lazy(() => import('./components/Dashboard.jsx'))
 const VideoEditor = lazy(() => import('./components/VideoEditor/VideoEditor.jsx'))
 const LongToShorts = lazy(() => import('./components/LongToShorts/LongToShorts.jsx'))
+const TemplateLibrary = lazy(() => import('./components/TemplateLibrary.jsx'))
 const RouteLoadingFallback = () => (
   <div style={{
     display: 'flex',
@@ -297,6 +298,16 @@ const AppContent = () => {
               <ProtectedRoute>
                 <ErrorBoundary name="long-to-shorts" message="AI Shorts feature encountered an error" onReset={() => navigate('/long-to-shorts')}>
                   <LongToShorts />
+                </ErrorBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/templates"
+            element={
+              <ProtectedRoute>
+                <ErrorBoundary name="templates" message="Template library failed to load" onReset={() => navigate('/templates')}>
+                  <TemplateLibrary />
                 </ErrorBoundary>
               </ProtectedRoute>
             }
