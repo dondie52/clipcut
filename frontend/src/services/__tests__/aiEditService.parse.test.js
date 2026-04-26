@@ -249,3 +249,148 @@ describe('parseIntentLocally — non-command prompts fall through to the Worker'
     expect(r[0].type).toBe('apply_filter');
   });
 });
+
+describe('parseIntentLocally — minute / hour units', () => {
+  it('parses "split at 1 minute" as 60 seconds', () => {
+    const r = parseIntentLocally('split at 1 minute', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(60);
+  });
+
+  it('parses "split at 30 mins"', () => {
+    const r = parseIntentLocally('split at 30 mins', { duration: 3600 });
+    expect(r[0].params.at).toBe(1800);
+  });
+
+  it('parses "split at 1m" (single-letter unit)', () => {
+    const r = parseIntentLocally('split at 1m', { duration: 247 });
+    expect(r[0].params.at).toBe(60);
+  });
+
+  it('parses "split at 1.5 hours"', () => {
+    const r = parseIntentLocally('split at 1.5 hours', { duration: 7200 });
+    expect(r[0].params.at).toBe(5400);
+  });
+
+  it('still parses "split at 30 seconds" as 30s', () => {
+    const r = parseIntentLocally('split at 30 seconds', { duration: 247 });
+    expect(r[0].params.at).toBe(30);
+  });
+
+  it('parses "delete after 1 minute" (the screenshot bug)', () => {
+    const r = parseIntentLocally('delete after 1 minute', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('parses "remove the first 2 minutes"', () => {
+    const r = parseIntentLocally('remove the first 2 minutes', { duration: 247 });
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(120);
+  });
+
+  it('parses "trim the last 1 minute"', () => {
+    const r = parseIntentLocally('trim the last 1 minute', { duration: 247 });
+    expect(r[0].params.from).toBe(187);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('parses "cut from 1 min to 2 min"', () => {
+    const r = parseIntentLocally('cut from 1 min to 2 min', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(120);
+  });
+
+  it('explicit unit suppresses the "0.26" ambiguity prompt', () => {
+    // "0.26 seconds" is unambiguous — don't ask for clarification.
+    const r = parseIntentLocally('split at 0.26 seconds', { duration: 314 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].params.at).toBeCloseTo(0.26, 5);
+  });
+});
+
+describe('parseIntentLocally — minute / second typo tolerance', () => {
+  it('handles "1 mintune" (the screenshot typo) as 1 minute', () => {
+    const r = parseIntentLocally('split at 1 mintune', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(60);
+  });
+
+  it('handles "spilt at 1 mintune the delte after the 1 mintune" end-to-end', () => {
+    const r = parseIntentLocally('spilt at 1 mintune the delte after the 1 mintune', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    // Single-clause with split + the "delte the rest" anchor wired by the compound handler
+    // — but no clause separator is present, so it falls back to the single-clause split.
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(60);
+  });
+
+  it('compound "split at 1 minute and delete the rest" cuts to end', () => {
+    const r = parseIntentLocally('split at 1 minute and delete the rest', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.map(a => a.type)).toEqual(['split_clip', 'cut_clip']);
+    expect(r[0].params.at).toBe(60);
+    expect(r[1].params.from).toBe(60);
+    expect(r[1].params.to).toBe(247);
+  });
+
+  it('handles "minit" / "mintue" / "minet" minute typos', () => {
+    for (const t of ['minit', 'mintue', 'minet']) {
+      const r = parseIntentLocally(`split at 2 ${t}`, { duration: 247 });
+      expect(r?.[0]?.params?.at, `failed for "${t}"`).toBe(120);
+    }
+  });
+
+  it('handles "secound" → "second"', () => {
+    const r = parseIntentLocally('split at 30 secound', { duration: 247 });
+    expect(r[0].params.at).toBe(30);
+  });
+});
+
+describe('parseIntentLocally — delete the Nth clip', () => {
+  it('parses "delete the second clip"', () => {
+    const r = parseIntentLocally('delete the second clip', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('delete_clip');
+    expect(r[0].params.index).toBe(2);
+  });
+
+  it('parses "delete the secound clip" (typo) as the second clip', () => {
+    // "secound" is fuzzed to "second" by normaliseTypos; the ordinal still matches.
+    const r = parseIntentLocally('delete the secound clip', { duration: 247 });
+    expect(r[0].type).toBe('delete_clip');
+    expect(r[0].params.index).toBe(2);
+  });
+
+  it('parses "delete the first clip"', () => {
+    const r = parseIntentLocally('delete the first clip', { duration: 247 });
+    expect(r[0].params.index).toBe(1);
+  });
+
+  it('parses "remove the last clip" as -1', () => {
+    const r = parseIntentLocally('remove the last clip', { duration: 247 });
+    expect(r[0].type).toBe('delete_clip');
+    expect(r[0].params.index).toBe(-1);
+  });
+
+  it('parses "delete clip 3"', () => {
+    const r = parseIntentLocally('delete clip 3', { duration: 247 });
+    expect(r[0].params.index).toBe(3);
+  });
+
+  it('parses "delete the 2nd clip"', () => {
+    const r = parseIntentLocally('delete the 2nd clip', { duration: 247 });
+    expect(r[0].params.index).toBe(2);
+  });
+
+  it('does NOT misinterpret "delete the first 5 seconds" as a clip-index delete', () => {
+    const r = parseIntentLocally('delete the first 5 seconds', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(5);
+  });
+});

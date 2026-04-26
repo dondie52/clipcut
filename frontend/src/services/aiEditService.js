@@ -27,6 +27,10 @@ const FILTER_NAME_MAP = {
 const VALID_TRANSITIONS = ['fade', 'fadeblack', 'fadewhite', 'dissolve', 'wipeleft', 'wiperight', 'slideup', 'slidedown'];
 
 const TIME_TOKEN = String.raw`(?:\d+:\d+(?:\.\d+)?|\d*\.?\d+)`;
+// Matches a unit suffix on a time token: seconds (default), minutes, hours.
+// Used by patterns that accept "split at 1 minute", "delete after 30s", etc.
+// Order longer-first so "minutes" wins over "min".
+const TIME_UNIT = String.raw`(?:milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)`;
 
 // Parse "0.26" → 0.26, "1:45" → 105, "30s" → 30. Returns null if unparseable.
 function parseTimeToken(raw) {
@@ -42,6 +46,34 @@ function parseTimeToken(raw) {
   const n = parseFloat(t);
   return Number.isFinite(n) ? n : null;
 }
+
+// Convert a base number (assumed seconds when no colon) by its unit token.
+// "5", "min" → 300. mm:ss times ignore the unit — already in seconds.
+function applyTimeUnit(seconds, unit, raw) {
+  if (seconds == null) return null;
+  if (typeof raw === 'string' && raw.includes(':')) return seconds; // mm:ss is already seconds
+  if (!unit) return seconds;
+  const u = unit.toLowerCase();
+  if (u === 'ms' || u.startsWith('millisecond')) return seconds / 1000;
+  if (u === 'h' || u === 'hr' || u === 'hrs' || u.startsWith('hour')) return seconds * 3600;
+  if (u === 'm' || u === 'min' || u === 'mins' || u.startsWith('minute')) return seconds * 60;
+  return seconds; // s/sec/seconds/secs — already seconds
+}
+
+// English ordinals → 1-based index; "last" maps to -1.
+const ORDINAL_INDEX = {
+  first: 1, '1st': 1,
+  second: 2, '2nd': 2,
+  third: 3, '3rd': 3,
+  fourth: 4, '4th': 4,
+  fifth: 5, '5th': 5,
+  sixth: 6, '6th': 6,
+  seventh: 7, '7th': 7,
+  eighth: 8, '8th': 8,
+  ninth: 9, '9th': 9,
+  tenth: 10, '10th': 10,
+  last: -1, final: -1,
+};
 
 // Damerau-Levenshtein distance (allows 1-char transpositions). Used for
 // tolerant keyword matching of short, known targets like "split" / "transition".
@@ -79,12 +111,16 @@ function normaliseTypos(prompt) {
   // Semicolon is one key over from colon on QWERTY — "0;26" almost always means "0:26".
   let out = prompt.replace(/(\d)\s*;\s*(\d)/g, '$1:$2');
 
-  // Fuzz-correct "split", "transition(s)", and "delete" token-by-token. Thresholds
-  // are tuned so common nearby words ("shift" dist 2 to "split", "select"/"delegate"
-  // dist >=2 to "delete") are NOT coerced — only genuine near-misses hit.
+  // Fuzz-correct "split", "transition(s)", "delete", and time-unit words token-by-token.
+  // Thresholds are tuned so common nearby words ("shift" dist 2 to "split",
+  // "select"/"delegate" dist >=2 to "delete") are NOT coerced — only genuine near-misses hit.
+  const KNOWN = new Set([
+    'split', 'transition', 'transitions', 'delete',
+    'minute', 'minutes', 'second', 'seconds', 'hour', 'hours',
+  ]);
   out = out.replace(/\b[a-z]{3,14}\b/gi, (word) => {
     const lower = word.toLowerCase();
-    if (lower === 'split' || lower === 'transition' || lower === 'transitions' || lower === 'delete') return word;
+    if (KNOWN.has(lower)) return word;
     // "split" — very short; require distance 1 to avoid grabbing real words.
     if (lower.length >= 4 && lower.length <= 7 && editDistance(lower, 'split') === 1) return 'split';
     // "transition(s)" — allow distance 2 (missing letter + transposition is common).
@@ -93,6 +129,25 @@ function normaliseTypos(prompt) {
     // "delete" — require distance 1 ("deleate", "deleted"). Distance 2 would catch
     // "select"/"delegate"/etc. so keep it tight.
     if (lower.length >= 5 && lower.length <= 8 && editDistance(lower, 'delete') === 1) return 'delete';
+    // Time units. Anchor on "min"/"sec"/"hou" prefix to keep distance-2 fuzzes safe —
+    // "mintune"/"mintue" → "minute", "secound" → "second", "hous" → "hours".
+    // When both singular and plural match, pick the closer one ("secound" → "second"
+    // not "seconds", since the ordinal "the second clip" must still be recognisable).
+    if (lower.startsWith('min') && lower.length >= 5 && lower.length <= 9) {
+      const dS = editDistance(lower, 'minute');
+      const dP = editDistance(lower, 'minutes');
+      if (Math.min(dS, dP) <= 2) return dS <= dP ? 'minute' : 'minutes';
+    }
+    if (lower.startsWith('sec') && lower.length >= 5 && lower.length <= 9) {
+      const dS = editDistance(lower, 'second');
+      const dP = editDistance(lower, 'seconds');
+      if (Math.min(dS, dP) <= 2) return dS <= dP ? 'second' : 'seconds';
+    }
+    if (lower.startsWith('hou') && lower.length >= 3 && lower.length <= 6) {
+      const dS = editDistance(lower, 'hour');
+      const dP = editDistance(lower, 'hours');
+      if (Math.min(dS, dP) <= 1) return dS <= dP ? 'hour' : 'hours';
+    }
     return word;
   });
 
@@ -145,17 +200,34 @@ export function parseIntentLocally(prompt, context = {}) {
       const speed = parseFloat(m[1] || m[2]);
       return [{ type: 'change_speed', params: { speed } }];
     }],
-    // Split accepts decimals (0.26) AND mm:ss (0:26) AND plain seconds ("30", "30s").
-    // `TIME_TOKEN` must come from the enclosing scope — patterns live in `parseIntentLocally`.
-    [new RegExp(String.raw`\bsplit\s+(?:at\s+|@\s*)?(${TIME_TOKEN})\s*(?:s|sec|secs|seconds?)?\b`), (m) => {
+    // Delete by clip index — "delete the second clip", "delete the last clip", "remove clip 2".
+    // Must come BEFORE the unit-aware time patterns so "second clip" isn't read as "2 seconds clip".
+    [new RegExp(String.raw`\b(?:delete|remove|drop|cut)\s+(?:the\s+)?(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|last|final|\d+(?:st|nd|rd|th)?)\s+clip\b`), (m) => {
+      const tok = m[1].toLowerCase();
+      const idx = ORDINAL_INDEX[tok] ?? parseInt(tok, 10);
+      if (!Number.isFinite(idx) || idx === 0) return null;
+      return [{ type: 'delete_clip', params: { index: idx } }];
+    }],
+    [new RegExp(String.raw`\b(?:delete|remove|drop)\s+clip\s+(?:#\s*)?(\d+)\b`), (m) => {
+      const idx = parseInt(m[1], 10);
+      if (!Number.isFinite(idx) || idx === 0) return null;
+      return [{ type: 'delete_clip', params: { index: idx } }];
+    }],
+    // Split accepts decimals (0.26) AND mm:ss (0:26) AND plain seconds ("30", "30s")
+    // AND minute/hour units ("1 minute", "1.5 hours", "30 mins", "1m").
+    // `TIME_TOKEN`/`TIME_UNIT` come from the enclosing scope.
+    [new RegExp(String.raw`\bsplit\s+(?:at\s+|@\s*)?(${TIME_TOKEN})\s*(${TIME_UNIT})?\b`), (m) => {
       const raw = m[1];
-      const at = parseTimeToken(raw);
-      if (at === null) return null;
+      const unit = m[2];
+      const base = parseTimeToken(raw);
+      if (base === null) return null;
+      const at = applyTimeUnit(base, unit, raw);
       // Ambiguity heuristic: user wrote decimal notation like "0.26" on a video longer than 60s.
       // They probably meant 0:26 (26s), not 0.26s. Ask rather than do the wrong thing.
+      // Skip when an explicit unit was given — "0.26 seconds" is unambiguous.
       const usedDotNotation = raw.includes('.') && !raw.includes(':');
       const looksLikeClockStyle = /^\d+\.\d{2}$/.test(raw); // "0.26", "1.45"
-      if (usedDotNotation && looksLikeClockStyle && videoDuration >= 60 && at < 1) {
+      if (!unit && usedDotNotation && looksLikeClockStyle && videoDuration >= 60 && at < 1) {
         const [mm, ss] = raw.split('.');
         const clockSeconds = parseInt(mm, 10) * 60 + parseInt(ss, 10);
         return {
@@ -165,37 +237,36 @@ export function parseIntentLocally(prompt, context = {}) {
       }
       return [{ type: 'split_clip', params: { at } }];
     }],
-    [new RegExp(String.raw`\bcut\s+(?:from\s+)?(${TIME_TOKEN})\s*(?:to|-)\s*(${TIME_TOKEN})`), (m) => {
-      const from = parseTimeToken(m[1]);
-      const to = parseTimeToken(m[2]);
+    [new RegExp(String.raw`\bcut\s+(?:from\s+)?(${TIME_TOKEN})\s*(${TIME_UNIT})?\s*(?:to|-)\s*(${TIME_TOKEN})\s*(${TIME_UNIT})?`), (m) => {
+      const from = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
+      const to = applyTimeUnit(parseTimeToken(m[3]), m[4] || m[2], m[3]);
       if (from === null || to === null) return null;
       return [{ type: 'cut_clip', params: { from, to } }];
     }],
-    // "delete after 60s" / "remove everything from 1:00 onwards" / "trim from 60 to end"
+    // "delete after 60s" / "remove everything from 1:00 onwards" / "trim from 1 minute to end"
     // → cut from X to end of video. Needs videoDuration so we know where "end" is.
-    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?(?:after|past|from)\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?(?:\s+(?:onwards?|to\s+(?:the\s+)?end))?\b`), (m) => {
-      const from = parseTimeToken(m[1]);
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?(?:after|past|from)\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?(?:\s+(?:onwards?|to\s+(?:the\s+)?end))?\b`), (m) => {
+      const from = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       if (from === null) return null;
       if (!videoDuration || videoDuration <= from) return null;
       return [{ type: 'cut_clip', params: { from, to: videoDuration } }];
     }],
-    // "delete before 30s" / "remove everything before 0:30" → cut from 0 to X.
-    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?before\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
-      const to = parseTimeToken(m[1]);
+    // "delete before 30s" / "remove everything before 0:30" / "trim before 1 minute" → cut from 0 to X.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?before\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?\b`), (m) => {
+      const to = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       if (to === null || to <= 0) return null;
       return [{ type: 'cut_clip', params: { from: 0, to } }];
     }],
-    // "remove the first 5 seconds" / "trim first 10s" / "delete the first 30"
+    // "remove the first 5 seconds" / "trim first 1 minute" / "delete the first 30"
     // → cut from 0 to N. Same effect as "delete before N" but more natural phrasing.
-    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?first\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
-      const to = parseTimeToken(m[1]);
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?first\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?\b`), (m) => {
+      const to = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       if (to === null || to <= 0) return null;
       return [{ type: 'cut_clip', params: { from: 0, to } }];
     }],
-    // "remove the last 10 seconds" / "trim last 5s" → cut from (duration - N) to end.
-    // Needs videoDuration to compute the start point.
-    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?last\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
-      const n = parseTimeToken(m[1]);
+    // "remove the last 10 seconds" / "trim last 1 minute" → cut from (duration - N) to end.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?last\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?\b`), (m) => {
+      const n = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       if (n === null || n <= 0) return null;
       if (!videoDuration || videoDuration <= n) return null;
       return [{ type: 'cut_clip', params: { from: videoDuration - n, to: videoDuration } }];
@@ -472,6 +543,9 @@ async function executeAction(action, editor) {
 
     case 'split_clip':
       return executeSplitClip(action.params, editor);
+
+    case 'delete_clip':
+      return executeDeleteClip(action.params, editor);
 
     case 'add_transition':
       return executeAddTransition(action.params, editor);
@@ -817,6 +891,46 @@ function executeCutClip(params, editor) {
 
   setClips(newClips);
   return `Cut ${from}s to ${to}s (removed ${cutDuration.toFixed(1)}s)`;
+}
+
+/* ─── Action: Delete Clip (by 1-based index, or -1 for last) ──── */
+function executeDeleteClip(params, editor) {
+  const { setClips, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
+
+  // Operate on visible media clips (skip captions/text/stickers), ordered as
+  // they appear on the timeline — track first, then start time. This matches
+  // the user's mental model when they say "the second clip".
+  const targets = clips
+    .filter(c => !c.isCaption && c.type !== 'text' && c.type !== 'sticker')
+    .sort((a, b) => (a.track || 0) - (b.track || 0) || a.startTime - b.startTime);
+
+  if (targets.length === 0) {
+    throw new Error('No clips on the timeline to delete.');
+  }
+
+  const idx = params.index;
+  if (idx == null || !Number.isFinite(idx)) {
+    throw new Error('Specify which clip to delete (e.g., "delete the second clip" or "delete clip 2").');
+  }
+
+  let target;
+  let label;
+  if (idx === -1) {
+    target = targets[targets.length - 1];
+    label = 'last';
+  } else if (idx > 0 && idx <= targets.length) {
+    target = targets[idx - 1];
+    label = `#${idx}`;
+  } else {
+    const wordFor = targets.length === 1 ? 'clip' : 'clips';
+    const verbFor = targets.length === 1 ? 'is' : 'are';
+    throw new Error(`Clip ${idx} doesn't exist — there ${verbFor} only ${targets.length} ${wordFor} on the timeline.`);
+  }
+
+  setClips(prev => prev.filter(c => c.id !== target.id));
+  const name = target.name ? ` ("${target.name}")` : '';
+  return `Deleted ${label} clip${name}`;
 }
 
 /* ─── Action: Split Clip ────────────────────────────────────── */
