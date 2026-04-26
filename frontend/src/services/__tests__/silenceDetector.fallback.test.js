@@ -2,8 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // The fallback path dynamically imports transcriptService — mock it at the
 // module level so we can assert `extractAudio` is called when Web Audio fails.
+// `getCachedWav` is the cross-action audio cache lookup; tests don't exercise
+// the cache, so it always returns null and decoding follows the original path.
 vi.mock('../transcriptService', () => ({
   extractAudio: vi.fn(),
+  getCachedWav: vi.fn(() => null),
 }));
 
 describe('silenceDetector — FFmpeg fallback', () => {
