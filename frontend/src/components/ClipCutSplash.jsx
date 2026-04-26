@@ -332,6 +332,15 @@ const SPLASH_CSS = `
     0%, 100% { opacity: 0.5; transform: scale(1); }
     50% { opacity: 0.8; transform: scale(1.1); }
   }
+
+  /* —— Mobile —— */
+  @media (max-width: 480px) {
+    .splash-title { font-size: 40px; letter-spacing: -0.5px; }
+    .splash-tagline { font-size: 11px; letter-spacing: 3px; margin-bottom: 32px; }
+    .splash-glow-orb { width: 220px; height: 220px; }
+    .splash-loader { width: 200px; }
+    .splash-film-frame { width: 76px; height: 62px; }
+  }
 `;
 
 /* ═══════════════════════════════════════════

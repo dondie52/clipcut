@@ -806,7 +806,9 @@ export function listProjectsFromLocalStorage() {
 function deleteProjectFromLocalStorage(projectId) {
   localStorage.removeItem(`clipcut_project_${projectId}`);
   localStorage.removeItem(`clipcut_autosave_${projectId}`);
-  deleteProjectMediaFromIDB(projectId).catch(() => {});
+  deleteProjectMediaFromIDB(projectId).catch((err) => {
+    logger.warn("Failed to delete project media from IndexedDB", { error: err, projectId });
+  });
 }
 
 /**

@@ -13,6 +13,7 @@ import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { storeMedia, loadMedia, rekeyProjectMedia, listAllMedia } from '../../utils/mediaStore';
 import { sanitizeTextInput } from '../../utils/validation';
+import { validateFile } from '../../utils/fileValidation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
 import { canvasExport } from '../../services/canvasExport';
@@ -749,13 +750,17 @@ const useAutoSave = (
           // Persist media files to IndexedDB so they survive page reloads
           for (const m of mediaItemsRef.current) {
             if (m.file) {
-              storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+              storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch((err) => {
+                console.warn("Failed to persist media to IndexedDB", { mediaId: m.id, error: err?.message });
+              });
             }
           }
           // Also persist background music
           const bg = bgMusicRef.current;
           if (bg?.file && bg?.mediaId) {
-            storeMedia(pid, bg.mediaId, bg.file, { name: bg.name, type: bg.file.type }).catch(() => {});
+            storeMedia(pid, bg.mediaId, bg.file, { name: bg.name, type: bg.file.type }).catch((err) => {
+              console.warn("Failed to persist background music to IndexedDB", { mediaId: bg.mediaId, error: err?.message });
+            });
           }
         }
 
@@ -785,7 +790,9 @@ const useAutoSave = (
           if (pid) {
             for (const m of mediaItemsRef.current) {
               if (m.file) {
-                storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+                storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch((err) => {
+                  console.warn("Fallback media persist failed", { mediaId: m.id, error: err?.message });
+                });
               }
             }
           }
@@ -1344,8 +1351,9 @@ const VideoEditor = () => {
 
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
-    if (!file || !file.type.startsWith('audio/')) {
-      notify('warning', 'Please select an audio file');
+    const result = validateFile(file, { allowedCategories: ['audio'], category: 'audio' });
+    if (!result.valid) {
+      notify('warning', result.error || 'Please select an audio file');
       return;
     }
     // Revoke previous bg music blob

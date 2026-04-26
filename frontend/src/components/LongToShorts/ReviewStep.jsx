@@ -218,7 +218,7 @@ export default function ReviewStep({ state, dispatch, videoRef }) {
             <div key={seg.id} className="lts-segment">
               <div className="lts-segment-top">
                 {thumbnails[seg.id] ? (
-                  <img className="lts-segment-thumb" src={thumbnails[seg.id]} alt="" />
+                  <img className="lts-segment-thumb" src={thumbnails[seg.id]} alt="" loading="lazy" decoding="async" />
                 ) : (
                   <div className="lts-segment-thumb" />
                 )}

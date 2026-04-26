@@ -19,7 +19,9 @@ import { listProjects as listCloudProjects, deleteProject as deleteCloudProject,
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
+import { validateFiles } from "../utils/fileValidation";
 import { getUserFriendlyMessage } from "../utils/errorHandling";
+import { toast } from "./Toast";
 
 const ADVISOR_DISMISSED_KEY = "clipcut-dashboard-advisor-dismissed";
 
@@ -1420,7 +1422,9 @@ const Dashboard = () => {
           p.name = derived;
           if (p._source !== "localStorage") {
             renamePromises.push(
-              updateCloudProject(p.id, user?.id, { name: derived }).catch(() => {})
+              updateCloudProject(p.id, user?.id, { name: derived }).catch((err) => {
+                logger.warn("Failed to backfill project name", { error: err, projectId: p.id });
+              })
             );
           }
         }
@@ -1476,8 +1480,16 @@ const Dashboard = () => {
   const handleFileSelect = useCallback((e) => {
     const files = Array.from(e.target.files);
     if (files.length > 0) {
-      trackEvent(analyticsEvents.dashboardFileImport, { fileCount: files.length });
-      navigate("/editor", { state: { filesToImport: files } });
+      const { validFiles, errors } = validateFiles(files, {
+        allowedCategories: ['video', 'audio', 'image'],
+      });
+      if (errors.length > 0) {
+        toast.error(`${errors.length} file${errors.length === 1 ? '' : 's'} rejected:\n${errors.map(x => `${x.file}: ${x.error}`).join('\n')}`);
+      }
+      if (validFiles.length > 0) {
+        trackEvent(analyticsEvents.dashboardFileImport, { fileCount: validFiles.length });
+        navigate("/editor", { state: { filesToImport: validFiles } });
+      }
     }
     e.target.value = "";
   }, [navigate]);
@@ -1506,7 +1518,7 @@ const Dashboard = () => {
         setProjects(prev => prev.filter(p => p.id !== projectId));
       } catch (err) {
         logger.error("Failed to delete project", { error: err, projectId });
-        alert(getUserFriendlyMessage(err, "project"));
+        toast.error(getUserFriendlyMessage(err, "project"));
       }
     }
   }, [user?.id]);
@@ -1792,6 +1804,8 @@ const Dashboard = () => {
                           <img
                             src={project.thumbnail}
                             alt={project.name}
+                            loading="lazy"
+                            decoding="async"
                             onError={() => setFailedThumbs(prev => new Set(prev).add(project.id))}
                           />
                         ) : (

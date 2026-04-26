@@ -22,6 +22,7 @@ import {
   clearWorkerUrl,
   getWorkerUrlSource,
 } from "../services/workerConfig";
+import { toast } from "./Toast";
 
 const SETTINGS_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Spline+Sans:wght@300;400;500;600;700;800&display=swap');
@@ -333,10 +334,10 @@ const Settings = () => {
     setIsExporting(true);
     try {
       await downloadUserDataExport(user?.id);
-      alert("Data export downloaded successfully!");
+      toast.success("Data export downloaded successfully");
     } catch (error) {
       console.error("Export failed:", error);
-      alert("Failed to export data. Please try again.");
+      toast.error("Failed to export data. Please try again.");
     } finally {
       setIsExporting(false);
     }
@@ -344,7 +345,7 @@ const Settings = () => {
 
   const handleDeleteAccount = async () => {
     if (deleteConfirm !== "DELETE") {
-      alert('Please type "DELETE" to confirm account deletion.');
+      toast.error('Please type "DELETE" to confirm account deletion.');
       return;
     }
 
@@ -362,10 +363,10 @@ const Settings = () => {
       // Sign out and redirect to login
       await signOut();
       navigate("/login");
-      alert("Your account and all data have been deleted.");
+      toast.success("Your account and all data have been deleted.");
     } catch (error) {
       console.error("Deletion failed:", error);
-      alert(
+      toast.error(
         "Failed to delete account. Some data may require manual deletion. Please contact support."
       );
     } finally {

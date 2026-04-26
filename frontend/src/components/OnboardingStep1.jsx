@@ -13,6 +13,8 @@
 import { useState, useRef, useEffect } from "react";
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { sanitizeTextInput } from "../utils/validation";
+import { validateFile } from "../utils/fileValidation";
+import { toast } from "./Toast";
 import BotswanaStripe from "./shared/BotswanaStripe";
 
 const STEP1_CSS = `
@@ -474,11 +476,16 @@ const OnboardingStep1 = ({ onContinue, onSkip, onSkipAll }) => {
 
   const handleAvatarChange = (e) => {
     const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setAvatarPreview(reader.result);
-      reader.readAsDataURL(file);
+    if (!file) return;
+    const result = validateFile(file, { allowedCategories: ['image'], category: 'avatar' });
+    if (!result.valid) {
+      toast.error(result.error || 'Invalid avatar image');
+      e.target.value = '';
+      return;
     }
+    const reader = new FileReader();
+    reader.onloadend = () => setAvatarPreview(reader.result);
+    reader.readAsDataURL(file);
   };
 
   return (

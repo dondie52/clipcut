@@ -6,6 +6,7 @@
 
 import { supabase } from "./supabaseClient";
 import { sanitizeFileName, sanitizeTextInput } from "../utils/validation";
+import { addBreadcrumb } from "../utils/errorTracking";
 
 /**
  * File upload security constants
@@ -76,6 +77,7 @@ function validateFileUpload(file) {
  * @throws {Error} If sign up fails
  */
 export async function signUp({ email, password, username }) {
+  addBreadcrumb({ category: 'auth', message: 'signUp.attempt', level: 'info' });
   // 1. Create auth user
   const { data, error } = await supabase.auth.signUp({
     email,
@@ -85,7 +87,15 @@ export async function signUp({ email, password, username }) {
     },
   });
 
-  if (error) throw error;
+  if (error) {
+    addBreadcrumb({
+      category: 'auth',
+      message: 'signUp.failed',
+      level: 'error',
+      data: { code: error.status, message: error.message },
+    });
+    throw error;
+  }
 
   // 2. Create profile row (runs after email confirmation if enabled)
   if (data.user) {
@@ -110,11 +120,13 @@ export async function signUp({ email, password, username }) {
  * @throws {Error} If sign in fails or account is locked
  */
 export async function signIn({ email, password }) {
+  addBreadcrumb({ category: 'auth', message: 'signIn.attempt', level: 'info' });
   // Check if account is locked
   const lockoutStatus = await checkAccountLockout(email);
   if (lockoutStatus.locked) {
     const lockedUntil = new Date(lockoutStatus.lockedUntil);
     const minutesRemaining = Math.ceil((lockedUntil - new Date()) / 60000);
+    addBreadcrumb({ category: 'auth', message: 'signIn.locked', level: 'warning' });
     throw new Error(`Account is locked due to too many failed attempts. Please try again in ${minutesRemaining} minute${minutesRemaining !== 1 ? 's' : ''}.`);
   }
 
@@ -127,6 +139,12 @@ export async function signIn({ email, password }) {
     if (error) {
       // Record failed attempt
       await recordFailedLoginAttempt(email);
+      addBreadcrumb({
+        category: 'auth',
+        message: 'signIn.failed',
+        level: 'error',
+        data: { code: error.status, message: error.message },
+      });
       throw error;
     }
 

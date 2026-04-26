@@ -164,6 +164,11 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['@ffmpeg/ffmpeg', '@ffmpeg/util', '@mediapipe/tasks-vision']
   },
+  // Drop debug-level console calls from production bundles. console.warn/error
+  // survive so genuine runtime errors still surface in the browser.
+  esbuild: {
+    pure: ['console.log', 'console.debug', 'console.info', 'console.trace'],
+  },
   server: {
     headers: securityHeaders,
     proxy: {

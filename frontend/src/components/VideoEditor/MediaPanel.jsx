@@ -3,6 +3,7 @@ import Icon from './Icon';
 import { styles } from './styles';
 import { SCROLLBAR_CSS } from './constants';
 import { validateFiles, getAcceptString } from '../../utils/fileValidation';
+import { toast } from '../Toast';
 
 /* ========== CSS ANIMATIONS ========== */
 const MEDIA_PANEL_CSS = `
@@ -639,7 +640,7 @@ const MediaPanel = ({
     if (files.length > 0 && onImportMedia) {
       const { validFiles, errors } = validateFiles(files, { allowedCategories: ['video', 'audio'] });
       if (errors.length > 0) {
-        alert(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
+        toast.error(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
       }
       if (validFiles.length > 0) {
         onImportMedia(validFiles);
@@ -673,7 +674,7 @@ const MediaPanel = ({
     const { validFiles, errors } = validateFiles(droppedFiles, { allowedCategories: ['video', 'audio'] });
 
     if (errors.length > 0) {
-      alert(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
+      toast.error(`Some files were rejected:\n${errors.map(e => `${e.file}: ${e.error}`).join('\n')}`);
     }
 
     if (validFiles.length > 0 && onImportMedia) {

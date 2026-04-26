@@ -5,6 +5,8 @@
  * with MediaRecorder, and produces a downloadable WebM blob.
  */
 
+import { addBreadcrumb } from '../utils/errorTracking';
+
 // ── Resolution map (mirrors videoOperations.js RESOLUTIONS) ──
 const RESOLUTION_MAP = {
   '480p':  { width: 854,  height: 480 },
@@ -241,7 +243,15 @@ export async function canvasExport({
   const bitrate = getBitrate(resolution, quality);
   const mimeType = pickMimeType();
 
+  addBreadcrumb({
+    category: 'export',
+    message: 'canvasExport.start',
+    level: 'info',
+    data: { resolution, fps, quality, totalDuration, clipCount: clips?.length ?? 0 },
+  });
+
   if (!mimeType) {
+    addBreadcrumb({ category: 'export', message: 'canvasExport.no_mime_support', level: 'error' });
     throw new Error('Your browser does not support MediaRecorder for WebM. Please use Chrome or Firefox.');
   }
 
@@ -252,6 +262,7 @@ export async function canvasExport({
   const textClips = clips.filter(c => c.type === 'text' || c.type === 'sticker' || c.text?.trim());
 
   if (videoClips.length === 0) {
+    addBreadcrumb({ category: 'export', message: 'canvasExport.no_video_clips', level: 'error' });
     throw new Error('No video clips to export.');
   }
 
@@ -451,8 +462,16 @@ export async function canvasExport({
   onProgress?.({ percent: 100, elapsed: fmtTime((Date.now() - startWall) / 1000), eta: '0:00', label: 'Complete' });
 
   if (abortSignal?.aborted) {
+    addBreadcrumb({ category: 'export', message: 'canvasExport.cancelled', level: 'warning' });
     throw new Error('Export cancelled.');
   }
+
+  addBreadcrumb({
+    category: 'export',
+    message: 'canvasExport.complete',
+    level: 'info',
+    data: { sizeBytes: blob.size, duration: totalDuration, elapsedMs: Date.now() - startWall },
+  });
 
   return { blob, duration: totalDuration, size: blob.size };
 }
