@@ -1619,6 +1619,9 @@ const VideoEditor = () => {
         clips, setClips, updateClip, addClip: (clip) => {
           setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
         },
+        // Live getter — chained actions (e.g. auto-edit) need to read post-setClips state
+        // so a later step doesn't clobber clips added by an earlier one (see aiEditService).
+        getClips: () => clipsRef.current,
         splitClip, selectedClipId, mediaItems,
       }, { history, onSlowResponse: () => setAiSlowHint(true) });
 

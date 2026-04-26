@@ -31,6 +31,20 @@ const SENTENCE_ENDINGS = /[.!?]$/;
 
 const MAX_EXTRACT_DURATION = 600; // 10 min safety cap (in seconds)
 
+// Cache extracted WAV bytes by source File/Blob identity. Auto-edit fans out into
+// captions + silence detection (and silence falls back to this same extractor on
+// browsers where Web Audio rejects MP4 containers), so without this cache the
+// FFmpeg WASM extraction runs twice on the same video — usually 10–30 seconds
+// of duplicate work. The cache holds the WAV Uint8Array; consumers never mutate
+// it (chunkWav and computeRmsPerSecond both slice), so sharing one instance is safe.
+const _wavCache = new WeakMap();
+
+/** Look up a previously-extracted WAV for this File/Blob. Returns null if absent. */
+export function getCachedWav(videoFile) {
+  if (videoFile && typeof videoFile === 'object') return _wavCache.get(videoFile) || null;
+  return null;
+}
+
 /**
  * Resolve a video source (File, Blob, or blob URL string) into an
  * ArrayBuffer for Web Audio API decoding.
@@ -80,6 +94,17 @@ function buildWav(pcmSamples) {
  * @returns {Promise<Uint8Array>} WAV data
  */
 export async function extractAudio(videoFile, onExtractionProgress) {
+  // Cache hit: same File/Blob already extracted — skip the (often FFmpeg-heavy) work.
+  // String URLs aren't keyable in a WeakMap, so they always re-extract.
+  if (videoFile && typeof videoFile === 'object') {
+    const cached = _wavCache.get(videoFile);
+    if (cached) {
+      console.log('[Captions] extractAudio: cache hit, skipping re-extraction');
+      if (onExtractionProgress) onExtractionProgress(100);
+      return cached;
+    }
+  }
+
   // 1. Read the video into an ArrayBuffer
   console.log('[Captions] Step 1/3: Reading video file...');
   if (onExtractionProgress) onExtractionProgress(5);
@@ -110,7 +135,9 @@ export async function extractAudio(videoFile, onExtractionProgress) {
   }
 
   if (useFFmpegFallback) {
-    return await extractAudioViaFFmpeg(videoFile, onExtractionProgress);
+    const wavFromFFmpeg = await extractAudioViaFFmpeg(videoFile, onExtractionProgress);
+    if (videoFile && typeof videoFile === 'object') _wavCache.set(videoFile, wavFromFFmpeg);
+    return wavFromFFmpeg;
   }
 
   console.log('[Captions] Decoded:', audioBuffer.duration.toFixed(1) + 's,',
@@ -142,6 +169,7 @@ export async function extractAudio(videoFile, onExtractionProgress) {
   }
   if (onExtractionProgress) onExtractionProgress(100);
 
+  if (videoFile && typeof videoFile === 'object') _wavCache.set(videoFile, wav);
   return wav;
 }
 

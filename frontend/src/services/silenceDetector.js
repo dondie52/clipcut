@@ -18,17 +18,26 @@
  * browser.
  */
 async function decodeAudioBufferFromFile(file) {
-  const arrayBuffer = await file.arrayBuffer();
+  const { extractAudio, getCachedWav } = await import('./transcriptService');
   let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   try {
+    // If a previous action already extracted this file (auto-edit: captions before
+    // silence), skip straight to decoding the cached WAV. Avoids a wasted decode
+    // attempt on the raw container that we already know fails on this browser.
+    const cached = getCachedWav(file);
+    if (cached) {
+      const wavCopy = cached.slice().buffer;
+      return await audioCtx.decodeAudioData(wavCopy);
+    }
+
     try {
+      const arrayBuffer = await file.arrayBuffer();
       return await audioCtx.decodeAudioData(arrayBuffer.slice(0));
     } catch (err) {
       console.warn('[silenceDetector] Web Audio failed on raw file — trying FFmpeg fallback:', err?.message || err);
     }
 
     // Fallback: extract audio via FFmpeg.wasm → WAV → Web Audio decodes that cleanly.
-    const { extractAudio } = await import('./transcriptService');
     const wavBytes = await extractAudio(file);
     // `extractAudio` closed its own AudioContext when it took the Web-Audio fast
     // path; to keep decoding independent from its internals, use a fresh context.
