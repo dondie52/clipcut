@@ -20,6 +20,7 @@ import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
 import { getUserFriendlyMessage } from "../utils/errorHandling";
+import { toast } from "./Toast";
 
 const ADVISOR_DISMISSED_KEY = "clipcut-dashboard-advisor-dismissed";
 
@@ -1420,7 +1421,9 @@ const Dashboard = () => {
           p.name = derived;
           if (p._source !== "localStorage") {
             renamePromises.push(
-              updateCloudProject(p.id, user?.id, { name: derived }).catch(() => {})
+              updateCloudProject(p.id, user?.id, { name: derived }).catch((err) => {
+                logger.warn("Failed to backfill project name", { error: err, projectId: p.id });
+              })
             );
           }
         }
@@ -1506,7 +1509,7 @@ const Dashboard = () => {
         setProjects(prev => prev.filter(p => p.id !== projectId));
       } catch (err) {
         logger.error("Failed to delete project", { error: err, projectId });
-        alert(getUserFriendlyMessage(err, "project"));
+        toast.error(getUserFriendlyMessage(err, "project"));
       }
     }
   }, [user?.id]);
@@ -1792,6 +1795,8 @@ const Dashboard = () => {
                           <img
                             src={project.thumbnail}
                             alt={project.name}
+                            loading="lazy"
+                            decoding="async"
                             onError={() => setFailedThumbs(prev => new Set(prev).add(project.id))}
                           />
                         ) : (

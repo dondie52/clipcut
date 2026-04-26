@@ -749,13 +749,17 @@ const useAutoSave = (
           // Persist media files to IndexedDB so they survive page reloads
           for (const m of mediaItemsRef.current) {
             if (m.file) {
-              storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+              storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch((err) => {
+                console.warn("Failed to persist media to IndexedDB", { mediaId: m.id, error: err?.message });
+              });
             }
           }
           // Also persist background music
           const bg = bgMusicRef.current;
           if (bg?.file && bg?.mediaId) {
-            storeMedia(pid, bg.mediaId, bg.file, { name: bg.name, type: bg.file.type }).catch(() => {});
+            storeMedia(pid, bg.mediaId, bg.file, { name: bg.name, type: bg.file.type }).catch((err) => {
+              console.warn("Failed to persist background music to IndexedDB", { mediaId: bg.mediaId, error: err?.message });
+            });
           }
         }
 
@@ -785,7 +789,9 @@ const useAutoSave = (
           if (pid) {
             for (const m of mediaItemsRef.current) {
               if (m.file) {
-                storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch(() => {});
+                storeMedia(pid, m.id, m.file, { name: m.name, type: m.file.type }).catch((err) => {
+                  console.warn("Fallback media persist failed", { mediaId: m.id, error: err?.message });
+                });
               }
             }
           }

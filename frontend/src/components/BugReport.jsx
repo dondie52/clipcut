@@ -171,7 +171,7 @@ const BugReport = ({ onClose }) => {
             <label style={labelStyle}>Screenshot (optional)</label>
             {screenshot ? (
               <div style={{ position: "relative", borderRadius: "8px", overflow: "hidden", border: "1px solid rgba(255,255,255,0.1)" }}>
-                <img src={screenshot} alt="Bug screenshot" style={{ width: "100%", display: "block", maxHeight: "200px", objectFit: "contain", background: "#0a0a0a" }} />
+                <img src={screenshot} alt="Bug screenshot" loading="lazy" decoding="async" style={{ width: "100%", display: "block", maxHeight: "200px", objectFit: "contain", background: "#0a0a0a" }} />
                 <button type="button" onClick={() => setScreenshot(null)} style={{
                   position: "absolute", top: "8px", right: "8px", width: "28px", height: "28px",
                   borderRadius: "50%", background: "rgba(0,0,0,0.7)", border: "none", cursor: "pointer",

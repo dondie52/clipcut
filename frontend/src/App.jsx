@@ -15,6 +15,7 @@ import { performanceMonitor } from './utils/performance'
 import { initAnalytics, trackPageView, trackEvent, analyticsEvents, initCoreWebVitalsTracking } from './utils/analytics'
 import { onNetworkStatusChange } from './utils/errorHandling'
 import UpdateToast from './components/UpdateToast'
+import { ToastContainer } from './components/Toast'
 
 // Lazy load route components for code splitting
 const Landing = lazy(() => import('./components/Landing.jsx'))
@@ -174,6 +175,7 @@ const AppContent = () => {
       <OfflineBanner />
       <SessionTimeoutBanner />
       <UpdateToast />
+      <ToastContainer />
       <Suspense fallback={<RouteLoadingFallback />}>
         <Routes>
           {/* Public routes — redirect to dashboard if already logged in */}
