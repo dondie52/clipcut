@@ -1619,6 +1619,13 @@ const VideoEditor = () => {
         clips, setClips, updateClip, addClip: (clip) => {
           setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
         },
+        // Live getter — chained actions (e.g. auto-edit) need to read post-setClips state
+        // so a later step doesn't clobber clips added by an earlier one. clipsSnapshotRef
+        // is the convention in this file (synchronously assigned during render — see
+        // splitClip, addToTimeline, trimClip). executeAiEdit also wraps setClips with
+        // an in-tick mirror so reads between an action's setClips and the next render
+        // don't lag behind React's commit.
+        getClips: () => clipsSnapshotRef.current,
         splitClip, selectedClipId, mediaItems,
       }, { history, onSlowResponse: () => setAiSlowHint(true) });
 

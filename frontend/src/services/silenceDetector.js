@@ -18,18 +18,28 @@
  * browser.
  */
 async function decodeAudioBufferFromFile(file) {
-  const arrayBuffer = await file.arrayBuffer();
+  const { extractAudio, getCachedWav } = await import('./transcriptService');
   let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   try {
+    // Always try the raw-container decode first — it preserves the FULL audio
+    // duration. The cached WAV is produced by extractAudio, which truncates at
+    // MAX_EXTRACT_DURATION (600s); preferring the cache for long videos (>10min)
+    // would silently drop silence detection past the 10-minute mark.
     try {
+      const arrayBuffer = await file.arrayBuffer();
       return await audioCtx.decodeAudioData(arrayBuffer.slice(0));
     } catch (err) {
       console.warn('[silenceDetector] Web Audio failed on raw file — trying FFmpeg fallback:', err?.message || err);
     }
 
-    // Fallback: extract audio via FFmpeg.wasm → WAV → Web Audio decodes that cleanly.
-    const { extractAudio } = await import('./transcriptService');
-    const wavBytes = await extractAudio(file);
+    // Fallback path: when the browser can't decode the container (Firefox/Zen
+    // with MP4), reuse a previous action's extracted WAV if we have one.
+    // `extractAudio` itself caches, but reading via getCachedWav lets us skip
+    // its leading log/progress noise on a guaranteed cache hit.
+    let wavBytes = getCachedWav(file);
+    if (!wavBytes) {
+      wavBytes = await extractAudio(file);
+    }
     // `extractAudio` closed its own AudioContext when it took the Web-Audio fast
     // path; to keep decoding independent from its internals, use a fresh context.
     await audioCtx.close();
