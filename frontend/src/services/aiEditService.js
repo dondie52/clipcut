@@ -244,12 +244,28 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
 
   const actions = parsed;
 
+  // Synchronous mirror of clips so chained actions see each other's writes
+  // immediately, without waiting for React to commit and refresh clipsRef.
+  // The host's getClips() (clipsSnapshotRef.current) is updated during render
+  // — between an action's setClips and the next render, it lags behind.
+  // Wrap setClips so the mirror is updated in the same tick the updater runs,
+  // and route reads through the mirror.
+  let liveClips = editor.getClips ? editor.getClips() : editor.clips;
+  const wrappedEditor = {
+    ...editor,
+    setClips: (updater) => {
+      liveClips = typeof updater === 'function' ? updater(liveClips) : updater;
+      editor.setClips(updater);
+    },
+    getClips: () => liveClips,
+  };
+
   // Step 2: Execute each action sequentially; collect successes and failures
   const labels = [];
   const errors = [];
   for (const action of actions) {
     try {
-      const label = await executeAction(action, editor);
+      const label = await executeAction(action, wrappedEditor);
       if (label) labels.push(label);
     } catch (err) {
       // Actions (esp. ones backed by FFmpeg WASM) can reject with non-Error values
@@ -642,13 +658,24 @@ async function executeRemoveSilence(params, editor) {
 
   // Use functional setClips so we preserve any clip the prior action added between
   // closure capture and now (most importantly: caption clips from executeAddCaptions
-  // running first in auto-edit). Drop the original video clips we processed; each is
-  // either preserved as-is or replaced inside `newClips` already.
+  // running first in auto-edit). Drop the original video clips we processed and
+  // splice the replacements in at the position of the first one, so captions/stickers
+  // keep their relative order (most consumers sort by track/startTime, but anything
+  // iterating in array order — z-index, debug logs — would otherwise see drift).
   const processedIds = new Set(videoClips.map(c => c.id));
-  setClips(prev => [
-    ...newClips,
-    ...prev.filter(c => !processedIds.has(c.id)),
-  ]);
+  setClips(prev => {
+    const out = [];
+    let inserted = false;
+    for (const c of prev) {
+      if (processedIds.has(c.id)) {
+        if (!inserted) { out.push(...newClips); inserted = true; }
+        continue;
+      }
+      out.push(c);
+    }
+    if (!inserted) out.push(...newClips);
+    return out;
+  });
 
   return `Removed ${sectionsRemoved} silent section${sectionsRemoved !== 1 ? 's' : ''} (saved ${totalRemoved.toFixed(1)}s)`;
 }
@@ -854,8 +881,12 @@ function executeApplyFilter(params, editor) {
   // success message claiming "applied to N clips".
   const clips = getClips ? getClips() : editor.clips;
 
-  // Apply to selected clip, or all video clips if none selected
-  const targetClips = selectedClipId
+  // Apply to selected clip, or all video clips if none selected. If the
+  // selection was retired by an earlier chained action (e.g. remove_silence
+  // replacing the selected clip with new-ID segments), fall through to the
+  // all-video-clips branch instead of erroring out.
+  const stillSelected = selectedClipId && clips.some(c => c.id === selectedClipId);
+  const targetClips = stillSelected
     ? clips.filter(c => c.id === selectedClipId)
     : clips.filter(c => c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption);
 
