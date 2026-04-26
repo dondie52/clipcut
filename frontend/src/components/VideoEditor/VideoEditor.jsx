@@ -44,6 +44,8 @@ import Icon from './Icon';
 import { formatTimecode } from './timelineEngine';
 import { buildRestoredProjectState, hasUnavailableMediaClips } from './restoreState';
 import { shouldSkipAutoSave } from './autoSaveGuard';
+import { warmupWorker } from '../../services/workerWarmup';
+import { warmupFaceModels } from '../../services/faceDetection';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -510,6 +512,19 @@ const useAutoSave = (
   useEffect(() => {
     projectIdRef.current = projectId;
   }, [projectId]);
+
+  // Pre-warm Worker isolate + face-detection models on editor mount so the
+  // first AI action doesn't pay the cold-start tax mid-demo. Idle-scheduled so
+  // it doesn't fight the initial render for the main thread.
+  useEffect(() => {
+    const run = () => { warmupWorker(); warmupFaceModels(); };
+    if (typeof requestIdleCallback === 'function') {
+      const id = requestIdleCallback(run, { timeout: 1500 });
+      return () => cancelIdleCallback?.(id);
+    }
+    const t = setTimeout(run, 500);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     const SKIP_KEYS = new Set(["file", "blobUrl", "thumbnail", "isProcessing"]);

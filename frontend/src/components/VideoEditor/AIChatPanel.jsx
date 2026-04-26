@@ -81,6 +81,10 @@ const QUICK_ACTIONS = [
   { label: 'Make vertical', prompt: 'make it vertical for TikTok' },
   { label: 'Highlights', prompt: 'find the best 60 seconds' },
   { label: 'Extract audio', prompt: 'extract audio' },
+  { label: 'Cinematic', prompt: 'apply cinematic filter' },
+  { label: 'Remove fillers', prompt: 'remove filler words' },
+  { label: 'Zoom to speaker', prompt: 'zoom to speaker' },
+  { label: 'Add fades', prompt: 'add fade transitions' },
 ];
 
 /* ========== Message Component ========== */

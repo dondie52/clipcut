@@ -94,6 +94,16 @@ let _lastDebugData = null;
 /** Retrieve the debug data collected during the last detectFaceKeyframes + buildCropFilter run. */
 export function getLastDebugData() { return _lastDebugData; }
 
+/**
+ * Fire-and-forget pre-load of both face models (BlazeFace + MediaPipe Landmarker).
+ * Safe to call multiple times — the underlying loaders are singletons.
+ * Used to pay the 2–3s model-load cost on editor mount instead of on first action.
+ */
+export function warmupFaceModels() {
+  loadBlazeFace();
+  loadMediaPipeLandmarker();
+}
+
 // ── BlazeFace (TensorFlow.js) singleton ──────────────────────
 
 let blazeFaceModel = null;
