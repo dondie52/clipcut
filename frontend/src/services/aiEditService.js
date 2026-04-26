@@ -185,6 +185,21 @@ export function parseIntentLocally(prompt, context = {}) {
       if (to === null || to <= 0) return null;
       return [{ type: 'cut_clip', params: { from: 0, to } }];
     }],
+    // "remove the first 5 seconds" / "trim first 10s" / "delete the first 30"
+    // → cut from 0 to N. Same effect as "delete before N" but more natural phrasing.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?first\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
+      const to = parseTimeToken(m[1]);
+      if (to === null || to <= 0) return null;
+      return [{ type: 'cut_clip', params: { from: 0, to } }];
+    }],
+    // "remove the last 10 seconds" / "trim last 5s" → cut from (duration - N) to end.
+    // Needs videoDuration to compute the start point.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:the\s+)?last\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
+      const n = parseTimeToken(m[1]);
+      if (n === null || n <= 0) return null;
+      if (!videoDuration || videoDuration <= n) return null;
+      return [{ type: 'cut_clip', params: { from: videoDuration - n, to: videoDuration } }];
+    }],
     // Standalone "delete the rest" — anchor at playhead. The compound handler
     // below catches the more common "split at X then delete the rest" case and
     // anchors against the split time instead.
@@ -210,23 +225,24 @@ export function parseIntentLocally(prompt, context = {}) {
     }],
   ];
 
-  // Compound: "add captions, remove silence, and apply cinematic filter" (auto-edit)
-  if (/\bcaptions?\b/.test(p) && /\bremove\s+silence\b/.test(p) && /\bcinematic|filter\b/.test(p)) {
-    return [
-      { type: 'add_captions', params: { style: 'classic' } },
-      { type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } },
-      { type: 'apply_filter', params: { name: 'cinematic' } },
-    ];
-  }
-
-  // Compound: "split at X and (add transitions | delete the rest | delete after Y)".
-  // Run each clause through the single-clause matcher so decimal parsing and the
-  // clarifying-question path stay in one place. If either clause asks for
-  // clarification, surface that immediately.
-  // Also splits on bare " then " ("split at 1:00 then delete the rest").
-  if (/\bsplit\b/.test(p) && (/\btransitions?\b/.test(p) || /\b(?:delete|remove|trim|cut)\b/.test(p))) {
-    const clauses = p.split(/\s+and\s+(?:then\s+)?|\s+then\s+|,\s*/).map(s => s.trim()).filter(Boolean);
-
+  // Compound prompts: anything with a clause separator ("and", "then", ",") gets
+  // each clause parsed independently and the actions concatenated. Examples:
+  //   "split at 1:00 then delete the rest"        → [split, cut]
+  //   "remove the first 5 seconds and add captions" → [cut, add_captions]
+  //   "add captions, remove silence, and apply cinematic filter" → 3-action auto-edit
+  //
+  // Returns the compound result only if it produced ≥2 actions (or any clause
+  // asked for clarification). A single-action compound falls through to the
+  // single-clause walk on the whole prompt — that way phrases that happen to
+  // contain "and" but represent one intent (e.g. "remove ums and uhs") still
+  // match their named pattern below.
+  //
+  // Special case: "delete the rest" needs an anchor for where "the rest" begins.
+  // Inside a compound it resolves against the split time (if any clause is a
+  // split_clip); otherwise against the playhead. The same anchor logic also
+  // lives as a single-clause pattern above for the standalone case.
+  const clauses = p.split(/\s+and\s+(?:then\s+)?|\s+then\s+|,\s*/).map(s => s.trim()).filter(Boolean);
+  if (clauses.length >= 2) {
     // First pass: locate the split time so "delete the rest" can resolve against it.
     let splitTime = null;
     for (const clause of clauses) {
@@ -239,16 +255,12 @@ export function parseIntentLocally(prompt, context = {}) {
 
     const collected = [];
     for (const clause of clauses) {
-      // "delete the rest" / "remove the rest" — anchor against the split time
-      // (or playhead if the user said it standalone). Without an anchor we have
-      // no idea where "the rest" begins, so fall through to the Worker.
       if (/\b(?:delete|remove|trim|cut)\s+(?:the\s+)?rest\b/.test(clause)) {
         const anchor = splitTime != null ? splitTime : context.currentTime;
         if (anchor != null && Number.isFinite(anchor) && videoDuration > anchor) {
           collected.push({ type: 'cut_clip', params: { from: anchor, to: videoDuration } });
-          continue;
         }
-        return null;
+        continue;
       }
       const sub = parseIntentLocally(clause, context);
       if (!sub) continue;
