@@ -79,16 +79,20 @@ function normaliseTypos(prompt) {
   // Semicolon is one key over from colon on QWERTY — "0;26" almost always means "0:26".
   let out = prompt.replace(/(\d)\s*;\s*(\d)/g, '$1:$2');
 
-  // Fuzz-correct "split" and "transition(s)" token-by-token. Thresholds are tuned
-  // so "shift" (dist 2 to "split") is NOT coerced — only genuine near-misses hit.
+  // Fuzz-correct "split", "transition(s)", and "delete" token-by-token. Thresholds
+  // are tuned so common nearby words ("shift" dist 2 to "split", "select"/"delegate"
+  // dist >=2 to "delete") are NOT coerced — only genuine near-misses hit.
   out = out.replace(/\b[a-z]{3,14}\b/gi, (word) => {
     const lower = word.toLowerCase();
-    if (lower === 'split' || lower === 'transition' || lower === 'transitions') return word;
+    if (lower === 'split' || lower === 'transition' || lower === 'transitions' || lower === 'delete') return word;
     // "split" — very short; require distance 1 to avoid grabbing real words.
     if (lower.length >= 4 && lower.length <= 7 && editDistance(lower, 'split') === 1) return 'split';
     // "transition(s)" — allow distance 2 (missing letter + transposition is common).
     if (lower.length >= 7 && editDistance(lower, 'transitions') <= 2) return 'transitions';
     if (lower.length >= 7 && editDistance(lower, 'transition') <= 2) return 'transition';
+    // "delete" — require distance 1 ("deleate", "deleted"). Distance 2 would catch
+    // "select"/"delegate"/etc. so keep it tight.
+    if (lower.length >= 5 && lower.length <= 8 && editDistance(lower, 'delete') === 1) return 'delete';
     return word;
   });
 
@@ -167,6 +171,28 @@ export function parseIntentLocally(prompt, context = {}) {
       if (from === null || to === null) return null;
       return [{ type: 'cut_clip', params: { from, to } }];
     }],
+    // "delete after 60s" / "remove everything from 1:00 onwards" / "trim from 60 to end"
+    // → cut from X to end of video. Needs videoDuration so we know where "end" is.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?(?:after|past|from)\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?(?:\s+(?:onwards?|to\s+(?:the\s+)?end))?\b`), (m) => {
+      const from = parseTimeToken(m[1]);
+      if (from === null) return null;
+      if (!videoDuration || videoDuration <= from) return null;
+      return [{ type: 'cut_clip', params: { from, to: videoDuration } }];
+    }],
+    // "delete before 30s" / "remove everything before 0:30" → cut from 0 to X.
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?before\s+(${TIME_TOKEN})(?:\s*(?:s|sec|secs|seconds?))?\b`), (m) => {
+      const to = parseTimeToken(m[1]);
+      if (to === null || to <= 0) return null;
+      return [{ type: 'cut_clip', params: { from: 0, to } }];
+    }],
+    // Standalone "delete the rest" — anchor at playhead. The compound handler
+    // below catches the more common "split at X then delete the rest" case and
+    // anchors against the split time instead.
+    [/\b(?:delete|remove|trim|cut)\s+(?:the\s+)?rest\b/, () => {
+      const anchor = context.currentTime;
+      if (anchor == null || !Number.isFinite(anchor) || !videoDuration || videoDuration <= anchor) return null;
+      return [{ type: 'cut_clip', params: { from: anchor, to: videoDuration } }];
+    }],
     // Transitions — match a named type, or ask which one if user just said "add transitions".
     [/\badd\s+(?:a\s+|an\s+)?(fade\s*black|fade\s*white|fade|dissolve|wipe\s*left|wipe\s*right|slide\s*up|slide\s*down)\s*(?:transitions?)?\b/, (m) => {
       const name = m[1].replace(/\s+/g, '').toLowerCase();
@@ -193,13 +219,37 @@ export function parseIntentLocally(prompt, context = {}) {
     ];
   }
 
-  // Compound: "split at X and add [Y] transitions". Run each clause through the
-  // single-clause matcher so decimal parsing and the clarifying-question path stay
-  // in one place. If either clause asks for clarification, surface that immediately.
-  if (/\bsplit\b/.test(p) && /\btransitions?\b/.test(p)) {
-    const clauses = p.split(/\s+and\s+(?:then\s+)?|,\s*/).map(s => s.trim()).filter(Boolean);
+  // Compound: "split at X and (add transitions | delete the rest | delete after Y)".
+  // Run each clause through the single-clause matcher so decimal parsing and the
+  // clarifying-question path stay in one place. If either clause asks for
+  // clarification, surface that immediately.
+  // Also splits on bare " then " ("split at 1:00 then delete the rest").
+  if (/\bsplit\b/.test(p) && (/\btransitions?\b/.test(p) || /\b(?:delete|remove|trim|cut)\b/.test(p))) {
+    const clauses = p.split(/\s+and\s+(?:then\s+)?|\s+then\s+|,\s*/).map(s => s.trim()).filter(Boolean);
+
+    // First pass: locate the split time so "delete the rest" can resolve against it.
+    let splitTime = null;
+    for (const clause of clauses) {
+      const sub = parseIntentLocally(clause, context);
+      if (Array.isArray(sub) && sub[0]?.type === 'split_clip' && Number.isFinite(sub[0].params?.at)) {
+        splitTime = sub[0].params.at;
+        break;
+      }
+    }
+
     const collected = [];
     for (const clause of clauses) {
+      // "delete the rest" / "remove the rest" — anchor against the split time
+      // (or playhead if the user said it standalone). Without an anchor we have
+      // no idea where "the rest" begins, so fall through to the Worker.
+      if (/\b(?:delete|remove|trim|cut)\s+(?:the\s+)?rest\b/.test(clause)) {
+        const anchor = splitTime != null ? splitTime : context.currentTime;
+        if (anchor != null && Number.isFinite(anchor) && videoDuration > anchor) {
+          collected.push({ type: 'cut_clip', params: { from: anchor, to: videoDuration } });
+          continue;
+        }
+        return null;
+      }
       const sub = parseIntentLocally(clause, context);
       if (!sub) continue;
       if (!Array.isArray(sub)) return sub; // chat/clarification — short-circuit
