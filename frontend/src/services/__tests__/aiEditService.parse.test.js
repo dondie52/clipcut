@@ -109,6 +109,133 @@ describe('parseIntentLocally — typo tolerance', () => {
   });
 });
 
+describe('parseIntentLocally — delete after / before / the rest', () => {
+  it('parses "delete after 60s" as a cut from 60 to end', () => {
+    const r = parseIntentLocally('delete after 60s', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('parses "remove everything after 1:00" with mm:ss', () => {
+    const r = parseIntentLocally('remove everything after 1:00', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('parses "trim from 1:00 onwards"', () => {
+    const r = parseIntentLocally('trim from 1:00 onwards', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+  });
+
+  it('parses "delete before 30s" as a cut from 0 to 30', () => {
+    const r = parseIntentLocally('delete before 30s', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(30);
+  });
+
+  it('standalone "delete the rest" anchors at the playhead', () => {
+    const r = parseIntentLocally('delete the rest', { duration: 247, currentTime: 90 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(90);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('standalone "delete the rest" with no playhead falls through to the Worker', () => {
+    const r = parseIntentLocally('delete the rest', { duration: 247 });
+    expect(r).toBeNull();
+  });
+});
+
+describe('parseIntentLocally — compound "split + delete the rest"', () => {
+  it('handles "split at 1:00 then delete the rest" (the screenshot bug)', () => {
+    const r = parseIntentLocally('split at 1:00 then delete the rest', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.map(a => a.type)).toEqual(['split_clip', 'cut_clip']);
+    expect(r[0].params.at).toBe(60);
+    expect(r[1].params.from).toBe(60);
+    expect(r[1].params.to).toBe(247);
+  });
+
+  it('handles the user\'s exact "split at 1:00 then deleate the rest" (typo)', () => {
+    const r = parseIntentLocally('split at 1:00 then deleate the rest', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.map(a => a.type)).toEqual(['split_clip', 'cut_clip']);
+    expect(r[1].params.from).toBe(60);
+    expect(r[1].params.to).toBe(247);
+  });
+
+  it('handles "split at 30 and delete after 60"', () => {
+    const r = parseIntentLocally('split at 30 and delete after 60', { duration: 247 });
+    expect(r.map(a => a.type)).toEqual(['split_clip', 'cut_clip']);
+    expect(r[0].params.at).toBe(30);
+    expect(r[1].params.from).toBe(60);
+  });
+});
+
+describe('parseIntentLocally — first/last N seconds', () => {
+  it('parses "remove the first 5 seconds" as cut from 0 to 5', () => {
+    const r = parseIntentLocally('remove the first 5 seconds', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(5);
+  });
+
+  it('parses "trim first 10s" without the article', () => {
+    const r = parseIntentLocally('trim first 10s', { duration: 247 });
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(10);
+  });
+
+  it('parses "remove the last 10 seconds" relative to videoDuration', () => {
+    const r = parseIntentLocally('remove the last 10 seconds', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(237);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('refuses "remove the last 500s" when video is shorter than that', () => {
+    // Returns null so the Worker can ask the user what they actually meant.
+    const r = parseIntentLocally('remove the last 500 seconds', { duration: 247 });
+    expect(r).toBeNull();
+  });
+});
+
+describe('parseIntentLocally — generic compound prompts (no split required)', () => {
+  it('handles "remove the first 5 seconds and add captions" (the dispatcher-bug report)', () => {
+    const r = parseIntentLocally('remove the first 5 seconds and add captions', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.map(a => a.type)).toEqual(['cut_clip', 'add_captions']);
+    expect(r[0].params.from).toBe(0);
+    expect(r[0].params.to).toBe(5);
+  });
+
+  it('handles the symmetric inverse "add captions and delete after 60s"', () => {
+    const r = parseIntentLocally('add captions and delete after 60s', { duration: 247 });
+    expect(r.map(a => a.type)).toEqual(['add_captions', 'cut_clip']);
+    expect(r[1].params.from).toBe(60);
+    expect(r[1].params.to).toBe(247);
+  });
+
+  it('still handles the 3-action auto-edit compound', () => {
+    const r = parseIntentLocally(
+      'add captions, remove silence, and apply cinematic filter',
+      { duration: 247 },
+    );
+    expect(r.map(a => a.type)).toEqual(['add_captions', 'remove_silence', 'apply_filter']);
+    expect(r[2].params.name).toBe('cinematic');
+  });
+
+  it('does NOT compound when "and" is inside a single intent ("remove ums and uhs")', () => {
+    const r = parseIntentLocally('remove ums and uhs', { duration: 247 });
+    expect(r.map(a => a.type)).toEqual(['remove_filler_words']);
+  });
+});
+
 describe('parseIntentLocally — non-command prompts fall through to the Worker', () => {
   it('returns null for greetings so the Worker LLM can respond naturally', () => {
     for (const g of ['hi', 'hello', 'how are you', 'thanks', 'bye', 'help']) {
