@@ -15,10 +15,13 @@ let warmupStarted = false;
 
 export function warmupWorker() {
   if (warmupStarted) return;
-  warmupStarted = true;
 
   const url = getWorkerUrl();
+  // No URL yet (user may configure it later via Settings) — don't latch the
+  // guard so a subsequent call after configuration still gets to fire.
   if (!url) return;
+
+  warmupStarted = true;
 
   const controller = typeof AbortSignal !== 'undefined' && AbortSignal.timeout
     ? { signal: AbortSignal.timeout(5000) }

@@ -45,7 +45,6 @@ import { formatTimecode } from './timelineEngine';
 import { buildRestoredProjectState, hasUnavailableMediaClips } from './restoreState';
 import { shouldSkipAutoSave } from './autoSaveGuard';
 import { warmupWorker } from '../../services/workerWarmup';
-import { warmupFaceModels } from '../../services/faceDetection';
 
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
@@ -515,9 +514,15 @@ const useAutoSave = (
 
   // Pre-warm Worker isolate + face-detection models on editor mount so the
   // first AI action doesn't pay the cold-start tax mid-demo. Idle-scheduled so
-  // it doesn't fight the initial render for the main thread.
+  // it doesn't fight the initial render. faceDetection is dynamically imported
+  // to keep TFJS/MediaPipe out of the eager VideoEditor chunk.
   useEffect(() => {
-    const run = () => { warmupWorker(); warmupFaceModels(); };
+    const run = () => {
+      warmupWorker();
+      import('../../services/faceDetection')
+        .then((m) => m.warmupFaceModels?.())
+        .catch(() => { /* warmup is best-effort */ });
+    };
     if (typeof requestIdleCallback === 'function') {
       const id = requestIdleCallback(run, { timeout: 1500 });
       return () => cancelIdleCallback?.(id);
