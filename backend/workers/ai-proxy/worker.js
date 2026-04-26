@@ -121,7 +121,7 @@ async function handleScore(request, env) {
 /* ─── Route: POST /edit ────────────────────────────────────── */
 const VALID_ACTION_TYPES = new Set([
   'add_captions', 'remove_captions', 'remove_silence', 'cut_clip', 'split_clip',
-  'add_text', 'apply_filter', 'change_speed', 'add_music', 'add_transition',
+  'delete_clip', 'add_text', 'apply_filter', 'change_speed', 'add_music', 'add_transition',
   // Phase 2 — ML-powered actions
   'remove_filler_words', 'detect_scenes', 'auto_highlight',
   'smart_crop', 'beat_sync', 'zoom_to_speaker', 'remove_boring',
@@ -142,9 +142,10 @@ You handle TWO types of user messages:
    - add_captions: style (classic|boxed|modern|minimal)
    - remove_captions: (no params) — deletes all existing caption clips from the timeline. Use this when the user says "remove captions", "delete captions", "get rid of captions", "no captions", or similar. Never map removal requests to add_captions.
    - remove_silence: threshold (-60 to -20, default -40 dB), minDuration (0.1-2.0, default 0.5 sec)
-   - cut_clip: from (seconds), to (seconds). Always resolve to a number of seconds — e.g. "1:45" means 105.
-   - split_clip: at (seconds). Always resolve to a number of seconds — e.g. "0:26" means 26, "0.26" means 0.26 seconds.
+   - cut_clip: from (seconds), to (seconds). Always resolve to a number of seconds — e.g. "1:45" means 105, "1 minute" means 60, "2 mins" means 120, "1 hour" means 3600.
+   - split_clip: at (seconds). Always resolve to a number of seconds — e.g. "0:26" means 26, "0.26" means 0.26 seconds, "1 minute" means 60, "30 mins" means 1800, "1.5 hours" means 5400.
      If the user writes something like "0.26" on a video longer than a minute, treat it as AMBIGUOUS and respond with type:"chat" asking whether they meant 0:26 (26s) or 0.26s — do NOT guess.
+   - delete_clip: index (1-based integer for ordinal positions, or -1 for the last clip). Use this for "delete the second clip", "remove the last clip", "delete clip 3". Note that "second" here is the ordinal position, NOT a unit of time.
    - add_text: text (string), position (top|center|bottom), duration (seconds)
    - apply_filter: name (cinematic|vintage|bw|warm|cool|90s|sepia)
    - change_speed: speed (0.5|1|1.5|2|4)
