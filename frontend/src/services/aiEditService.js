@@ -165,10 +165,15 @@ export function parseIntentLocally(prompt, context = {}) {
       }
       return [{ type: 'split_clip', params: { at } }];
     }],
-    [new RegExp(String.raw`\bcut\s+(?:from\s+)?(${TIME_TOKEN})\s*(?:to|-)\s*(${TIME_TOKEN})`), (m) => {
+    // Bounded range: "cut from 0:10 to 0:30" / "delete from 60 to 120s" /
+    // "trim 30 to 60" / "remove from 1:00 until 2:00".
+    // MUST come before the open-ended "delete from X onwards" pattern below so
+    // a fully-specified range isn't truncated to "delete from X to end".
+    [new RegExp(String.raw`\b(?:cut|delete|remove|trim)\s+(?:from\s+)?(${TIME_TOKEN})\s*(?:s|sec|secs|seconds?)?\s*(?:to|-|until|through)\s*(${TIME_TOKEN})\s*(?:s|sec|secs|seconds?)?\b`), (m) => {
       const from = parseTimeToken(m[1]);
       const to = parseTimeToken(m[2]);
       if (from === null || to === null) return null;
+      if (to <= from) return null;
       return [{ type: 'cut_clip', params: { from, to } }];
     }],
     // "delete after 60s" / "remove everything from 1:00 onwards" / "trim from 60 to end"

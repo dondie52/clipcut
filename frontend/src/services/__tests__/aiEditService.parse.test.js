@@ -236,6 +236,53 @@ describe('parseIntentLocally — generic compound prompts (no split required)', 
   });
 });
 
+describe('parseIntentLocally — bounded range wins over open-ended (Codex P2)', () => {
+  it('parses "trim from 1:00 to 2:00" as a bounded cut, not trim-to-end', () => {
+    const r = parseIntentLocally('trim from 1:00 to 2:00', { duration: 247 });
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(120);
+  });
+
+  it('parses "delete from 30 to 60" with the new verb extension', () => {
+    const r = parseIntentLocally('delete from 30 to 60', { duration: 247 });
+    expect(r[0].params.from).toBe(30);
+    expect(r[0].params.to).toBe(60);
+  });
+
+  it('still parses "trim from 1:00 onwards" as trim-to-end (open-ended)', () => {
+    const r = parseIntentLocally('trim from 1:00 onwards', { duration: 247 });
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(247);
+  });
+
+  it('parses "remove from 1:00 until 2:00" with "until" as separator', () => {
+    const r = parseIntentLocally('remove from 1:00 until 2:00', { duration: 247 });
+    expect(r[0].params.from).toBe(60);
+    expect(r[0].params.to).toBe(120);
+  });
+});
+
+describe('parseIntentLocally — no infinite recursion on unsplittable prompts (Codex P1)', () => {
+  it('handles "split at 1:00 delete the rest" (no separator) without stack overflow', () => {
+    // Prior to the clauses.length >= 2 guard, the compound block re-entered
+    // itself with the same full prompt and blew the stack. Now: compound is
+    // skipped (single clause), pattern walk returns just the split.
+    const r = parseIntentLocally('split at 1:00 delete the rest', { duration: 247 });
+    expect(r).toEqual([{ type: 'split_clip', params: { at: 60 } }]);
+  });
+
+  it('handles "delete the rest split at 30" (no separator, reverse order)', () => {
+    // Same shape, opposite verb order — also must not recurse.
+    const r = parseIntentLocally('delete the rest split at 30', { duration: 247, currentTime: 0 });
+    // Standalone "delete the rest" matches first against the playhead anchor
+    // (0 → 247). The split clause is silently dropped without a separator.
+    // Either result shape is fine — the test only asserts no stack overflow
+    // and a well-formed array.
+    expect(Array.isArray(r) || r === null || (r && r.chat)).toBe(true);
+  });
+});
+
 describe('parseIntentLocally — non-command prompts fall through to the Worker', () => {
   it('returns null for greetings so the Worker LLM can respond naturally', () => {
     for (const g of ['hi', 'hello', 'how are you', 'thanks', 'bye', 'help']) {
