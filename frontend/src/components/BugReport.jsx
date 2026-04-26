@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from "react";
 import { sanitizeTextInput } from "../utils/validation";
 import { trackEvent } from "../utils/analytics";
 import { logger } from "../utils/logger";
+import { validateFile } from "../utils/fileValidation";
+import { toast } from "./Toast";
 
 const BugReport = ({ onClose }) => {
   const [title, setTitle] = useState("");
@@ -44,11 +46,16 @@ const BugReport = ({ onClose }) => {
 
   const handleFileScreenshot = (e) => {
     const file = e.target.files[0];
-    if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onloadend = () => setScreenshot(reader.result);
-      reader.readAsDataURL(file);
+    if (!file) return;
+    const result = validateFile(file, { allowedCategories: ['image'], category: 'thumbnail' });
+    if (!result.valid) {
+      toast.error(result.error || 'Invalid image');
+      e.target.value = '';
+      return;
     }
+    const reader = new FileReader();
+    reader.onloadend = () => setScreenshot(reader.result);
+    reader.readAsDataURL(file);
   };
 
   const handleSubmit = async (e) => {

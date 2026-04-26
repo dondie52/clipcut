@@ -13,6 +13,7 @@ import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { storeMedia, loadMedia, rekeyProjectMedia, listAllMedia } from '../../utils/mediaStore';
 import { sanitizeTextInput } from '../../utils/validation';
+import { validateFile } from '../../utils/fileValidation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
 import { canvasExport } from '../../services/canvasExport';
@@ -1350,8 +1351,9 @@ const VideoEditor = () => {
 
   // ---- Background music ----
   const importBgMusic = useCallback((file) => {
-    if (!file || !file.type.startsWith('audio/')) {
-      notify('warning', 'Please select an audio file');
+    const result = validateFile(file, { allowedCategories: ['audio'], category: 'audio' });
+    if (!result.valid) {
+      notify('warning', result.error || 'Please select an audio file');
       return;
     }
     // Revoke previous bg music blob

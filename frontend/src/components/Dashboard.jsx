@@ -19,6 +19,7 @@ import { listProjects as listCloudProjects, deleteProject as deleteCloudProject,
 import { trackEvent, analyticsEvents } from "../utils/analytics";
 import { logger } from "../utils/logger";
 import { sanitizeSearchQuery } from "../utils/validation";
+import { validateFiles } from "../utils/fileValidation";
 import { getUserFriendlyMessage } from "../utils/errorHandling";
 import { toast } from "./Toast";
 
@@ -1479,8 +1480,16 @@ const Dashboard = () => {
   const handleFileSelect = useCallback((e) => {
     const files = Array.from(e.target.files);
     if (files.length > 0) {
-      trackEvent(analyticsEvents.dashboardFileImport, { fileCount: files.length });
-      navigate("/editor", { state: { filesToImport: files } });
+      const { validFiles, errors } = validateFiles(files, {
+        allowedCategories: ['video', 'audio', 'image'],
+      });
+      if (errors.length > 0) {
+        toast.error(`${errors.length} file${errors.length === 1 ? '' : 's'} rejected:\n${errors.map(x => `${x.file}: ${x.error}`).join('\n')}`);
+      }
+      if (validFiles.length > 0) {
+        trackEvent(analyticsEvents.dashboardFileImport, { fileCount: validFiles.length });
+        navigate("/editor", { state: { filesToImport: validFiles } });
+      }
     }
     e.target.value = "";
   }, [navigate]);
