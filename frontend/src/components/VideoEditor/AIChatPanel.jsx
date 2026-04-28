@@ -109,6 +109,26 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
           ))}
         </div>
       )}
+      {Array.isArray(msg.applied) && msg.applied.length > 0 && (
+        <div style={{ fontSize: 11, color: COLORS.TEXT_MUTED, padding: '0 4px' }}>
+          Applied: {msg.applied.map(a => a.label || a.type).join(', ')}
+        </div>
+      )}
+      {Array.isArray(msg.skipped) && msg.skipped.length > 0 && (
+        <div style={{ fontSize: 11, color: '#f59e0b', padding: '0 4px' }}>
+          Skipped: {msg.skipped.map(a => a.type).join(', ')}
+        </div>
+      )}
+      {Array.isArray(msg.failed) && msg.failed.length > 0 && (
+        <div style={{ fontSize: 11, color: COLORS.ERROR, padding: '0 4px' }}>
+          Failed: {msg.failed.map(a => `${a.type} (${a.reason})`).join('; ')}
+        </div>
+      )}
+      {msg.undoScope && (
+        <div style={{ fontSize: 11, color: COLORS.TEXT_MUTED, padding: '0 4px' }}>
+          {msg.undoScope}
+        </div>
+      )}
       {msg.openMedia && (
         <button
           onClick={msg.openMedia}
@@ -149,14 +169,19 @@ const ChatMessage = memo(function ChatMessage({ msg }) {
 });
 
 /* ========== Thinking Indicator ========== */
-const ThinkingIndicator = memo(function ThinkingIndicator({ slowHint = false }) {
+const ThinkingIndicator = memo(function ThinkingIndicator({ slowHint = false, stage = 'parse' }) {
+  const stageLabel = stage === 'apply'
+    ? 'Applying timeline edits...'
+    : stage === 'finalize'
+      ? 'Finalizing...'
+      : 'Parsing request...';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4 }}>
       <div className="ai-msg-bubble ai-msg-assistant" style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '12px 18px' }}>
         <div className="ai-thinking-dot" />
         <div className="ai-thinking-dot" />
         <div className="ai-thinking-dot" />
-        <span style={{ marginLeft: 6, fontSize: 12, color: COLORS.TEXT_MUTED }}>Thinking...</span>
+        <span style={{ marginLeft: 6, fontSize: 12, color: COLORS.TEXT_MUTED }}>{stageLabel}</span>
       </div>
       {slowHint && (
         <div style={{ padding: '0 4px', fontSize: 11, color: COLORS.TEXT_SECONDARY, fontFamily: FONTS.PRIMARY, fontStyle: 'italic' }}>
@@ -196,6 +221,16 @@ const SuggestionCard = memo(function SuggestionCard({ suggestion, onApply }) {
         <div style={{ fontSize: 11, color: COLORS.TEXT_MUTED, fontFamily: FONTS.PRIMARY, marginTop: 1 }}>
           {suggestion.description}
         </div>
+        {suggestion.reason && (
+          <div style={{ fontSize: 10, color: COLORS.TEXT_MUTED, marginTop: 2 }}>
+            Why: {suggestion.reason}
+          </div>
+        )}
+        {suggestion.confidence && (
+          <div style={{ fontSize: 10, color: COLORS.PRIMARY_BLUE, marginTop: 2, textTransform: 'uppercase' }}>
+            {suggestion.confidence} confidence
+          </div>
+        )}
       </div>
       <Icon i="arrow_forward" s={14} c={COLORS.TEXT_MUTED} />
     </button>
@@ -208,6 +243,7 @@ const AIChatPanel = memo(function AIChatPanel({
   onClose,
   messages,
   isThinking,
+  thinkingStage = 'parse',
   slowHint = false,
   onSendMessage,
   suggestions = [],
@@ -427,7 +463,7 @@ const AIChatPanel = memo(function AIChatPanel({
         {messages.map((msg, i) => (
           <ChatMessage key={msg.id || i} msg={msg} />
         ))}
-        {isThinking && <ThinkingIndicator slowHint={slowHint} />}
+        {isThinking && <ThinkingIndicator slowHint={slowHint} stage={thinkingStage} />}
         <div ref={messagesEndRef} />
       </div>
 

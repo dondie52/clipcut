@@ -34,6 +34,8 @@ export async function analyzeVideo(clip, options = {}) {
       description: 'No captions found. Generate captions from speech.',
       action: 'add_captions',
       params: { style: 'classic' },
+      confidence: 'high',
+      reason: 'No captions detected on timeline.',
     });
   }
 
@@ -55,6 +57,8 @@ export async function analyzeVideo(clip, options = {}) {
         description: `${silentRanges.length} silent section${silentRanges.length !== 1 ? 's' : ''} detected in this clip.`,
         action: 'remove_silence',
         params: { threshold: -40, minDuration: 0.5 },
+        confidence: totalSilence >= 5 ? 'high' : 'medium',
+        reason: `${silentRanges.length} silent section${silentRanges.length !== 1 ? 's were' : ' was'} detected.`,
       });
     }
   } catch { /* silence detection failed — skip suggestion */ }
@@ -68,6 +72,8 @@ export async function analyzeVideo(clip, options = {}) {
       description: `Video is ${Math.round(clip.duration / 60)} min. Extract the best 60 seconds.`,
       action: 'auto_highlight',
       params: { duration: 60 },
+      confidence: 'medium',
+      reason: 'Long-form clip can benefit from highlight extraction.',
     });
   }
 
@@ -80,6 +86,8 @@ export async function analyzeVideo(clip, options = {}) {
       description: 'Auto-crop to 9:16 following the speaker.',
       action: 'smart_crop',
       params: { aspect: '9:16' },
+      confidence: 'medium',
+      reason: 'Vertical outputs are ideal for social short-form.',
     });
   }
 

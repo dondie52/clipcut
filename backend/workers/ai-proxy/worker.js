@@ -127,6 +127,79 @@ const VALID_ACTION_TYPES = new Set([
   'smart_crop', 'beat_sync', 'zoom_to_speaker', 'remove_boring',
 ]);
 
+const VALID_FILTERS = new Set(['cinematic', 'vintage', 'bw', 'warm', 'cool', '90s', 'sepia', 'b&w', 'black and white']);
+const VALID_TRANSITIONS = new Set(['fade', 'fadeblack', 'fadewhite', 'dissolve', 'wipeleft', 'wiperight', 'slideup', 'slidedown']);
+const VALID_SMART_CROP = new Set(['9:16', '1:1', '4:5', '16:9']);
+
+function toFiniteNumber(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function sanitizeAction(action) {
+  if (!action || typeof action !== 'object' || !VALID_ACTION_TYPES.has(action.type)) {
+    return { ok: false, error: 'Unknown action type' };
+  }
+  const params = action.params && typeof action.params === 'object' ? { ...action.params } : {};
+
+  switch (action.type) {
+    case 'remove_silence': {
+      const threshold = toFiniteNumber(params.threshold);
+      const minDuration = toFiniteNumber(params.minDuration);
+      return {
+        ok: true,
+        action: {
+          type: action.type,
+          params: {
+            threshold: threshold == null ? -40 : Math.max(-60, Math.min(-20, threshold)),
+            minDuration: minDuration == null ? 0.5 : Math.max(0.1, Math.min(2.0, minDuration)),
+          },
+        },
+      };
+    }
+    case 'cut_clip': {
+      const from = toFiniteNumber(params.from);
+      const to = toFiniteNumber(params.to);
+      if (from == null || to == null || to <= from) return { ok: false, error: 'cut_clip requires valid from/to seconds' };
+      return { ok: true, action: { type: action.type, params: { from, to } } };
+    }
+    case 'split_clip': {
+      const at = toFiniteNumber(params.at);
+      if (at == null || at <= 0) return { ok: false, error: 'split_clip requires a valid positive at value (seconds)' };
+      return { ok: true, action: { type: action.type, params: { at } } };
+    }
+    case 'delete_clip': {
+      const index = Number.isFinite(Number(params.index)) ? parseInt(params.index, 10) : null;
+      if (index == null || index === 0) return { ok: false, error: 'delete_clip requires a non-zero index' };
+      return { ok: true, action: { type: action.type, params: { index } } };
+    }
+    case 'apply_filter': {
+      const name = String(params.name || '').toLowerCase().trim();
+      if (!VALID_FILTERS.has(name)) return { ok: false, error: 'apply_filter has unsupported filter name' };
+      return { ok: true, action: { type: action.type, params: { name } } };
+    }
+    case 'change_speed': {
+      const speed = toFiniteNumber(params.speed);
+      if (![0.5, 1, 1.5, 2, 4].includes(speed)) return { ok: false, error: 'change_speed supports only 0.5, 1, 1.5, 2, 4' };
+      return { ok: true, action: { type: action.type, params: { speed } } };
+    }
+    case 'add_transition': {
+      const name = String(params.name || '').replace(/\s+/g, '').toLowerCase();
+      if (!VALID_TRANSITIONS.has(name)) return { ok: false, error: 'add_transition has unsupported transition name' };
+      const rawDuration = toFiniteNumber(params.duration);
+      const duration = rawDuration == null ? 1.0 : Math.max(0.2, Math.min(3.0, rawDuration));
+      return { ok: true, action: { type: action.type, params: { name, duration } } };
+    }
+    case 'smart_crop': {
+      const aspect = String(params.aspect || '9:16');
+      if (!VALID_SMART_CROP.has(aspect)) return { ok: false, error: 'smart_crop has unsupported aspect ratio' };
+      return { ok: true, action: { type: action.type, params: { aspect } } };
+    }
+    default:
+      return { ok: true, action: { type: action.type, params } };
+  }
+}
+
 const EDIT_SYSTEM_PROMPT = `You are a friendly video editing assistant called ClipCut AI.
 You handle TWO types of user messages:
 
@@ -154,7 +227,7 @@ You handle TWO types of user messages:
    - remove_filler_words: fillers (optional array like ['um','uh','like','you know'])
    - detect_scenes: sensitivity (low|medium|high, default medium)
    - auto_highlight: duration (seconds, default 30)
-   - smart_crop: aspect (9:16|1:1|4:5, default 9:16)
+  - smart_crop: aspect (9:16|1:1|4:5|16:9, default 9:16)
    - beat_sync: sensitivity (0.5-3.0, default 1.5)
    - zoom_to_speaker: zoomFactor (1.1-2.0, default 1.3)
    - remove_boring: threshold (1-10 engagement score, default 4)
@@ -244,12 +317,22 @@ async function handleEdit(request, env) {
   }
 
   // Validate and sanitize each action
+  const invalid = [];
   const validated = rawActions
-    .filter(a => a && typeof a === 'object' && VALID_ACTION_TYPES.has(a.type))
-    .map(a => ({ type: a.type, params: a.params || {} }));
+    .map(sanitizeAction)
+    .filter(result => {
+      if (result.ok) return true;
+      invalid.push(result.error);
+      return false;
+    })
+    .map(result => result.action);
 
   if (validated.length === 0) {
-    return jsonResponse({ type: 'chat', message: "I couldn't find a matching edit action. Try 'add captions', 'remove silence', or 'make it vertical'." });
+    return jsonResponse({
+      type: 'chat',
+      message: "I couldn't produce a safe edit action for that request. Try a more specific command like 'split at 00:26' or 'apply cinematic filter'.",
+      validationErrors: invalid,
+    });
   }
 
   console.log(`[edit] Parsed ${validated.length} action(s):`, validated.map(a => a.type));

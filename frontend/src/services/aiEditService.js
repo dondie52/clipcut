@@ -32,6 +32,12 @@ const TIME_TOKEN = String.raw`(?:\d+:\d+(?:\.\d+)?|\d*\.?\d+)`;
 // Order longer-first so "minutes" wins over "min".
 const TIME_UNIT = String.raw`(?:milliseconds?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h)`;
 
+const isMediaEditableClip = (clip) =>
+  clip && clip.type !== 'text' && clip.type !== 'sticker' && !clip.isCaption;
+
+const isVisualMediaClip = (clip) =>
+  isMediaEditableClip(clip) && clip.type !== 'audio';
+
 // Parse "0.26" → 0.26, "1:45" → 105, "30s" → 30. Returns null if unparseable.
 function parseTimeToken(raw) {
   if (typeof raw !== 'string') return null;
@@ -169,6 +175,7 @@ function normaliseTypos(prompt) {
 export function parseIntentLocally(prompt, context = {}) {
   const p = normaliseTypos(prompt.toLowerCase().trim());
   const videoDuration = Number(context.duration) || 0;
+  const looksQuestionLike = /^(?:what|why|how|when|where|who|can you explain|help|show me|tell me)\b/.test(p) || p.includes('?');
 
   // Pattern table: [regex, action builder]
   const patterns = [
@@ -179,7 +186,7 @@ export function parseIntentLocally(prompt, context = {}) {
     [/\b(?:no|without)\s+(?:captions?|subs?(?:titles?)?)\b/, () => [{ type: 'remove_captions', params: {} }]],
     [/\badd\s+(auto[- ]?)?captions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
     [/\b(?:add|generate|put|turn\s+on)\s+(?:the\s+)?subs?(?:titles?)?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
-    [/\bcaptions?\b/, () => [{ type: 'add_captions', params: { style: 'classic' } }]],
+    [/\bcaptions?\b/, () => (looksQuestionLike ? null : [{ type: 'add_captions', params: { style: 'classic' } }])],
     [/\bremove\s+silence\b/, () => [{ type: 'remove_silence', params: { threshold: -40, minDuration: 0.5 } }]],
     [/\bextract\s+(?:the\s+)?audio\b/, () => [{ type: 'extract_audio', params: { format: 'mp3' } }]],
     // Filler must match BEFORE the silence-synonym pattern below — "cut the ums" shouldn't become remove_silence.
@@ -288,6 +295,13 @@ export function parseIntentLocally(prompt, context = {}) {
       chat: true,
       message: "Which transition would you like — fade, fade black, fade white, dissolve, wipe left, wipe right, slide up, or slide down? I'll apply it between every pair of adjacent clips.",
     })],
+    [/\badd\s+text\b|\badd\s+(?:a\s+)?title\b|\bput\s+text\s+(?:on|over)\b/, () => {
+      const quoted = prompt.match(/["']([^"']+)["']/);
+      if (!quoted || !quoted[1]?.trim()) {
+        return { chat: true, message: 'What text should I add? You can say: add text "My title".' };
+      }
+      return [{ type: 'add_text', params: { text: quoted[1].trim(), position: 'center', duration: 5 } }];
+    }],
     [/\b(?:apply\s+)?(?:a\s+)?(cinematic|vintage|bw|b&w|black\s+and\s+white|warm|cool|90s|sepia)\s*filter\b/, (m) => {
       return [{ type: 'apply_filter', params: { name: m[1].replace(/\s+/g, ' ') } }];
     }],
@@ -312,7 +326,7 @@ export function parseIntentLocally(prompt, context = {}) {
   // Inside a compound it resolves against the split time (if any clause is a
   // split_clip); otherwise against the playhead. The same anchor logic also
   // lives as a single-clause pattern above for the standalone case.
-  const clauses = p.split(/\s+and\s+(?:then\s+)?|\s+then\s+|,\s*/).map(s => s.trim()).filter(Boolean);
+  const clauses = splitCompoundClauses(p);
   if (clauses.length >= 2) {
     // First pass: locate the split time so "delete the rest" can resolve against it.
     let splitTime = null;
@@ -354,6 +368,17 @@ export function parseIntentLocally(prompt, context = {}) {
   return null;
 }
 
+function splitCompoundClauses(prompt) {
+  if (!prompt) return [];
+  const protectedPrompt = prompt
+    .replace(/"[^"]*"/g, m => m.replaceAll(',', '<<comma>>').replaceAll(' and ', '<<and>>'))
+    .replace(/'[^']*'/g, m => m.replaceAll(',', '<<comma>>').replaceAll(' and ', '<<and>>'));
+  return protectedPrompt
+    .split(/\s+and\s+(?:then\s+)?|\s+then\s+|,\s*/)
+    .map(s => s.trim().replaceAll('<<comma>>', ',').replaceAll('<<and>>', ' and '))
+    .filter(Boolean);
+}
+
 /**
  * Main entry point — parse prompt via Worker, then execute actions.
  *
@@ -365,9 +390,10 @@ export function parseIntentLocally(prompt, context = {}) {
  * @returns {Promise<{summary: string, actionLabels: string[]}>}
  */
 export async function executeAiEdit(prompt, context, editor, options = {}) {
-  const { history, onSlowResponse } = options;
+  const { history, onSlowResponse, onProgress } = options;
 
   // Step 1: Parse intent via Cloudflare Worker (with conversation history)
+  onProgress?.('parse');
   const parsed = await parseIntent(prompt, context, history, onSlowResponse);
 
   // If the Worker returned a conversational reply, pass it through without executing
@@ -376,13 +402,16 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
   }
 
   const actions = parsed;
+  return executeParsedActions(actions, editor, { onProgress });
+}
 
+export async function executeStructuredAiActions(actions, editor, options = {}) {
+  return executeParsedActions(actions, editor, options);
+}
+
+async function executeParsedActions(actions, editor, options = {}) {
+  const { onProgress } = options;
   // Synchronous mirror of clips so chained actions see each other's writes
-  // immediately, without waiting for React to commit and refresh clipsRef.
-  // The host's getClips() (clipsSnapshotRef.current) is updated during render
-  // — between an action's setClips and the next render, it lags behind.
-  // Wrap setClips so the mirror is updated in the same tick the updater runs,
-  // and route reads through the mirror.
   let liveClips = editor.getClips ? editor.getClips() : editor.clips;
   const wrappedEditor = {
     ...editor,
@@ -393,13 +422,24 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
     getClips: () => liveClips,
   };
 
-  // Step 2: Execute each action sequentially; collect successes and failures
   const labels = [];
   const errors = [];
+  const applied = [];
+  const failed = [];
+  const skipped = [];
   for (const action of actions) {
     try {
+      onProgress?.('apply');
       const label = await executeAction(action, wrappedEditor);
-      if (label) labels.push(label);
+      if (!label) {
+        skipped.push({ type: action.type, reason: 'no-op' });
+      } else if (typeof label === 'object' && label.skipped) {
+        skipped.push({ type: action.type, reason: label.reason || 'skipped' });
+      } else {
+        const text = typeof label === 'string' ? label : label?.label;
+        if (text) labels.push(text);
+        applied.push({ type: action.type, label: text || action.type });
+      }
     } catch (err) {
       // Actions (esp. ones backed by FFmpeg WASM) can reject with non-Error values
       // that have no .message — rendering as the literal string "undefined" is useless.
@@ -410,7 +450,9 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
         (err && err.toString && err.toString() !== '[object Object]' ? err.toString() : null) ||
         'unknown error';
       console.error(`[AI] action '${action.type}' failed:`, err);
-      errors.push(`${action.type}: ${msg}`);
+      const detail = `${action.type}: ${msg}`;
+      errors.push(detail);
+      failed.push({ type: action.type, reason: msg });
     }
   }
 
@@ -426,7 +468,8 @@ export async function executeAiEdit(prompt, context, editor, options = {}) {
     summary = 'No actions were applied.';
   }
 
-  return { summary, actionLabels: labels };
+  onProgress?.('finalize');
+  return { summary, actionLabels: labels, applied, failed, skipped };
 }
 
 /**
@@ -509,7 +552,7 @@ async function parseIntent(prompt, context, history, onSlowResponse) {
     // Re-parse the text response through local intent parser
     const workerText = data.result?.response || data.response || data.message;
     if (workerText && attempt === 0) {
-      const reparsed = parseIntentLocally(workerText);
+      const reparsed = parseIntentLocally(workerText, context);
       if (reparsed) return reparsed;
       continue; // retry once
     }
@@ -594,7 +637,8 @@ async function executeAction(action, editor) {
 
 /* ─── Action: Remove Captions ───────────────────────────────── */
 function executeRemoveCaptions(editor) {
-  const { clips, setClips } = editor;
+  const { setClips, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const captionCount = clips.filter(c => c.isCaption).length;
   if (captionCount === 0) return 'No captions to remove';
   setClips(prev => prev.filter(c => !c.isCaption));
@@ -603,13 +647,12 @@ function executeRemoveCaptions(editor) {
 
 /* ─── Action: Add Captions ──────────────────────────────────── */
 async function executeAddCaptions(params, editor) {
-  const { clips, setClips, mediaItems } = editor;
+  const { setClips, mediaItems, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const style = params.style || 'classic';
 
   // Find the first video clip with a file we can transcribe
-  const videoClip = clips.find(c =>
-    c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl)
-  );
+  const videoClip = clips.find(c => isVisualMediaClip(c) && (c.file || c.blobUrl));
 
   if (!videoClip) {
     throw new Error('No video clip found to generate captions from. Import a video first.');
@@ -717,9 +760,7 @@ async function executeRemoveSilence(params, editor) {
   const clips = getClips ? getClips() : editor.clips;
 
   // Find video clips with audio we can analyze
-  const videoClips = clips.filter(c =>
-    c.type !== 'text' && c.type !== 'sticker' && !c.isCaption && (c.file || c.blobUrl)
-  );
+  const videoClips = clips.filter(c => isVisualMediaClip(c) && (c.file || c.blobUrl));
 
   if (videoClips.length === 0) {
     throw new Error('No clips with audio found to analyze for silence.');
@@ -727,6 +768,7 @@ async function executeRemoveSilence(params, editor) {
 
   let totalRemoved = 0;
   let sectionsRemoved = 0;
+  const removedTimelineRanges = [];
 
   // Cache silence ranges per source file. Multiple timeline clips often reference
   // the same media (e.g. a clip that was split in two) — without this we'd extract
@@ -768,11 +810,11 @@ async function executeRemoveSilence(params, editor) {
       start: clip.startTime + (r.start - trimStart),
       end:   clip.startTime + (r.end   - trimStart),
     }));
+    removedTimelineRanges.push(...timelineSilent);
 
     const keepSegments = getKeepSegments(clip.startTime, clip.startTime + clip.duration, timelineSilent);
 
     // Create new clips for each non-silent segment
-    let offset = clip.startTime;
     for (const seg of keepSegments) {
       const segDuration = seg.end - seg.start;
       if (segDuration < 0.1) continue; // skip tiny remnants
@@ -780,17 +822,31 @@ async function executeRemoveSilence(params, editor) {
       newClips.push({
         ...clip,
         id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        startTime: offset,
+        startTime: seg.start,
         duration: segDuration,
         trimStart: (clip.trimStart || 0) + (seg.start - clip.startTime),
         trimEnd: 0,
       });
-      offset += segDuration;
     }
 
     totalRemoved += totalSilenceDuration(visible);
     sectionsRemoved += visible.length;
   }
+
+  if (sectionsRemoved === 0 || totalRemoved < 0.05) {
+    return 'No silent sections detected. No timeline changes made.';
+  }
+
+  const mapTimelineTime = createRippleTimeMapper(removedTimelineRanges);
+  const shiftedNewClips = newClips
+    .map(clip => {
+      const start = mapTimelineTime(clip.startTime);
+      const end = mapTimelineTime(clip.startTime + clip.duration);
+      const duration = end - start;
+      if (duration < 0.1) return null;
+      return { ...clip, startTime: start, duration };
+    })
+    .filter(Boolean);
 
   // Use functional setClips so we preserve any clip the prior action added between
   // closure capture and now (most importantly: caption clips from executeAddCaptions
@@ -804,16 +860,69 @@ async function executeRemoveSilence(params, editor) {
     let inserted = false;
     for (const c of prev) {
       if (processedIds.has(c.id)) {
-        if (!inserted) { out.push(...newClips); inserted = true; }
+        if (!inserted) { out.push(...shiftedNewClips); inserted = true; }
         continue;
       }
-      out.push(c);
+      const shifted = shiftClipWithRipple(c, mapTimelineTime);
+      if (shifted) out.push(shifted);
     }
-    if (!inserted) out.push(...newClips);
+    if (!inserted) out.push(...shiftedNewClips);
     return out;
   });
 
   return `Removed ${sectionsRemoved} silent section${sectionsRemoved !== 1 ? 's' : ''} (saved ${totalRemoved.toFixed(1)}s)`;
+}
+
+function createRippleTimeMapper(ranges) {
+  const merged = mergeTimelineRanges(ranges);
+  if (merged.length === 0) return (t) => t;
+
+  return (time) => {
+    let removedBefore = 0;
+    for (const range of merged) {
+      if (time >= range.end) {
+        removedBefore += range.end - range.start;
+        continue;
+      }
+      if (time > range.start) {
+        removedBefore += time - range.start;
+      }
+      break;
+    }
+    return Math.max(0, time - removedBefore);
+  };
+}
+
+function mergeTimelineRanges(ranges) {
+  if (!Array.isArray(ranges) || ranges.length === 0) return [];
+  const sorted = ranges
+    .filter(r => Number.isFinite(r?.start) && Number.isFinite(r?.end) && r.end > r.start)
+    .sort((a, b) => a.start - b.start);
+  if (sorted.length === 0) return [];
+
+  const merged = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    const current = sorted[i];
+    const last = merged[merged.length - 1];
+    if (current.start <= last.end) {
+      last.end = Math.max(last.end, current.end);
+    } else {
+      merged.push({ ...current });
+    }
+  }
+  return merged;
+}
+
+function shiftClipWithRipple(clip, mapTimelineTime) {
+  const start = mapTimelineTime(clip.startTime);
+  const end = mapTimelineTime(clip.startTime + clip.duration);
+  const nextDuration = end - start;
+  if (nextDuration < 0.1) return null;
+  return {
+    ...clip,
+    startTime: start,
+    duration: nextDuration,
+  };
 }
 
 /**
@@ -840,7 +949,8 @@ function getKeepSegments(start, end, silentRanges) {
 
 /* ─── Action: Cut Clip ──────────────────────────────────────── */
 function executeCutClip(params, editor) {
-  const { clips, setClips } = editor;
+  const { setClips, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const from = params.from ?? 0;
   const to = params.to ?? 0;
 
@@ -889,7 +999,7 @@ function executeCutClip(params, editor) {
     // If clip is entirely inside cut range, it's simply removed
   }
 
-  setClips(newClips);
+  setClips(() => newClips);
   return `Cut ${from}s to ${to}s (removed ${cutDuration.toFixed(1)}s)`;
 }
 
@@ -935,7 +1045,8 @@ function executeDeleteClip(params, editor) {
 
 /* ─── Action: Split Clip ────────────────────────────────────── */
 function executeSplitClip(params, editor) {
-  const { clips, splitClip } = editor;
+  const { splitClip, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const splitTime = params.at;
 
   if (splitTime == null || !Number.isFinite(splitTime)) {
@@ -945,7 +1056,7 @@ function executeSplitClip(params, editor) {
   // Pick the clip that contains the split point. Prefer the lowest-track video clip
   // so a caption overlay at the same time doesn't win over the actual media clip.
   const candidates = clips
-    .filter(c => c.startTime <= splitTime && (c.startTime + c.duration) > splitTime && !c.isCaption)
+    .filter(c => c.startTime <= splitTime && (c.startTime + c.duration) > splitTime && isVisualMediaClip(c))
     .sort((a, b) => (a.track || 0) - (b.track || 0));
   const targetClip = candidates[0];
 
@@ -962,13 +1073,17 @@ function executeSplitClip(params, editor) {
     throw new Error(`Split point too close to the clip edge (${localOffset.toFixed(2)}s into a ${targetClip.duration.toFixed(1)}s clip).`);
   }
 
-  splitClip(targetClip.id, localOffset);
+  const didSplit = splitClip(targetClip.id, localOffset);
+  if (didSplit === false) {
+    return { skipped: true, reason: 'target clip changed before split was applied' };
+  }
   return `Split clip at ${splitTime}s`;
 }
 
 /* ─── Action: Add Transition ────────────────────────────────── */
 function executeAddTransition(params, editor) {
-  const { clips, setClips } = editor;
+  const { setClips, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const raw = String(params.name || 'fade').replace(/\s+/g, '').toLowerCase();
   if (!VALID_TRANSITIONS.includes(raw)) {
     throw new Error(`Unknown transition "${params.name}". Try: ${VALID_TRANSITIONS.join(', ')}.`);
@@ -978,7 +1093,7 @@ function executeAddTransition(params, editor) {
   // Transitions live on a clip and apply between it and the NEXT clip, so the final
   // clip on each track has nothing to transition into — exclude those.
   const videoClips = clips
-    .filter(c => c.type !== 'text' && c.type !== 'sticker' && !c.isCaption)
+    .filter(c => isMediaEditableClip(c))
     .sort((a, b) => (a.track || 0) - (b.track || 0) || a.startTime - b.startTime);
 
   if (videoClips.length < 2) {
@@ -1082,7 +1197,8 @@ function executeApplyFilter(params, editor) {
 
 /* ─── Action: Change Speed ──────────────────────────────────── */
 function executeChangeSpeed(params, editor) {
-  const { clips, setClips, selectedClipId } = editor;
+  const { setClips, selectedClipId, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const speed = params.speed;
 
   const validSpeeds = [0.5, 1, 1.5, 2, 4];
@@ -1093,7 +1209,7 @@ function executeChangeSpeed(params, editor) {
   // Apply to selected clip, or all video clips if none selected
   const targetClips = selectedClipId
     ? clips.filter(c => c.id === selectedClipId)
-    : clips.filter(c => c.type !== 'text' && c.type !== 'sticker' && !c.isCaption);
+    : clips.filter(c => isMediaEditableClip(c));
 
   if (targetClips.length === 0) {
     throw new Error('No clips to change speed on.');
@@ -1344,7 +1460,8 @@ async function executeRemoveBoring(params, editor) {
 
 /* ─── Action: Detect Scenes ─────────────────────────────────── */
 async function executeDetectScenes(params, editor) {
-  const { clips, splitClip } = editor;
+  const { splitClip, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const clip = findVideoClip(clips);
   const file = await getClipFile(clip);
 
@@ -1362,12 +1479,14 @@ async function executeDetectScenes(params, editor) {
   for (const t of timestamps) {
     const absTime = clip.startTime + t;
     // Find the clip that contains this time (may have been split already)
-    const current = editor.clips.find(c =>
+    const currentClips = getClips ? getClips() : editor.clips;
+    const current = currentClips.find(c =>
       c.startTime <= absTime && (c.startTime + c.duration) > absTime
     );
     if (current) {
-      splitClip(current.id, absTime);
-      splitCount++;
+      const localOffset = absTime - current.startTime;
+      const didSplit = splitClip(current.id, localOffset);
+      if (didSplit !== false) splitCount++;
     }
   }
 
@@ -1376,7 +1495,8 @@ async function executeDetectScenes(params, editor) {
 
 /* ─── Action: Beat Sync ─────────────────────────────────────── */
 async function executeBeatSync(params, editor) {
-  const { clips, splitClip } = editor;
+  const { splitClip, getClips } = editor;
+  const clips = getClips ? getClips() : editor.clips;
   const clip = findVideoClip(clips);
   const file = await getClipFile(clip);
   const sensitivity = Math.max(0.5, Math.min(3.0, params.sensitivity ?? 1.5));
@@ -1389,12 +1509,14 @@ async function executeBeatSync(params, editor) {
   let splitCount = 0;
   for (const t of beats) {
     const absTime = clip.startTime + t;
-    const current = editor.clips.find(c =>
+    const currentClips = getClips ? getClips() : editor.clips;
+    const current = currentClips.find(c =>
       c.startTime <= absTime && (c.startTime + c.duration) > absTime
     );
     if (current) {
-      splitClip(current.id, absTime);
-      splitCount++;
+      const localOffset = absTime - current.startTime;
+      const didSplit = splitClip(current.id, localOffset);
+      if (didSplit !== false) splitCount++;
     }
   }
 

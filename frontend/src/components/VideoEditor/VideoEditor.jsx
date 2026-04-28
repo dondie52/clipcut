@@ -966,6 +966,7 @@ const VideoEditor = () => {
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiMessages, setAiMessages] = useState([]);
   const [aiThinking, setAiThinking] = useState(false);
+  const [aiThinkingStage, setAiThinkingStage] = useState('parse');
   const [aiSlowHint, setAiSlowHint] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState([]);
   const aiUndoStackRef = useRef([]);
@@ -1072,7 +1073,9 @@ const VideoEditor = () => {
 
   const totalDuration = useMemo(() => {
     if (clips.length === 0) return 30;
-    return Math.max(30, Math.max(...clips.map(c => c.startTime + c.duration)) + 10);
+    const mediaClips = clips.filter(c => c.type !== 'text' && c.type !== 'sticker' && !c.isCaption);
+    const source = mediaClips.length > 0 ? mediaClips : clips;
+    return Math.max(...source.map(c => c.startTime + c.duration));
   }, [clips]);
 
   // Playback
@@ -1395,7 +1398,8 @@ const VideoEditor = () => {
   // ---- Split (non-destructive — instant, no FFmpeg) ----
   const splitClip = useCallback((clipId, splitTime) => {
     const clip = clipsSnapshotRef.current.find(c => c.id === clipId);
-    if (!clip) return;
+    if (!clip) return false;
+    if (!Number.isFinite(splitTime) || splitTime <= 0.1 || splitTime >= clip.duration - 0.1) return false;
 
     // Create two clips referencing the same source file.
     // trimStart tracks where each clip starts within the source.
@@ -1422,6 +1426,7 @@ const VideoEditor = () => {
     });
     setSelectedClipId(c1.id);
     notify("success", "Clip split");
+    return true;
   }, [setClips, notify]);
 
   // ---- Add clip directly (used by paste/duplicate) ----
@@ -1579,7 +1584,24 @@ const VideoEditor = () => {
   }, [navigate]);
 
   // ---- AI Edit handlers ----
-  const handleAiSendMessage = useCallback(async (text) => {
+  const formatAiError = useCallback((err) => {
+    const message = String(err?.message || err || '').toLowerCase();
+    if (message.includes('too long to respond') || message.includes('timeout')) {
+      return 'AI is taking too long right now. Try again or use a shorter command like "add captions".';
+    }
+    if (message.includes('worker') || message.includes('network') || message.includes('fetch')) {
+      return 'I could not reach the AI service. Check your internet and retry.';
+    }
+    if (message.includes('import a video first') || message.includes('no video clip found')) {
+      return 'Please import a video first, then try the AI edit again.';
+    }
+    if (message.includes('didn\'t understand') || message.includes('rephrasing')) {
+      return 'I did not understand that request. Try a clearer command like "split at 00:26".';
+    }
+    return 'I could not complete that AI edit. Please try again.';
+  }, []);
+
+  const handleAiSendMessage = useCallback(async (text, sendOptions = {}) => {
     // Rate limit: max 10 prompts per minute
     const now = Date.now();
     aiRateLimitRef.current = aiRateLimitRef.current.filter(t => now - t < 60000);
@@ -1600,22 +1622,29 @@ const VideoEditor = () => {
       if (localActions) {
         // Recognised edit command but nothing to edit — show helpful message with action
         const openMedia = () => {
-          if (isMobile) { setMobileActiveTab('media'); setMobileDrawerOpen(true); }
+          if (isMobile) {
+            setMobileActiveTab('media');
+            setMobileDrawerOpen(true);
+          } else {
+            setActiveToolbar('media');
+            setMediaTab('local');
+          }
         };
         setAiMessages(prev => [...prev, {
           id: `g-${now}`, role: 'assistant',
           text: 'Please import a video first to use AI editing.',
-          openMedia: isMobile ? openMedia : undefined,
+          openMedia,
         }]);
         return;
       }
     }
 
     setAiThinking(true);
+    setAiThinkingStage('parse');
     setAiSlowHint(false);
 
     try {
-      const { executeAiEdit } = await import('../../services/aiEditService');
+      const { executeAiEdit, executeStructuredAiActions } = await import('../../services/aiEditService');
 
       // Build richer context from current editor state
       const context = {
@@ -1643,7 +1672,8 @@ const VideoEditor = () => {
       })));
       const filesMap = new Map(clips.filter(c => c.file).map(c => [c.id, c.file]));
 
-      const result = await executeAiEdit(text, context, {
+      const runOptions = { history, onSlowResponse: () => setAiSlowHint(true), onProgress: setAiThinkingStage };
+      const editorBridge = {
         clips, setClips, updateClip, addClip: (clip) => {
           setClips(prev => [...prev, { ...DEFAULT_CLIP_PROPERTIES, id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, ...clip }]);
         },
@@ -1655,7 +1685,10 @@ const VideoEditor = () => {
         // don't lag behind React's commit.
         getClips: () => clipsSnapshotRef.current,
         splitClip, selectedClipId, mediaItems,
-      }, { history, onSlowResponse: () => setAiSlowHint(true) });
+      };
+      const result = sendOptions.structuredActions
+        ? await executeStructuredAiActions(sendOptions.structuredActions, editorBridge, { onProgress: setAiThinkingStage })
+        : await executeAiEdit(text, context, editorBridge, runOptions);
 
       // Conversational reply — no actions executed, no undo needed
       if (result.isChat) {
@@ -1669,6 +1702,10 @@ const VideoEditor = () => {
           id: `a-${Date.now()}`, role: 'assistant',
           text: result.summary || 'Done!',
           actions: result.actionLabels || [],
+          applied: result.applied || [],
+          failed: result.failed || [],
+          skipped: result.skipped || [],
+          undoScope: `Undoes all changes from this AI command (${(result.applied || []).length} action${(result.applied || []).length === 1 ? '' : 's'}).`,
           canUndo: true,
           onUndo: () => {
             const entry = aiUndoStackRef.current.find(e => e.id === undoId);
@@ -1680,6 +1717,7 @@ const VideoEditor = () => {
               setClips(restored);
               aiUndoStackRef.current = aiUndoStackRef.current.filter(e => e.id !== undoId);
               setAiMessages(prev => prev.map(m => m.id === assistantMsg.id ? { ...m, canUndo: false } : m));
+              setAiMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: 'Restored timeline to pre-AI state for that command.' }]);
               notify('info', 'AI edit undone');
             }
           },
@@ -1687,16 +1725,23 @@ const VideoEditor = () => {
         setAiMessages(prev => [...prev, assistantMsg]);
       }
     } catch (err) {
-      const errMsg = { id: `e-${Date.now()}`, role: 'assistant', text: `Error: ${err.message || 'Something went wrong. Please try again.'}` };
+      const errMsg = { id: `e-${Date.now()}`, role: 'assistant', text: formatAiError(err) };
       setAiMessages(prev => [...prev, errMsg]);
     } finally {
       setAiThinking(false);
+      setAiThinkingStage('parse');
       setAiSlowHint(false);
     }
-  }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime, aiMessages]);
+  }, [clips, setClips, updateClip, splitClip, selectedClipId, mediaItems, totalDuration, pb.currentTime, aiMessages, formatAiError]);
 
   // Apply a suggestion card (same as sending a prompt but with known action)
   const handleAiSuggestion = useCallback((suggestion) => {
+    if (suggestion?.action) {
+      const syntheticPrompt = `Apply suggestion: ${suggestion.title}`;
+      const structuredActions = [{ type: suggestion.action, params: suggestion.params || {} }];
+      handleAiSendMessage(syntheticPrompt, { structuredActions });
+      return;
+    }
     handleAiSendMessage(suggestion.title);
   }, [handleAiSendMessage]);
 
@@ -2762,6 +2807,7 @@ const VideoEditor = () => {
                 onClose={() => setAiPanelOpen(false)}
                 messages={aiMessages}
                 isThinking={aiThinking}
+                thinkingStage={aiThinkingStage}
                 slowHint={aiSlowHint}
                 onSendMessage={handleAiSendMessage}
                 suggestions={aiSuggestions}
@@ -2941,6 +2987,7 @@ const VideoEditor = () => {
                     onClose={() => setMobileDrawerOpen(false)}
                     messages={aiMessages}
                     isThinking={aiThinking}
+                    thinkingStage={aiThinkingStage}
                     slowHint={aiSlowHint}
                     onSendMessage={handleAiSendMessage}
                     suggestions={aiSuggestions}
