@@ -47,6 +47,42 @@ import { buildRestoredProjectState, hasUnavailableMediaClips } from './restoreSt
 import { shouldSkipAutoSave } from './autoSaveGuard';
 import { warmupWorker } from '../../services/workerWarmup';
 
+const DEBUG_LOG_ENDPOINT = 'http://127.0.0.1:7548/ingest/6a46b320-d8b5-43ce-8840-a981f4bbeaac';
+const DEBUG_SESSION_ID = '199465';
+
+function summarizeClipsForDebug(clips = []) {
+  const items = Array.isArray(clips) ? clips : [];
+  const ordered = [...items]
+    .sort((a, b) => (a.startTime || 0) - (b.startTime || 0))
+    .map((c) => `${c.id || 'no-id'}:${c.type || 'unknown'}:${Number(c.startTime || 0).toFixed(2)}:${Number(c.duration || 0).toFixed(2)}`);
+  const tail = ordered.slice(0, 12).join('|');
+  const lastEnd = items.reduce((max, c) => Math.max(max, Number(c.startTime || 0) + Number(c.duration || 0)), 0);
+  return {
+    count: items.length,
+    lastEnd: Number(lastEnd.toFixed(3)),
+    signature: tail,
+  };
+}
+
+function emitDebugLog({ hypothesisId, location, message, data = {}, runId = 'pre-fix' }) {
+  fetch(DEBUG_LOG_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': DEBUG_SESSION_ID,
+    },
+    body: JSON.stringify({
+      sessionId: DEBUG_SESSION_ID,
+      runId,
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+
 /* ========== CSS ========== */
 const VIDEO_EDITOR_CSS = `
   /* Ensure Material Symbols font renders immediately with swap fallback */
@@ -442,7 +478,7 @@ function slugifyFilename(raw) {
 }
 
 /** Upload local media files to project storage; updates clips with storagePath for reload. */
-async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips, setMediaItems, setClips) {
+async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips, setMediaItems, setClips, getLatestClips) {
   const uploaded = new Map();
   for (const m of mediaItems) {
     if (!m.file || m.storagePath) continue;
@@ -459,6 +495,21 @@ async function uploadPendingMediaForProject(userId, projectId, mediaItems, clips
     const p = c.mediaId && uploaded.get(c.mediaId);
     return p ? { ...c, storagePath: p } : c;
   });
+  const latestClips = typeof getLatestClips === 'function' ? getLatestClips() : clips;
+  // #region agent log
+  emitDebugLog({
+    hypothesisId: 'H1',
+    location: 'VideoEditor.jsx:uploadPendingMediaForProject',
+    message: 'media upload finished; checking stale timeline overwrite risk',
+    data: {
+      projectId,
+      uploadedCount: uploaded.size,
+      saveSnapshot: summarizeClipsForDebug(clips),
+      latestBeforeApply: summarizeClipsForDebug(latestClips),
+      replacementState: summarizeClipsForDebug(newClips),
+    },
+  });
+  // #endregion
   setMediaItems(newMedia);
   setClips(newClips);
   return { changed: true, clips: newClips, mediaItems: newMedia };
@@ -581,6 +632,22 @@ const useAutoSave = (
         clipsCount: pendingClipsCount,
         mediaItemsCount: pendingMediaCount,
       });
+      // #region agent log
+      emitDebugLog({
+        hypothesisId: 'H4',
+        location: 'VideoEditor.jsx:useAutoSave.doSave.guard',
+        message: 'autosave guard evaluated',
+        data: {
+          projectId: projectIdRef.current,
+          guardSkip: guard.skip,
+          guardReason: guard.reason,
+          isRestored: isRestoreCompleteRef ? isRestoreCompleteRef.current : true,
+          hasBeenNonEmpty: hasBeenNonEmptyRef.current,
+          clipsCount: pendingClipsCount,
+          mediaItemsCount: pendingMediaCount,
+        },
+      });
+      // #endregion
       if (guard.skip) return { saved: false, skipReason: guard.reason };
 
       // Exponential backoff: after consecutive failures, skip ticks to avoid spamming
@@ -612,6 +679,18 @@ const useAutoSave = (
           resolution: resolutionRef.current || "1080p",
           timelineMarkers: timelineMarkersRef.current || [],
         };
+        // #region agent log
+        emitDebugLog({
+          hypothesisId: 'H2',
+          location: 'VideoEditor.jsx:useAutoSave.doSave.snapshot',
+          message: 'autosave snapshot captured',
+          data: {
+            projectId: projectIdRef.current,
+            clips: summarizeClipsForDebug(currentClips),
+            mediaItemsCount: currentMedia.length,
+          },
+        });
+        // #endregion
 
         if (currentBg?.storagePath || currentBg?.mediaId) {
           projectData.bgMusic = {
@@ -690,7 +769,8 @@ const useAutoSave = (
               mediaItemsRef.current,
               clipsRef.current,
               setMediaItems,
-              setClips
+              setClips,
+              () => clipsRef.current
             );
             if (uploadResult.changed) {
               clipsRef.current = uploadResult.clips;
@@ -1735,6 +1815,19 @@ const VideoEditor = () => {
       if (result.isChat) {
         setAiMessages(prev => [...prev, { id: `a-${Date.now()}`, role: 'assistant', text: result.summary }]);
       } else {
+        // #region agent log
+        emitDebugLog({
+          hypothesisId: 'H2',
+          location: 'VideoEditor.jsx:handleAiSendMessage',
+          message: 'ai edit applied to timeline',
+          data: {
+            projectId,
+            actionLabels: result.actionLabels || [],
+            appliedCount: (result.applied || []).length,
+            clipsAfterAi: summarizeClipsForDebug(clipsSnapshotRef.current),
+          },
+        });
+        // #endregion
         // Store undo snapshot
         const undoId = `ai-${Date.now()}`;
         aiUndoStackRef.current.push({ id: undoId, snapshot, filesMap });
@@ -2278,6 +2371,19 @@ const VideoEditor = () => {
     const restoreProject = async () => {
       setIsProcessing(true);
       setLoadMsg("Restoring media...");
+      // #region agent log
+      emitDebugLog({
+        hypothesisId: 'H3',
+        location: 'VideoEditor.jsx:restoreProject.start',
+        message: 'restore project effect started',
+        data: {
+          projectId,
+          stateProjectId,
+          urlProjectId,
+          hasRestoredFor: hasRestoredRef.current,
+        },
+      });
+      // #endregion
       try {
         let pData = projectData;
         if (!pData) {
@@ -2580,6 +2686,18 @@ const VideoEditor = () => {
 
         setMediaItems(restoredState.mediaItems);
         setClips(restoredState.clips);
+        // #region agent log
+        emitDebugLog({
+          hypothesisId: 'H3',
+          location: 'VideoEditor.jsx:restoreProject.applyState',
+          message: 'restore applied timeline state',
+          data: {
+            projectId,
+            restoredClips: summarizeClipsForDebug(restoredState.clips),
+            restoredMediaItems: restoredState.mediaItems.length,
+          },
+        });
+        // #endregion
         await restoreBgMusic(pData);
 
         // Asynchronously regenerate metadata and thumbnails for restored media items
