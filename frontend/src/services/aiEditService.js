@@ -116,6 +116,10 @@ function editDistance(a, b) {
 function normaliseTypos(prompt) {
   // Semicolon is one key over from colon on QWERTY — "0;26" almost always means "0:26".
   let out = prompt.replace(/(\d)\s*;\s*(\d)/g, '$1:$2');
+  // Common "second(s)" misspellings from voice/fast typing.
+  out = out
+    .replace(/\b(?:secound|scound)\b/gi, 'second')
+    .replace(/\b(?:secounds|scounds)\b/gi, 'seconds');
 
   // Fuzz-correct "split", "transition(s)", "delete", and time-unit words token-by-token.
   // Thresholds are tuned so common nearby words ("shift" dist 2 to "split",
@@ -160,6 +164,9 @@ function normaliseTypos(prompt) {
   return out;
 }
 
+const isVisualTransitionClip = (clip) =>
+  clip && !clip.isCaption && clip.type !== 'audio' && clip.type !== 'text' && clip.type !== 'sticker';
+
 /**
  * Local intent parser — matches common editing commands to structured actions
  * without requiring a network call.
@@ -175,6 +182,7 @@ function normaliseTypos(prompt) {
 export function parseIntentLocally(prompt, context = {}) {
   const p = normaliseTypos(prompt.toLowerCase().trim());
   const videoDuration = Number(context.duration) || 0;
+  const prefersGlobalTransitions = /\b(?:all|every)\b[\w\s]{0,24}\bclips?\b/.test(p);
   const looksQuestionLike = /^(?:what|why|how|when|where|who|can you explain|help|show me|tell me)\b/.test(p) || p.includes('?');
 
   // Pattern table: [regex, action builder]
@@ -244,6 +252,15 @@ export function parseIntentLocally(prompt, context = {}) {
       }
       return [{ type: 'split_clip', params: { at } }];
     }],
+    // Many users say "cut at 30s" when they mean "split at 30s".
+    [new RegExp(String.raw`\bcut\s+at\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?\b`), (m) => {
+      const raw = m[1];
+      const unit = m[2];
+      const base = parseTimeToken(raw);
+      if (base === null) return null;
+      const at = applyTimeUnit(base, unit, raw);
+      return [{ type: 'split_clip', params: { at } }];
+    }],
     [new RegExp(String.raw`\bcut\s+(?:from\s+)?(${TIME_TOKEN})\s*(${TIME_UNIT})?\s*(?:to|-)\s*(${TIME_TOKEN})\s*(${TIME_UNIT})?`), (m) => {
       const from = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       const to = applyTimeUnit(parseTimeToken(m[3]), m[4] || m[2], m[3]);
@@ -252,7 +269,7 @@ export function parseIntentLocally(prompt, context = {}) {
     }],
     // "delete after 60s" / "remove everything from 1:00 onwards" / "trim from 1 minute to end"
     // → cut from X to end of video. Needs videoDuration so we know where "end" is.
-    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:everything\s+)?(?:after|past|from)\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?(?:\s+(?:onwards?|to\s+(?:the\s+)?end))?\b`), (m) => {
+    [new RegExp(String.raw`\b(?:delete|remove|cut|trim)\s+(?:(?:everything|anything)\s+)?(?:after|past|from)\s+(${TIME_TOKEN})\s*(${TIME_UNIT})?(?:\s+(?:onwards?|to\s+(?:the\s+)?end))?\b`), (m) => {
       const from = applyTimeUnit(parseTimeToken(m[1]), m[2], m[1]);
       if (from === null) return null;
       if (!videoDuration || videoDuration <= from) return null;
@@ -289,7 +306,10 @@ export function parseIntentLocally(prompt, context = {}) {
     // Transitions — match a named type, or ask which one if user just said "add transitions".
     [/\badd\s+(?:a\s+|an\s+)?(fade\s*black|fade\s*white|fade|dissolve|wipe\s*left|wipe\s*right|slide\s*up|slide\s*down)\s*(?:transitions?)?\b/, (m) => {
       const name = m[1].replace(/\s+/g, '').toLowerCase();
-      return [{ type: 'add_transition', params: { name } }];
+      const params = { name };
+      if (prefersGlobalTransitions) params.target = 'all';
+      else if (Number.isFinite(context.currentTime)) params.targetTime = context.currentTime;
+      return [{ type: 'add_transition', params }];
     }],
     [/\badd\s+(?:a\s+|an\s+|some\s+)?transitions?\b/, () => ({
       chat: true,
@@ -352,7 +372,20 @@ export function parseIntentLocally(prompt, context = {}) {
       if (!Array.isArray(sub)) return sub; // chat/clarification — short-circuit
       collected.push(...sub);
     }
-    if (collected.length >= 2) return collected;
+    if (collected.length >= 2) {
+      // Bind a transition clause to the split boundary when both are present.
+      const split = collected.find(a => a?.type === 'split_clip' && Number.isFinite(a?.params?.at));
+      if (split) {
+        for (const action of collected) {
+          if (action?.type !== 'add_transition') continue;
+          action.params = action.params || {};
+          if (action.params.target !== 'all' && !Number.isFinite(action.params.targetTime)) {
+            action.params.targetTime = split.params.at;
+          }
+        }
+      }
+      return collected;
+    }
   }
 
   for (const [regex, builder] of patterns) {
@@ -1089,27 +1122,51 @@ function executeAddTransition(params, editor) {
     throw new Error(`Unknown transition "${params.name}". Try: ${VALID_TRANSITIONS.join(', ')}.`);
   }
   const duration = Math.max(0.2, Math.min(3.0, params.duration ?? 1.0));
+  const targetMode = params.target === 'all' ? 'all' : 'boundary';
+  const targetTime = Number.isFinite(params.targetTime) ? params.targetTime : null;
+  const leftClipId = params.leftClipId ? String(params.leftClipId) : null;
 
   // Transitions live on a clip and apply between it and the NEXT clip, so the final
   // clip on each track has nothing to transition into — exclude those.
   const videoClips = clips
-    .filter(c => isMediaEditableClip(c))
+    .filter(c => isVisualTransitionClip(c))
     .sort((a, b) => (a.track || 0) - (b.track || 0) || a.startTime - b.startTime);
 
   if (videoClips.length < 2) {
     throw new Error('Need at least 2 clips on the timeline to add a transition between them.');
   }
 
-  const lastOnTrack = new Map();
-  for (const c of videoClips) {
-    const t = c.track || 0;
-    const prev = lastOnTrack.get(t);
-    if (!prev || c.startTime > prev.startTime) lastOnTrack.set(t, c);
+  const contiguousPairs = [];
+  for (let i = 0; i < videoClips.length - 1; i += 1) {
+    const left = videoClips[i];
+    const right = videoClips[i + 1];
+    if ((left.track || 0) !== (right.track || 0)) continue;
+    const boundary = left.startTime + left.duration;
+    if (Math.abs(boundary - right.startTime) > 0.08) continue;
+    contiguousPairs.push({ left, right, boundary });
   }
-  const skipIds = new Set([...lastOnTrack.values()].map(c => c.id));
-  const targetIds = new Set(videoClips.filter(c => !skipIds.has(c.id)).map(c => c.id));
+
+  const targetIds = new Set();
+  if (targetMode === 'all') {
+    contiguousPairs.forEach(p => targetIds.add(p.left.id));
+  } else if (leftClipId) {
+    if (contiguousPairs.some(p => p.left.id === leftClipId)) targetIds.add(leftClipId);
+  } else if (targetTime != null) {
+    let best = null;
+    for (const p of contiguousPairs) {
+      const d = Math.abs(p.boundary - targetTime);
+      if (!best || d < best.d) best = { d, p };
+    }
+    if (best && best.d <= 1.0) targetIds.add(best.p.left.id);
+  } else {
+    // Backward-compatible fallback for old commands with no targeting hints.
+    contiguousPairs.forEach(p => targetIds.add(p.left.id));
+  }
 
   if (targetIds.size === 0) {
+    if (targetMode !== 'all') {
+      throw new Error('No split boundary found near the requested point to add a transition.');
+    }
     throw new Error('No adjacent clips found to bridge with a transition.');
   }
 
@@ -1117,6 +1174,9 @@ function executeAddTransition(params, editor) {
     targetIds.has(c.id) ? { ...c, transition: raw, transitionDuration: duration } : c
   ));
 
+  if (targetMode !== 'all' && targetIds.size === 1) {
+    return `Added ${raw} transition at the requested split point`;
+  }
   return `Added ${raw} transition between ${targetIds.size} pair${targetIds.size !== 1 ? 's' : ''} of clips`;
 }
 

@@ -665,12 +665,14 @@ const Player = ({
   selectedClipId = null,
   onClipUpdate = null,
   onSelectClip = null,
+  transitionPreview = null,
   hasTimelineClips = false,
   hasUnavailableMediaClips = false,
   isRestoringMedia = false,
 }) => {
   const isMobile = useMobile();
   const videoRef = useRef(null);
+  const nextVideoRef = useRef(null);
   const containerRef = useRef(null);
   const videoCanvasRef = useRef(null);
   const [dTime, setDTime] = useState(currentTime);
@@ -864,6 +866,20 @@ const Player = ({
     v.addEventListener("pause", handleBrowserPause);
     return () => v.removeEventListener("pause", handleBrowserPause);
   }, [videoSrc, onPlayPause]);
+
+  // Keep transition overlay video in lockstep with the main player.
+  useEffect(() => {
+    const v = nextVideoRef.current;
+    if (!v || !transitionPreview?.nextVideoSrc) return;
+    const target = Number.isFinite(transitionPreview.nextTime) ? transitionPreview.nextTime : 0;
+    if (Math.abs((v.currentTime || 0) - target) > 0.08) v.currentTime = target;
+    if (isPlaying) {
+      const p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } else {
+      v.pause();
+    }
+  }, [transitionPreview?.nextVideoSrc, transitionPreview?.nextTime, isPlaying]);
 
   useEffect(() => { if (videoRef.current) { videoRef.current.volume = volume; videoRef.current.muted = muted; } }, [volume, muted]);
   useEffect(() => { if (videoRef.current) videoRef.current.playbackRate = speed; }, [speed]);
@@ -1219,6 +1235,45 @@ const Player = ({
                         };
                       })()}
                     />
+                    {transitionPreview?.nextVideoSrc && (
+                      <video
+                        ref={nextVideoRef}
+                        src={transitionPreview.nextVideoSrc}
+                        preload="auto"
+                        muted
+                        playsInline
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          height: "100%",
+                          objectFit: fitStyles[fitMode],
+                          opacity:
+                            transitionPreview.type === 'fadeblack'
+                              ? Math.max(0, (transitionPreview.progress - 0.5) * 2)
+                              : transitionPreview.progress,
+                          pointerEvents: "none",
+                          zIndex: 2,
+                        }}
+                      />
+                    )}
+                    {transitionPreview?.nextVideoSrc && transitionPreview.type === 'fadeblack' && (
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          inset: 0,
+                          background: "#000",
+                          pointerEvents: "none",
+                          zIndex: 3,
+                          opacity: transitionPreview.progress < 0.5
+                            ? transitionPreview.progress * 2
+                            : (1 - transitionPreview.progress) * 2,
+                        }}
+                      />
+                    )}
                     {videoPreviewStyle._hasVignette && (
                       <div className="clipcut-vignette-overlay" aria-hidden="true" />
                     )}

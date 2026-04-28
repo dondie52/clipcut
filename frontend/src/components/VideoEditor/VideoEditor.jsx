@@ -1148,6 +1148,47 @@ const VideoEditor = () => {
     return result;
   }, [clips, pb.currentTime]);
 
+  const transitionPreview = useMemo(() => {
+    const left = pb.currentClip;
+    if (!left || !left.transition) return null;
+    if (left.type === 'audio' || left.type === 'text' || left.type === 'sticker' || left.isCaption) return null;
+    if (!left.blobUrl) return null;
+
+    const duration = Math.max(0.2, Math.min(3.0, left.transitionDuration ?? 1));
+    const trimStart = left.trimStart || 0;
+    const localTime = Math.max(0, pb.clipOffset - trimStart);
+    const transitionStart = Math.max(0, left.duration - duration);
+    if (localTime < transitionStart) return null;
+
+    const boundary = left.startTime + left.duration;
+    const next = clips
+      .filter((c) =>
+        c.id !== left.id &&
+        !c.isCaption &&
+        c.type !== 'audio' &&
+        c.type !== 'text' &&
+        c.type !== 'sticker' &&
+        (c.track || 0) === (left.track || 0) &&
+        c.startTime >= boundary - 0.08 &&
+        c.startTime <= boundary + 0.08
+      )
+      .sort((a, b) => a.startTime - b.startTime)[0];
+    if (!next?.blobUrl) return null;
+
+    const progress = Math.max(0, Math.min(1, (localTime - transitionStart) / duration));
+    const nextLocalTime = (next.trimStart || 0) + Math.max(0, localTime - transitionStart);
+
+    return {
+      type: left.transition,
+      duration,
+      progress,
+      nextVideoSrc: next.blobUrl,
+      nextTime: nextLocalTime,
+      leftClipId: left.id,
+      rightClipId: next.id,
+    };
+  }, [pb.currentClip, pb.clipOffset, clips]);
+
   // ---- Clip mutations (push to undo stack) ----
   // Use a ref to always read the latest clips inside the callback,
   // so the callback identity is stable and doesn't cascade re-renders.
@@ -2771,6 +2812,7 @@ const VideoEditor = () => {
                 selectedClipId={selectedClipId}
                 onClipUpdate={updateClip}
                 onSelectClip={setSelectedClipId}
+                transitionPreview={transitionPreview}
                 hasTimelineClips={clips.some(c => c.type !== 'audio' && c.type !== 'text')}
                 hasUnavailableMediaClips={hasMissingPlayableMedia}
                 isRestoringMedia={isProcessing && loadMsg.includes('Restoring')}

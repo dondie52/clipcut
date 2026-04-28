@@ -34,14 +34,24 @@ describe('parseIntentLocally — split time parsing', () => {
 
 describe('parseIntentLocally — transitions', () => {
   it('parses a named transition', () => {
-    const r = parseIntentLocally('add a fade transition', { duration: 60 });
+    const r = parseIntentLocally('add a fade transition', { duration: 60, currentTime: 12 });
     expect(r[0].type).toBe('add_transition');
     expect(r[0].params.name).toBe('fade');
+    expect(r[0].params.targetTime).toBe(12);
   });
 
   it('parses multi-word transition names', () => {
-    const r = parseIntentLocally('add wipe left transitions', { duration: 60 });
+    const r = parseIntentLocally('add wipe left transitions', { duration: 60, currentTime: 8 });
     expect(r[0].params.name).toBe('wipeleft');
+    expect(r[0].params.targetTime).toBe(8);
+  });
+
+  it('keeps global application when explicitly requested', () => {
+    const r = parseIntentLocally('add fade black transition to all clips', { duration: 60, currentTime: 8 });
+    expect(r[0].type).toBe('add_transition');
+    expect(r[0].params.name).toBe('fadeblack');
+    expect(r[0].params.target).toBe('all');
+    expect(r[0].params.targetTime).toBeUndefined();
   });
 
   it('asks which transition when unspecified', () => {
@@ -58,6 +68,7 @@ describe('parseIntentLocally — compound "split + transition"', () => {
     expect(r.map(a => a.type)).toEqual(['split_clip', 'add_transition']);
     expect(r[0].params.at).toBe(26);
     expect(r[1].params.name).toBe('fade');
+    expect(r[1].params.targetTime).toBe(26);
   });
 
   it('surfaces clarification if the split time is ambiguous', () => {
@@ -349,6 +360,18 @@ describe('parseIntentLocally — minute / second typo tolerance', () => {
     const r = parseIntentLocally('split at 30 secound', { duration: 247 });
     expect(r[0].params.at).toBe(30);
   });
+
+  it('handles "secounds" (common misspelling) as seconds', () => {
+    const r = parseIntentLocally('split at 30 secounds', { duration: 247 });
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(30);
+  });
+
+  it('handles "scounds" (dropped e) as seconds', () => {
+    const r = parseIntentLocally('split at 30 scounds', { duration: 247 });
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(30);
+  });
 });
 
 describe('parseIntentLocally — delete the Nth clip', () => {
@@ -392,5 +415,22 @@ describe('parseIntentLocally — delete the Nth clip', () => {
     expect(r[0].type).toBe('cut_clip');
     expect(r[0].params.from).toBe(0);
     expect(r[0].params.to).toBe(5);
+  });
+});
+
+describe('parseIntentLocally — natural command variants', () => {
+  it('treats "cut at 30 seconds" as a split request', () => {
+    const r = parseIntentLocally('cut at 30 seconds', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('split_clip');
+    expect(r[0].params.at).toBe(30);
+  });
+
+  it('parses "delete anything after 30 scounds" as cut to end', () => {
+    const r = parseIntentLocally('delete anything after 30 scounds', { duration: 247 });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r[0].type).toBe('cut_clip');
+    expect(r[0].params.from).toBe(30);
+    expect(r[0].params.to).toBe(247);
   });
 });
