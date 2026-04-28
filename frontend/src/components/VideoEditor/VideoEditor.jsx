@@ -1731,7 +1731,7 @@ const VideoEditor = () => {
     }
   }, []);
 
-  // ---- Export via Canvas + MediaRecorder (no FFmpeg) ----
+  // ---- Export via local canvas render + optional server MP4 transcode ----
   const handleExport = useCallback(async (res, settings = {}) => {
     if (clips.length === 0) {
       notify("warning", "No clips to export. Add media to the timeline first.");
@@ -1775,26 +1775,77 @@ const VideoEditor = () => {
     exportAbortRef.current = abort;
 
     try {
-      const result = await canvasExport({
-        clips: [...vClips, ...clips.filter(c => c.type === 'text' || c.type === 'sticker')],
+      const requestedFormat = String(settings.format || 'webm').toLowerCase() === 'mp4' ? 'mp4' : 'webm';
+      const exportClipsWithText = [...vClips, ...clips.filter(c => c.type === 'text' || c.type === 'sticker')];
+      const computedDuration = Math.max(...vClips.map(c => c.startTime + c.duration));
+
+      const localRender = await canvasExport({
+        clips: exportClipsWithText,
         bgMusic,
-        totalDuration: Math.max(...vClips.map(c => c.startTime + c.duration)),
+        totalDuration: computedDuration,
         resolution: exportResolution,
-        settings,
+        settings: { ...settings, format: 'webm' },
         onProgress: ({ percent, elapsed, eta, label }) => {
-          setExportProgress(percent);
-          setLoadMsg(label || 'Exporting...');
-          setLoadSub(`${percent}%  ·  Elapsed ${elapsed}  ·  ETA ${eta}`);
+          // For MP4 exports, reserve progress headroom for upload/transcode.
+          const mappedPercent = requestedFormat === 'mp4'
+            ? Math.min(70, Math.round(percent * 0.7))
+            : percent;
+          setExportProgress(mappedPercent);
+          setLoadMsg(requestedFormat === 'mp4' ? 'Rendering local preview stream...' : (label || 'Exporting...'));
+          setLoadSub(`${mappedPercent}%  ·  Elapsed ${elapsed}  ·  ETA ${eta}`);
         },
         abortSignal: abort.signal,
       });
 
-      if (!result.blob || result.blob.size === 0) {
+      if (!localRender.blob || localRender.blob.size === 0) {
         throw new Error("Export produced an empty file.");
       }
 
-      downloadBlob(result.blob, settings.filename || projectName, settings.format || 'webm');
-      notify("success", `Exported at ${exportResolution} (${(result.size / (1024 * 1024)).toFixed(1)} MB)`);
+      let finalBlob = localRender.blob;
+      let finalFormat = 'webm';
+
+      if (requestedFormat === 'mp4') {
+        setLoadMsg('Checking server encoder...');
+        setLoadSub('Validating MP4 export service availability...');
+        const serverAvailable = await isServerExportAvailable();
+
+        if (!serverAvailable) {
+          notify("warning", "MP4 server is unavailable right now. Exported WebM locally instead.");
+        } else {
+          try {
+            setLoadMsg('Uploading to MP4 encoder...');
+            setLoadSub('Uploading render to server for fast MP4 transcode...');
+            const mp4Blob = await serverExport(
+              localRender.blob,
+              exportResolution,
+              {},
+              (uploadPct) => {
+                const mappedPct = Math.min(98, 70 + Math.round((uploadPct / 100) * 28));
+                setExportProgress(mappedPct);
+                setLoadMsg('Server encoding MP4...');
+                setLoadSub(`${mappedPct}%  ·  Upload + transcode in progress`);
+              },
+              abort.signal
+            );
+
+            if (mp4Blob && mp4Blob.size > 0) {
+              finalBlob = mp4Blob;
+              finalFormat = 'mp4';
+            } else {
+              notify("warning", "MP4 conversion returned empty output. Downloaded WebM fallback.");
+            }
+          } catch (serverErr) {
+            console.warn("Server MP4 export failed, using local WebM fallback:", serverErr);
+            notify("warning", "MP4 export failed on server. Downloaded WebM fallback instead.");
+          }
+        }
+      }
+
+      downloadBlob(finalBlob, settings.filename || projectName, finalFormat);
+      notify(
+        "success",
+        `Exported ${finalFormat.toUpperCase()} at ${exportResolution} (${(finalBlob.size / (1024 * 1024)).toFixed(1)} MB)`
+      );
     } catch (e) {
       if (e.message === 'Export cancelled.') {
         notify("info", "Export cancelled.");

@@ -178,10 +178,10 @@ function loadAudio(file) {
 // ── Pick the best supported MediaRecorder MIME type ──
 function pickMimeType() {
   const candidates = [
-    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
-    'video/webm;codecs=vp9',
     'video/webm;codecs=vp8',
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp9',
     'video/webm',
   ];
   for (const mime of candidates) {
@@ -237,7 +237,7 @@ export async function canvasExport({
   onProgress,
   abortSignal,
 }) {
-  const { quality = 18, fps = 30 } = settings;
+  const { quality = 23, fps = 30 } = settings;
   const res = RESOLUTION_MAP[resolution] || RESOLUTION_MAP['1080p'];
   const { width: W, height: H } = res;
   const bitrate = getBitrate(resolution, quality);
@@ -260,6 +260,14 @@ export async function canvasExport({
     .filter(c => c.type !== 'audio' && c.type !== 'text' && c.type !== 'sticker' && c.file)
     .sort((a, b) => a.startTime - b.startTime);
   const textClips = clips.filter(c => c.type === 'text' || c.type === 'sticker' || c.text?.trim());
+  const timedTextClips = textClips.map((tc) => {
+    const start = tc.startTime || 0;
+    return {
+      ...tc,
+      _start: start,
+      _end: start + (tc.duration || totalDuration),
+    };
+  });
 
   if (videoClips.length === 0) {
     addBreadcrumb({ category: 'export', message: 'canvasExport.no_video_clips', level: 'error' });
@@ -388,13 +396,13 @@ export async function canvasExport({
         if (clipDuration > 0 && vt >= clipEndTime - 0.05) {
           video.pause();
           // Draw one final frame
-          drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, textClips, clip.startTime + clipElapsed, totalDuration);
+          drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
           resolve();
           return;
         }
 
         // Draw current frame
-        drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, textClips, clip.startTime + clipElapsed, totalDuration);
+        drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
 
         // Progress reporting
         const currentTimeline = clip.startTime + clipElapsed;
@@ -477,7 +485,7 @@ export async function canvasExport({
 }
 
 // ── Draw a single composited frame ──
-function drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, textClips, timelineTime, totalDuration) {
+function drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, timelineTime) {
   ctx.save();
 
   // Fade in/out via globalAlpha
@@ -521,10 +529,8 @@ function drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration,
   ctx.globalAlpha = 1;
 
   // Draw text overlays visible at this timeline time
-  for (const tc of textClips) {
-    const tStart = tc.startTime || 0;
-    const tEnd = tStart + (tc.duration || totalDuration);
-    if (timelineTime >= tStart && timelineTime <= tEnd) {
+  for (const tc of timedTextClips) {
+    if (timelineTime >= tc._start && timelineTime <= tc._end) {
       drawTextOverlay(ctx, tc, W, H);
     }
   }

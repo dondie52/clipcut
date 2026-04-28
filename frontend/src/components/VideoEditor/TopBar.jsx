@@ -5,6 +5,7 @@ import { styles } from './styles';
 import { sanitizeTextInput } from '../../utils/validation';
 import { KEYBOARD_SHORTCUTS } from './constants';
 import { useMobile } from '../../hooks/useMobile';
+import { isServerExportAvailable } from '../../services/apiService';
 
 /** Slugify a project/filename for safe use as a download attribute. Falls back to a dated name. */
 function slugifyFilename(raw) {
@@ -725,13 +726,14 @@ const ExportModal = memo(({
   onDownload,
   onExportAnother,
 }) => {
-  const [selectedResolution, setSelectedResolution] = useState('1080p');
+  const [selectedResolution, setSelectedResolution] = useState('480p');
   const [exportTab, setExportTab] = useState('resolution'); // 'resolution' | 'platform'
   const [selectedPreset, setSelectedPreset] = useState('youtube-1080p');
   const [exportFormat, setExportFormat] = useState('webm');
-  const [exportQuality, setExportQuality] = useState('high');
+  const [exportQuality, setExportQuality] = useState('medium');
   const [exportFps, setExportFps] = useState(30);
   const [exportFilename, setExportFilename] = useState('');
+  const [serverMp4Available, setServerMp4Available] = useState(null);
 
   // Sync filename with project name (slugified; dated fallback when empty)
   useEffect(() => {
@@ -756,6 +758,23 @@ const ExportModal = memo(({
     const modal = document.getElementById('export-modal');
     const focusable = modal?.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     if (focusable?.length) focusable[0].focus();
+  }, [isOpen]);
+
+  // Probe MP4 server when modal opens so status messaging is accurate.
+  useEffect(() => {
+    if (!isOpen) return;
+    let active = true;
+    setServerMp4Available(null);
+    isServerExportAvailable()
+      .then((ok) => {
+        if (active) setServerMp4Available(Boolean(ok));
+      })
+      .catch(() => {
+        if (active) setServerMp4Available(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
@@ -943,7 +962,9 @@ const ExportModal = memo(({
             )}
             {exportFormat === 'mp4' && (
               <div className="hud-summary-note hud-summary-note--warn">
-                MP4 export routes through our encoding server, which is offline right now — falling back to WebM. Switch back once the server is available.
+                {serverMp4Available == null && 'Checking MP4 server availability...'}
+                {serverMp4Available === true && 'MP4 server is online. Export will render locally, then transcode to MP4 on server.'}
+                {serverMp4Available === false && 'MP4 server is currently unavailable. Export will fall back to local WebM.'}
               </div>
             )}
           </div>

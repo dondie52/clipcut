@@ -251,9 +251,10 @@ export async function isServerExportAvailable() {
  * @param {string} [options.textColor] - Text color
  * @param {string} [options.textBgColor] - Text background color
  * @param {(pct: number) => void} [onProgress] - Upload progress callback
+ * @param {AbortSignal} [abortSignal] - Optional cancellation signal
  * @returns {Promise<Blob>} Exported video as a Blob
  */
-export function serverExport(videoBlob, resolution, options = {}, onProgress) {
+export function serverExport(videoBlob, resolution, options = {}, onProgress, abortSignal) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const formData = new FormData();
@@ -301,6 +302,22 @@ export function serverExport(videoBlob, resolution, options = {}, onProgress) {
     xhr.timeout = 300000; // 5 minutes
 
     xhr.open('POST', `${API_BASE}/api/editor/export`);
+
+    if (abortSignal) {
+      const onAbort = () => {
+        try { xhr.abort(); } catch { /* noop */ }
+        reject(new Error('Export cancelled.'));
+      };
+      if (abortSignal.aborted) {
+        onAbort();
+        return;
+      }
+      abortSignal.addEventListener('abort', onAbort, { once: true });
+      xhr.addEventListener('loadend', () => {
+        abortSignal.removeEventListener('abort', onAbort);
+      }, { once: true });
+    }
+
     xhr.send(formData);
   });
 }
