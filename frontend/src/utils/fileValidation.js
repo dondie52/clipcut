@@ -63,6 +63,20 @@ function detectCategory(mimeType) {
 }
 
 /**
+ * Detect file category from extension
+ * @param {string} filename
+ * @returns {string|null} 'video', 'audio', 'image', or null
+ */
+function detectCategoryFromExtension(filename) {
+  const ext = getExtension(filename);
+  if (!ext) return null;
+  for (const [category, config] of Object.entries(FILE_TYPES)) {
+    if (config.extensions.includes(ext)) return category;
+  }
+  return null;
+}
+
+/**
  * Get all allowed MIME types across all categories
  * @returns {string[]}
  */
@@ -130,12 +144,27 @@ export function validateFileType(file, allowedCategories) {
   }
 
   if (!mimeValid && extValid) {
-    // Extension is valid but MIME isn't — could be a renamed file, allow with warning
-    return { valid: true, category: null };
+    // Extension is valid but MIME isn't — classify via extension for import workflows.
+    // Browsers often omit MIME type for some audio formats (e.g., m4a on Linux).
+    const category = detectCategoryFromExtension(file.name);
+    return { valid: true, category };
   }
 
   const category = detectCategory(file.type);
   return { valid: true, category };
+}
+
+/**
+ * Infer file category robustly from MIME first, then extension.
+ * Useful when browsers omit or misreport MIME metadata.
+ * @param {File|{name?: string, type?: string}} file
+ * @returns {string|null} 'video', 'audio', 'image', or null
+ */
+export function inferFileCategory(file) {
+  if (!file) return null;
+  const fromMime = detectCategory(file.type);
+  if (fromMime) return fromMime;
+  return detectCategoryFromExtension(file.name || '');
 }
 
 /**

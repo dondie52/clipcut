@@ -657,6 +657,7 @@ const Timeline = ({
   currentTime = 0, onSeek, totalDuration = 30, isProcessing = false,
   canUndo = false, canRedo = false, onUndo, onRedo,
   mediaItems = [], onAddToTimeline,
+  onDropRejected,
   timelineHeight,
   timelineMarkers = [],
   onTimelineMarkersChange,
@@ -1185,9 +1186,18 @@ const Timeline = ({
     if (!mediaItem) return;
 
     const isAudio = mediaItem.type === "audio";
-    if (trackType === "audio" && !isAudio) return;
-    if (trackType === "video" && isAudio) return;
-    if (trackLocks[trackType]) return;
+    if (trackType === "audio" && !isAudio) {
+      onDropRejected?.("This item is not recognized as audio. Re-import it or use Add to Timeline.");
+      return;
+    }
+    if (trackType === "video" && isAudio) {
+      onDropRejected?.("Audio can only be dropped on the audio track.");
+      return;
+    }
+    if (trackLocks[trackType]) {
+      onDropRejected?.(`${trackType === 'audio' ? 'Audio' : 'Video'} track is locked.`);
+      return;
+    }
 
     const rect = e.currentTarget.getBoundingClientRect();
     const scrollLeft = timelineRef.current?.scrollLeft || 0;
@@ -1202,7 +1212,7 @@ const Timeline = ({
     }
 
     onAddToTimeline(mediaItem, newStart);
-  }, [clips, trackLocks, pxPerSec, playheadPos, onAddToTimeline, mediaItems, snapEnabled]);
+  }, [clips, trackLocks, pxPerSec, playheadPos, onAddToTimeline, mediaItems, onDropRejected, snapEnabled]);
 
   // ────────────────────────────────────────────────────────────
   //  SPLIT + DELETE HANDLERS

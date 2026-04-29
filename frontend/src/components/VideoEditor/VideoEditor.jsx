@@ -13,7 +13,7 @@ import { getCachedThumbnail, cacheThumbnail } from '../../utils/thumbnailCache';
 import { getVideoInfoFast, generateThumbnailFast } from '../../utils/fastMediaProbe';
 import { storeMedia, loadMedia, rekeyProjectMedia, listAllMedia } from '../../utils/mediaStore';
 import { sanitizeTextInput } from '../../utils/validation';
-import { validateFile } from '../../utils/fileValidation';
+import { validateFile, validateFileType, inferFileCategory } from '../../utils/fileValidation';
 import { getUserFriendlyMessage, retryWithBackoff } from '../../utils/errorHandling';
 import { isServerExportAvailable, serverExport } from '../../services/apiService';
 import { canvasExport } from '../../services/canvasExport';
@@ -1312,16 +1312,25 @@ const VideoEditor = () => {
   const updateAllCaptions = useCallback((updates) => setClips(p => p.map(c => c.isCaption ? { ...c, ...updates } : c)), [setClips]);
   const deleteClip = useCallback((id) => { setClips(p => p.filter(c => c.id !== id)); if (selectedClipId === id) setSelectedClipId(null); }, [setClips, selectedClipId]);
 
+  const resolveMediaType = useCallback((mediaItem) => {
+    if (mediaItem?.type === 'audio' || mediaItem?.type === 'video' || mediaItem?.type === 'image') {
+      return mediaItem.type;
+    }
+    const inferred = inferFileCategory(mediaItem?.file || mediaItem);
+    return inferred || 'video';
+  }, []);
+
   const addToTimeline = useCallback((mi, startTime = null) => {
+    const mediaType = resolveMediaType(mi);
     let start = startTime;
     if (start === null) {
-      const same = clipsSnapshotRef.current.filter(c => c.type === mi.type);
+      const same = clipsSnapshotRef.current.filter(c => c.type === mediaType);
       const last = same.length > 0 ? same.reduce((a, b) => a.startTime + a.duration > b.startTime + b.duration ? a : b) : null;
       start = last ? last.startTime + last.duration : 0;
     }
     const clip = {
       ...DEFAULT_CLIP_PROPERTIES,
-      id: genId(), mediaId: mi.id, name: mi.name, type: mi.type,
+      id: genId(), mediaId: mi.id, name: mi.name, type: mediaType,
       startTime: start, duration: mi.duration || DEFAULT_CLIP_DURATION,
       file: mi.file, blobUrl: mi.blobUrl, thumbnail: mi.thumbnail,
     };
@@ -1329,7 +1338,7 @@ const VideoEditor = () => {
     setSelectedClipId(clip.id);
     // Persist dashboard thumbnail soon after the first clip exists (autosave interval is 30s).
     setTimeout(() => triggerSave(), 100);
-  }, [setClips, triggerSave]);
+  }, [resolveMediaType, setClips, triggerSave]);
 
   // ---- Import ----
   const importMedia = useCallback(async (files) => {
@@ -1361,7 +1370,9 @@ const VideoEditor = () => {
         storeMedia(pid, id, file, { name: file.name, type: file.type }).catch((e) =>
           console.warn('[import] IndexedDB store failed:', file.name, e)
         );
-        const isAudio = file.type.startsWith("audio/");
+        const detectedType = validateFileType(file, ['video', 'audio']).category;
+        const inferredCategory = inferFileCategory(file);
+        const isAudio = detectedType === 'audio' || inferredCategory === 'audio' || file.type.startsWith("audio/");
 
         setMediaItems(p => [...p, {
           id, name: file.name, file, blobUrl,
@@ -3085,6 +3096,7 @@ const VideoEditor = () => {
                   currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
                   isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
                   mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+                  onDropRejected={(message) => notify('warning', message)}
                   timelineHeight={timelineHeight}
                   timelineMarkers={timelineMarkers}
                   onTimelineMarkersChange={setTimelineMarkers}
@@ -3208,6 +3220,7 @@ const VideoEditor = () => {
                 currentTime={pb.currentTime} onSeek={pb.seek} totalDuration={totalDuration}
                 isProcessing={isProcessing} canUndo={canUndo} canRedo={canRedo} onUndo={undo} onRedo={redo}
                 mediaItems={mediaItems} onAddToTimeline={addToTimeline}
+                onDropRejected={(message) => notify('warning', message)}
                 timelineHeight={timelineHeight}
                 timelineMarkers={timelineMarkers}
                 onTimelineMarkersChange={setTimelineMarkers}
