@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import Icon from './Icon';
 import { styles } from './styles';
-import { FILTER_PRESETS, EFFECT_PRESETS } from './constants';
+import { buildClipCssFilter } from '../../utils/clipCanvasFilter';
 import { useMobile } from '../../hooks/useMobile';
 import { getPlayerRestoreState } from './restoreState';
 
@@ -602,11 +602,37 @@ const TextOverlayCanvas = memo(({ text, color, size, position, bgColor }) => {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const dpr = window.devicePixelRatio || 1;
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    ctx.scale(dpr, dpr);
+    const w = Math.max(1, canvas.clientWidth);
+    const h = Math.max(1, canvas.clientHeight);
+    const rawBw = Math.max(1, Math.floor(w * dpr));
+    const rawBh = Math.max(1, Math.floor(h * dpr));
+    const MAX_DIM = 8192;
+    const over = rawBw > MAX_DIM || rawBh > MAX_DIM;
+    let bw = rawBw;
+    let bh = rawBh;
+    if (over) {
+      const s = Math.min(MAX_DIM / rawBw, MAX_DIM / rawBh, 1);
+      bw = Math.max(1, Math.floor(rawBw * s));
+      bh = Math.max(1, Math.floor(rawBh * s));
+    }
+    // #region agent log
+    fetch('http://127.0.0.1:7548/ingest/6a46b320-d8b5-43ce-8840-a981f4bbeaac', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '07163f' },
+      body: JSON.stringify({
+        sessionId: '07163f',
+        hypothesisId: 'H2',
+        location: 'Player.jsx:TextOverlayCanvas',
+        message: 'text_overlay_canvas_dims',
+        data: { w, h, dpr, rawBw, rawBh, bw, bh, clamped: over },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    if (over) console.warn('[ClipCut:TextOverlayCanvas]', { w, h, rawBw, rawBh, bw, bh });
+    // #endregion
+    canvas.width = bw;
+    canvas.height = bh;
+    ctx.setTransform(bw / w, 0, 0, bh / h, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     const posData = TEXT_POS_MAP[position] || TEXT_POS_MAP['bottom-center'];
@@ -1021,7 +1047,6 @@ const Player = ({
   const videoPreviewStyle = useMemo(() => {
     if (!clipProperties) return {};
     const transforms = [];
-    const filters = [];
     const style = {};
 
     // Crop transform (smart crop — scale + pan)
@@ -1037,30 +1062,9 @@ const Player = ({
       transforms.push(`translate(${clipProperties.positionX || 0}px, ${clipProperties.positionY || 0}px)`);
     }
 
-    // Filter properties
-    if (clipProperties.brightness) filters.push(`brightness(${1 + clipProperties.brightness})`);
-    if (clipProperties.contrast) filters.push(`contrast(${1 + clipProperties.contrast})`);
-    if (clipProperties.saturation !== undefined && clipProperties.saturation !== 1.0) {
-      filters.push(`saturate(${clipProperties.saturation})`);
-    }
-
-    // Named filter preset CSS
-    if (clipProperties.filterName) {
-      const preset = FILTER_PRESETS.find(f => f.name === clipProperties.filterName);
-      if (preset?.css) {
-        const strength = (clipProperties.filterStrength ?? 50) / 100;
-        // Scale the CSS filter by strength
-        if (strength < 1) {
-          filters.push(preset.css.replace(/\(([^)]+)\)/g, (match, val) => {
-            const num = parseFloat(val);
-            if (isNaN(num)) return match;
-            const isIdentity = val.includes('deg') ? 0 : 1;
-            return `(${isIdentity + (num - isIdentity) * strength}${val.replace(/[\d.]+/, '')})`;
-          }));
-        } else {
-          filters.push(preset.css);
-        }
-      }
+    const filterChain = buildClipCssFilter(clipProperties);
+    if (filterChain && filterChain !== 'none') {
+      style.filter = filterChain;
     }
 
     // Opacity
@@ -1077,11 +1081,6 @@ const Player = ({
     if (Array.isArray(clipProperties.effects)) {
       for (const effect of clipProperties.effects) {
         if (effect.enabled === false) continue;
-        const preset = EFFECT_PRESETS.find(p => p.name === effect.name) || effect;
-        // Blur / sharpen that carry a static CSS string
-        if (preset.css) {
-          filters.push(preset.css);
-        }
         switch (effect.type) {
           case 'shake':   animationClasses.push('clipcut-effect-shake'); break;
           case 'flash':   animationClasses.push('clipcut-effect-flash'); break;
@@ -1099,7 +1098,6 @@ const Player = ({
     if (zoomScale > 1) transforms.push(`scale(${zoomScale})`);
 
     if (transforms.length) style.transform = transforms.join(' ');
-    if (filters.length) style.filter = filters.join(' ');
     style.transition = 'transform 0.1s ease, filter 0.1s ease, opacity 0.1s ease';
     if (animationClasses.length) style._effectClassName = animationClasses.join(' ');
     if (hasVignette) style._hasVignette = true;

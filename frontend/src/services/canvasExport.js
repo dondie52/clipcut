@@ -6,6 +6,7 @@
  */
 
 import { addBreadcrumb } from '../utils/errorTracking';
+import { buildClipCssFilter } from '../utils/clipCanvasFilter';
 
 // ── Resolution map (mirrors videoOperations.js RESOLUTIONS) ──
 const RESOLUTION_MAP = {
@@ -190,24 +191,6 @@ function pickMimeType() {
   return '';
 }
 
-// ── Build canvas filter string from clip effects ──
-function buildCanvasFilter(clip) {
-  const parts = [];
-  if (clip.brightness != null && clip.brightness !== 0) {
-    parts.push(`brightness(${1 + clip.brightness / 100})`);
-  }
-  if (clip.contrast != null && clip.contrast !== 0) {
-    parts.push(`contrast(${1 + clip.contrast / 100})`);
-  }
-  if (clip.saturation != null && clip.saturation !== 0) {
-    parts.push(`saturate(${1 + clip.saturation / 100})`);
-  }
-  if (clip.blur != null && clip.blur > 0) {
-    parts.push(`blur(${clip.blur}px)`);
-  }
-  return parts.length > 0 ? parts.join(' ') : 'none';
-}
-
 // ── Format seconds as m:ss ──
 function fmtTime(s) {
   const m = Math.floor(s / 60);
@@ -354,7 +337,7 @@ async function exportClipVideoSegment({
     console.warn('Could not route clip audio:', e);
   }
 
-  const filterStr = buildCanvasFilter(clip);
+  const filterStr = buildClipCssFilter(clip);
   const fadeInDur = clip.fadeIn || 0;
   const fadeOutDur = clip.fadeOut || 0;
 
@@ -476,8 +459,8 @@ async function exportTransitionJunction({
     console.warn('Could not route right clip audio in transition:', e);
   }
 
-  const filterL = buildCanvasFilter(left);
-  const filterR = buildCanvasFilter(right);
+  const filterL = buildClipCssFilter(left);
+  const filterR = buildClipCssFilter(right);
 
   vL.playbackRate = speedL;
   vR.playbackRate = speedR;

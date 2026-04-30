@@ -229,9 +229,36 @@ const WaveformCanvas = memo(({ width, height, color = "#75aadb", opacity = 0.4, 
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
+    // #region agent log
+    const rawBw = Math.max(1, Math.floor(width * dpr));
+    const rawBh = Math.max(1, Math.floor(height * dpr));
+    const MAX_DIM = 8192;
+    const over = rawBw > MAX_DIM || rawBh > MAX_DIM;
+    let bw = rawBw;
+    let bh = rawBh;
+    if (over) {
+      const s = Math.min(MAX_DIM / rawBw, MAX_DIM / rawBh, 1);
+      bw = Math.max(1, Math.floor(rawBw * s));
+      bh = Math.max(1, Math.floor(rawBh * s));
+    }
+    const payload = {
+      sessionId: '07163f',
+      hypothesisId: 'H1',
+      location: 'Timeline.jsx:WaveformCanvas',
+      message: 'waveform_canvas_dims',
+      data: { width, height, dpr, rawBw, rawBh, bw, bh, clamped: over },
+      timestamp: Date.now(),
+    };
+    fetch('http://127.0.0.1:7548/ingest/6a46b320-d8b5-43ce-8840-a981f4bbeaac', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '07163f' },
+      body: JSON.stringify(payload),
+    }).catch(() => {});
+    if (over) console.warn('[ClipCut:Waveform]', payload.data);
+    // #endregion
+    canvas.width = bw;
+    canvas.height = bh;
+    ctx.setTransform(bw / width, 0, 0, bh / height, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     const bars = Math.floor(width / 3);
