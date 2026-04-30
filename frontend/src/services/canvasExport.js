@@ -215,6 +215,355 @@ function fmtTime(s) {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
+/** Same-track clip whose start aligns with `left`'s end (matches VideoEditor transitionPreview tolerance). */
+function findAdjacentNextClip(sortedVideoClips, left) {
+  const boundary = left.startTime + (left.duration || 0);
+  const leftTrack = left.track || 0;
+  for (let j = 0; j < sortedVideoClips.length; j++) {
+    const c = sortedVideoClips[j];
+    if (c.id === left.id) continue;
+    if (c.type === 'audio' || c.type === 'text' || c.type === 'sticker') continue;
+    if ((c.track || 0) !== leftTrack) continue;
+    if (c.startTime < boundary - 0.08) continue;
+    if (c.startTime <= boundary + 0.08) return c;
+    if (c.startTime > boundary + 0.08) break;
+  }
+  return null;
+}
+
+function effectiveTransitionDuration(left, right) {
+  if (!left?.transition || !right) return 0;
+  const raw = Math.max(0.2, Math.min(3.0, left.transitionDuration ?? 1));
+  const Ld = left.duration || 0;
+  const Rd = right.duration || 0;
+  if (Ld < 0.1 || Rd < 0.1) return 0;
+  const D = Math.min(raw, Ld * 0.98, Rd * 0.98);
+  return D > 0.05 ? D : 0;
+}
+
+/** Letterboxed video frame with clip filter + rotation (no text). */
+function drawVideoLetterboxed(ctx, video, W, H, clip, filterStr, globalAlpha) {
+  ctx.save();
+  ctx.globalAlpha = Math.max(0, Math.min(1, globalAlpha));
+
+  if (filterStr && filterStr !== 'none') {
+    ctx.filter = filterStr;
+  }
+
+  if (clip.rotation) {
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate((clip.rotation * Math.PI) / 180);
+    ctx.translate(-W / 2, -H / 2);
+  }
+
+  const vw = video.videoWidth || W;
+  const vh = video.videoHeight || H;
+  const scale = Math.min(W / vw, H / vh);
+  const dw = vw * scale;
+  const dh = vh * scale;
+  const dx = (W - dw) / 2;
+  const dy = (H - dh) / 2;
+
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(video, dx, dy, dw, dh);
+
+  ctx.filter = 'none';
+  ctx.restore();
+}
+
+/**
+ * Composites two clips during a junction (mirrors Player.jsx transition stack).
+ * `progress` in [0, 1] along the transition window.
+ */
+function drawJunctionFrame(ctx, videoL, videoR, clipL, clipR, W, H, filterL, filterR, progress, transType, timedTextClips, timelineTime) {
+  const p = Math.max(0, Math.min(1, progress));
+
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, W, H);
+
+  drawVideoLetterboxed(ctx, videoL, W, H, clipL, filterL, 1);
+
+  let rightOpacity = p;
+  if (transType === 'fadeblack') {
+    rightOpacity = Math.max(0, (p - 0.5) * 2);
+  } else if (transType === 'fadewhite') {
+    rightOpacity = Math.max(0, (p - 0.5) * 2);
+  }
+
+  drawVideoLetterboxed(ctx, videoR, W, H, clipR, filterR, rightOpacity);
+
+  if (transType === 'fadeblack') {
+    ctx.fillStyle = '#000000';
+    ctx.globalAlpha = p < 0.5 ? p * 2 : (1 - p) * 2;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  } else if (transType === 'fadewhite') {
+    ctx.fillStyle = '#ffffff';
+    ctx.globalAlpha = p < 0.5 ? p * 2 : (1 - p) * 2;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  for (const tc of timedTextClips) {
+    if (timelineTime >= tc._start && timelineTime <= tc._end) {
+      drawTextOverlay(ctx, tc, W, H);
+    }
+  }
+
+  if (clipL.text?.trim() && clipL.type !== 'text') drawTextOverlay(ctx, clipL, W, H);
+  if (clipR.text?.trim() && clipR.type !== 'text') drawTextOverlay(ctx, clipR, W, H);
+
+  ctx.restore();
+}
+
+function waitSeeked(video) {
+  return new Promise((resolve) => {
+    video.addEventListener('seeked', resolve, { once: true });
+  });
+}
+
+function disconnectClipAudio(clipAudioSource, clipGain) {
+  try {
+    clipGain?.disconnect();
+    clipAudioSource?.disconnect();
+  } catch (_) { /* noop */ }
+}
+
+/** Plays `clip.file` from `sourceFrom` until `sourceToExclusive` (decoder times). */
+async function exportClipVideoSegment({
+  ctx, W, H, clip, sourceFrom, sourceToExclusive,
+  audioCtx, audioDest, timedTextClips, totalDuration,
+  videoClips, clipIndex, onProgress, abortSignal, startWall,
+}) {
+  const trimStart = clip.trimStart || 0;
+  const clipDuration = clip.duration || 0;
+  const clipSpeed = clip.speed || 1.0;
+  const { video, url: videoUrl } = await loadVideo(clip.file);
+
+  let clipAudioSource = null;
+  let clipGain = null;
+  try {
+    clipAudioSource = audioCtx.createMediaElementSource(video);
+    clipGain = audioCtx.createGain();
+    clipGain.gain.value = clip.isMuted ? 0 : (clip.volume ?? 1.0);
+    clipAudioSource.connect(clipGain);
+    clipGain.connect(audioDest);
+  } catch (e) {
+    console.warn('Could not route clip audio:', e);
+  }
+
+  const filterStr = buildCanvasFilter(clip);
+  const fadeInDur = clip.fadeIn || 0;
+  const fadeOutDur = clip.fadeOut || 0;
+
+  video.currentTime = sourceFrom;
+  video.playbackRate = clipSpeed;
+  await waitSeeked(video);
+  await video.play();
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    disconnectClipAudio(clipAudioSource, clipGain);
+    video.pause();
+    video.src = '';
+    video.load();
+    if (video.parentNode) document.body.removeChild(video);
+    URL.revokeObjectURL(videoUrl);
+  };
+
+  try {
+    await new Promise((resolve, reject) => {
+      let animId;
+      const renderFrame = () => {
+        if (abortSignal?.aborted) {
+          cancelAnimationFrame(animId);
+          video.pause();
+          cleanup();
+          resolve();
+          return;
+        }
+
+        const vt = video.currentTime;
+        const clipElapsed = vt - trimStart;
+
+        if (clipDuration > 0 && vt >= sourceToExclusive - 0.05) {
+          video.pause();
+          drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
+          cleanup();
+          resolve();
+          return;
+        }
+
+        drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
+
+        const currentTimeline = clip.startTime + clipElapsed;
+        const percent = totalDuration > 0 ? Math.min(99, (currentTimeline / totalDuration) * 100) : 0;
+        const wallElapsed = (Date.now() - startWall) / 1000;
+        const eta = percent > 1 ? (wallElapsed / percent) * (100 - percent) : 0;
+
+        onProgress?.({
+          percent: Math.round(percent),
+          elapsed: fmtTime(wallElapsed),
+          eta: fmtTime(eta),
+          label: videoClips.length > 1 ? `Exporting clip ${clipIndex + 1}/${videoClips.length}` : 'Exporting video...',
+        });
+
+        animId = requestAnimationFrame(renderFrame);
+      };
+
+      video.addEventListener('ended', () => {
+        cancelAnimationFrame(animId);
+        video.pause();
+        cleanup();
+        resolve();
+      }, { once: true });
+
+      video.addEventListener('error', () => {
+        cancelAnimationFrame(animId);
+        cleanup();
+        reject(new Error(`Video playback error during export of clip ${clipIndex + 1}`));
+      }, { once: true });
+
+      animId = requestAnimationFrame(renderFrame);
+    });
+  } catch (e) {
+    cleanup();
+    throw e;
+  }
+}
+
+/** Dual-video segment for junction transition (both clips' audio routed to `audioDest`). */
+async function exportTransitionJunction({
+  ctx, W, H, left, right, D, transType,
+  audioCtx, audioDest, timedTextClips, totalDuration, videoClips,
+  onProgress, abortSignal, startWall,
+}) {
+  const trimL = left.trimStart || 0;
+  const trimR = right.trimStart || 0;
+  const Ld = left.duration || 0;
+  const speedL = left.speed || 1.0;
+  const speedR = right.speed || 1.0;
+  const transitionStartTimeline = left.startTime + (Ld - D);
+  const leftSourceEnd = trimL + Ld;
+
+  const { video: vL, url: uL } = await loadVideo(left.file);
+  const { video: vR, url: uR } = await loadVideo(right.file);
+
+  let srcL = null;
+  let gainL = null;
+  let srcR = null;
+  let gainR = null;
+  try {
+    srcL = audioCtx.createMediaElementSource(vL);
+    gainL = audioCtx.createGain();
+    gainL.gain.value = left.isMuted ? 0 : (left.volume ?? 1.0);
+    srcL.connect(gainL);
+    gainL.connect(audioDest);
+  } catch (e) {
+    console.warn('Could not route left clip audio in transition:', e);
+  }
+  try {
+    srcR = audioCtx.createMediaElementSource(vR);
+    gainR = audioCtx.createGain();
+    gainR.gain.value = right.isMuted ? 0 : (right.volume ?? 1.0);
+    srcR.connect(gainR);
+    gainR.connect(audioDest);
+  } catch (e) {
+    console.warn('Could not route right clip audio in transition:', e);
+  }
+
+  const filterL = buildCanvasFilter(left);
+  const filterR = buildCanvasFilter(right);
+
+  vL.playbackRate = speedL;
+  vR.playbackRate = speedR;
+  vL.currentTime = trimL + Ld - D;
+  vR.currentTime = trimR;
+  await Promise.all([waitSeeked(vL), waitSeeked(vR)]);
+  await Promise.all([vL.play(), vR.play()]);
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    disconnectClipAudio(srcL, gainL);
+    disconnectClipAudio(srcR, gainR);
+    vL.pause();
+    vR.pause();
+    vL.src = '';
+    vR.src = '';
+    vL.load();
+    vR.load();
+    if (vL.parentNode) document.body.removeChild(vL);
+    if (vR.parentNode) document.body.removeChild(vR);
+    URL.revokeObjectURL(uL);
+    URL.revokeObjectURL(uR);
+  };
+
+  try {
+    await new Promise((resolve, reject) => {
+      let animId;
+      const renderFrame = () => {
+        if (abortSignal?.aborted) {
+          cancelAnimationFrame(animId);
+          vL.pause();
+          vR.pause();
+          cleanup();
+          resolve();
+          return;
+        }
+
+        const vtL = vL.currentTime;
+        const progress = D > 0 ? Math.max(0, Math.min(1, (vtL - (trimL + Ld - D)) / D)) : 1;
+        const timelineTime = transitionStartTimeline + progress * D;
+
+        drawJunctionFrame(ctx, vL, vR, left, right, W, H, filterL, filterR, progress, transType, timedTextClips, timelineTime);
+
+        if (vtL >= leftSourceEnd - 0.05 || progress >= 0.999) {
+          vL.pause();
+          vR.pause();
+          drawJunctionFrame(ctx, vL, vR, left, right, W, H, filterL, filterR, 1, transType, timedTextClips, transitionStartTimeline + D);
+          cleanup();
+          resolve();
+          return;
+        }
+
+        const percent = totalDuration > 0 ? Math.min(99, (timelineTime / totalDuration) * 100) : 0;
+        const wallElapsed = (Date.now() - startWall) / 1000;
+        const eta = percent > 1 ? (wallElapsed / percent) * (100 - percent) : 0;
+        onProgress?.({
+          percent: Math.round(percent),
+          elapsed: fmtTime(wallElapsed),
+          eta: fmtTime(eta),
+          label: videoClips.length > 1 ? 'Exporting transition...' : 'Exporting video...',
+        });
+
+        animId = requestAnimationFrame(renderFrame);
+      };
+
+      vL.addEventListener('error', () => {
+        cancelAnimationFrame(animId);
+        cleanup();
+        reject(new Error('Video playback error during transition export'));
+      }, { once: true });
+      vR.addEventListener('error', () => {
+        cancelAnimationFrame(animId);
+        cleanup();
+        reject(new Error('Video playback error during transition export'));
+      }, { once: true });
+
+      animId = requestAnimationFrame(renderFrame);
+    });
+  } catch (e) {
+    cleanup();
+    throw e;
+  }
+}
+
 /**
  * Main export function.
  *
@@ -333,116 +682,66 @@ export async function canvasExport({
   }
 
   const startWall = Date.now();
-  let timelineElapsed = 0; // how much timeline time has been rendered
 
-  // ── Process each video clip sequentially ──
+  // Seconds of each clip's timeline head already rendered (overlap from prior junction).
+  const consumedHead = new Map();
+
+  // ── Process each video clip: solo segments + optional junction with next same-track clip ──
   for (let i = 0; i < videoClips.length; i++) {
     if (abortSignal?.aborted) break;
 
     const clip = videoClips[i];
     const trimStart = clip.trimStart || 0;
-    const clipDuration = clip.duration || 0;
-    const clipSpeed = clip.speed || 1.0;
+    const Ld = clip.duration || 0;
+    const head = consumedHead.get(clip.id) || 0;
+    if (head >= Ld - 0.02) continue;
 
-    const { video, url: videoUrl } = await loadVideo(clip.file);
+    const right = findAdjacentNextClip(videoClips, clip);
+    const D = right && clip.transition ? effectiveTransitionDuration(clip, right) : 0;
 
-    // Connect this clip's audio to the mixer
-    let clipAudioSource = null;
-    try {
-      clipAudioSource = audioCtx.createMediaElementSource(video);
-      const clipGain = audioCtx.createGain();
-      clipGain.gain.value = clip.isMuted ? 0 : (clip.volume ?? 1.0);
-      clipAudioSource.connect(clipGain);
-      clipGain.connect(audioDest);
-    } catch (e) {
-      // Audio routing failed — video may not have an audio track
-      console.warn('Could not route clip audio:', e);
+    const sourceSoloStart = trimStart + head;
+    const sourceSoloEnd = trimStart + Ld - (right && clip.transition && D > 0 ? D : 0);
+
+    if (sourceSoloEnd - sourceSoloStart > 0.02) {
+      await exportClipVideoSegment({
+        ctx,
+        W,
+        H,
+        clip,
+        sourceFrom: sourceSoloStart,
+        sourceToExclusive: sourceSoloEnd,
+        audioCtx,
+        audioDest,
+        timedTextClips,
+        totalDuration,
+        videoClips,
+        clipIndex: i,
+        onProgress,
+        abortSignal,
+        startWall,
+      });
     }
 
-    // Seek to trim start
-    video.currentTime = trimStart;
-    video.playbackRate = clipSpeed;
-
-    // Apply CSS filter for effects (brightness, contrast, etc.)
-    const filterStr = buildCanvasFilter(clip);
-
-    // Wait for seek to complete
-    await new Promise(resolve => {
-      video.addEventListener('seeked', resolve, { once: true });
-    });
-
-    // Play the clip
-    await video.play();
-
-    // Render frames until clip duration is reached
-    await new Promise((resolve, reject) => {
-      let animId;
-      const clipEndTime = trimStart + clipDuration;
-      const fadeInDur = clip.fadeIn || 0;
-      const fadeOutDur = clip.fadeOut || 0;
-
-      const renderFrame = () => {
-        if (abortSignal?.aborted) {
-          cancelAnimationFrame(animId);
-          video.pause();
-          resolve();
-          return;
-        }
-
-        const vt = video.currentTime;
-        const clipElapsed = vt - trimStart;
-
-        // Check if clip is done
-        if (clipDuration > 0 && vt >= clipEndTime - 0.05) {
-          video.pause();
-          // Draw one final frame
-          drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
-          resolve();
-          return;
-        }
-
-        // Draw current frame
-        drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, clip.startTime + clipElapsed);
-
-        // Progress reporting
-        const currentTimeline = clip.startTime + clipElapsed;
-        const percent = totalDuration > 0 ? Math.min(99, (currentTimeline / totalDuration) * 100) : 0;
-        const wallElapsed = (Date.now() - startWall) / 1000;
-        const eta = percent > 1 ? (wallElapsed / percent) * (100 - percent) : 0;
-
-        onProgress?.({
-          percent: Math.round(percent),
-          elapsed: fmtTime(wallElapsed),
-          eta: fmtTime(eta),
-          label: videoClips.length > 1 ? `Exporting clip ${i + 1}/${videoClips.length}` : 'Exporting video...',
-        });
-
-        animId = requestAnimationFrame(renderFrame);
-      };
-
-      // Also handle natural video end (for untrimmed clips)
-      video.addEventListener('ended', () => {
-        cancelAnimationFrame(animId);
-        video.pause();
-        resolve();
-      }, { once: true });
-
-      video.addEventListener('error', () => {
-        cancelAnimationFrame(animId);
-        reject(new Error(`Video playback error during export of clip ${i + 1}`));
-      }, { once: true });
-
-      animId = requestAnimationFrame(renderFrame);
-    });
-
-    // Cleanup this clip
-    video.pause();
-    video.src = '';
-    video.load();
-    document.body.removeChild(video);
-    URL.revokeObjectURL(videoUrl);
-
-    timelineElapsed = clip.startTime + clipDuration;
+    if (right && clip.transition && D > 0) {
+      await exportTransitionJunction({
+        ctx,
+        W,
+        H,
+        left: clip,
+        right,
+        D,
+        transType: clip.transition,
+        audioCtx,
+        audioDest,
+        timedTextClips,
+        totalDuration,
+        videoClips,
+        onProgress,
+        abortSignal,
+        startWall,
+      });
+      consumedHead.set(right.id, (consumedHead.get(right.id) || 0) + D);
+    }
   }
 
   // Stop background music
@@ -488,7 +787,6 @@ export async function canvasExport({
 function drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration, fadeInDur, fadeOutDur, timedTextClips, timelineTime) {
   ctx.save();
 
-  // Fade in/out via globalAlpha
   let alpha = 1;
   if (fadeInDur > 0 && clipElapsed < fadeInDur) {
     alpha = clipElapsed / fadeInDur;
@@ -496,46 +794,17 @@ function drawFrame(ctx, video, W, H, filterStr, clip, clipElapsed, clipDuration,
   if (fadeOutDur > 0 && clipDuration > 0 && (clipDuration - clipElapsed) < fadeOutDur) {
     alpha = Math.min(alpha, (clipDuration - clipElapsed) / fadeOutDur);
   }
-  ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+  alpha = Math.max(0, Math.min(1, alpha));
 
-  // Apply effects filter
-  if (filterStr && filterStr !== 'none') {
-    ctx.filter = filterStr;
-  }
+  drawVideoLetterboxed(ctx, video, W, H, clip, filterStr, alpha);
 
-  // Handle rotation
-  if (clip.rotation) {
-    ctx.translate(W / 2, H / 2);
-    ctx.rotate((clip.rotation * Math.PI) / 180);
-    ctx.translate(-W / 2, -H / 2);
-  }
-
-  // Draw video frame scaled to fill canvas (letterboxed)
-  const vw = video.videoWidth || W;
-  const vh = video.videoHeight || H;
-  const scale = Math.min(W / vw, H / vh);
-  const dw = vw * scale;
-  const dh = vh * scale;
-  const dx = (W - dw) / 2;
-  const dy = (H - dh) / 2;
-
-  // Black background for letterboxing
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, W, H);
-  ctx.drawImage(video, dx, dy, dw, dh);
-
-  // Reset filter and alpha for text overlays
-  ctx.filter = 'none';
-  ctx.globalAlpha = 1;
-
-  // Draw text overlays visible at this timeline time
+  // Text overlays (full opacity)
   for (const tc of timedTextClips) {
     if (timelineTime >= tc._start && timelineTime <= tc._end) {
       drawTextOverlay(ctx, tc, W, H);
     }
   }
 
-  // Also draw text that's directly on the video clip (clip.text)
   if (clip.text?.trim() && clip.type !== 'text') {
     drawTextOverlay(ctx, clip, W, H);
   }

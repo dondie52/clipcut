@@ -1,12 +1,14 @@
 import { memo, useCallback, useRef } from 'react';
 import Icon from './Icon';
 import { Slider } from './InspectorComponents';
+import { validateFile, getAcceptString } from '../../utils/fileValidation';
+import { toast } from '../Toast';
 
 const cp = (clip, key) => clip?.[key] ?? clip?.properties?.[key];
 
 const MobileAudioPanel = memo(function MobileAudioPanel({
   selectedClip, onClipUpdate,
-  bgMusic, onImportBgMusic, onUpdateBgMusicVolume, onRemoveBgMusic,
+  bgMusic, onImportBgMusic, onImportAudioToTimeline, onUpdateBgMusicVolume, onRemoveBgMusic,
 }) {
   const fileRef = useRef(null);
   const hasClip = !!selectedClip;
@@ -18,9 +20,23 @@ const MobileAudioPanel = memo(function MobileAudioPanel({
 
   const handleImport = useCallback((e) => {
     const file = e.target.files?.[0];
-    if (file) onImportBgMusic(file);
+    if (!file) {
+      e.target.value = '';
+      return;
+    }
+    if (onImportAudioToTimeline) {
+      const result = validateFile(file, { allowedCategories: ['audio'], category: 'audio' });
+      if (!result.valid) {
+        toast.error(result.error || 'Unsupported audio file');
+        e.target.value = '';
+        return;
+      }
+      onImportAudioToTimeline(file);
+    } else if (onImportBgMusic) {
+      onImportBgMusic(file);
+    }
     e.target.value = '';
-  }, [onImportBgMusic]);
+  }, [onImportAudioToTimeline, onImportBgMusic]);
 
   return (
     <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -42,7 +58,7 @@ const MobileAudioPanel = memo(function MobileAudioPanel({
         <input
           ref={fileRef}
           type="file"
-          accept="audio/*"
+          accept={onImportAudioToTimeline ? getAcceptString(['audio']) : 'audio/*'}
           onChange={handleImport}
           style={{ display: 'none' }}
         />
@@ -146,7 +162,9 @@ const MobileAudioPanel = memo(function MobileAudioPanel({
         }}>
           <Icon i="info" s={14} c="#3d4a5c" />
           <span style={{ fontSize: '11px', color: '#475569' }}>
-            Import audio or select a clip to adjust its volume
+            {onImportAudioToTimeline
+              ? 'Import adds the file to your library and places it on the timeline audio track (A1).'
+              : 'Import audio or select a clip to adjust its volume'}
           </span>
         </div>
       )}

@@ -926,7 +926,9 @@ const usePlaybackEngine = (clips, totalDuration) => {
     return null;
   }, []);
 
-  const currentClip = useMemo(() => getClipAtTime(currentTime), [getClipAtTime, currentTime]);
+  // Include `clips` so we recompute after add/delete/reorder; `getClipAtTime` alone is stable ([] deps)
+  // but reads clipsRef — without `clips` here React would keep a stale null currentClip after first add.
+  const currentClip = useMemo(() => getClipAtTime(currentTime), [getClipAtTime, currentTime, clips]);
   // clipOffset includes trimStart so the Player seeks to the correct position in the source file
   const clipOffset = useMemo(() => {
     if (!currentClip) return 0;
@@ -1341,7 +1343,9 @@ const VideoEditor = () => {
   }, [resolveMediaType, setClips, triggerSave]);
 
   // ---- Import ----
-  const importMedia = useCallback(async (files) => {
+  /** @param {File[]} files @param {{ placeAudioOnTimeline?: boolean }} [options] */
+  const importMedia = useCallback(async (files, options = {}) => {
+    const { placeAudioOnTimeline = false } = options;
     setIsImporting(true);
     try {
       // Ensure a projectId exists for IndexedDB keying
@@ -1405,6 +1409,20 @@ const VideoEditor = () => {
               console.warn("Thumbnail generation failed:", e);
             }
           }
+
+          if (placeAudioOnTimeline && isAudio) {
+            addToTimeline({
+              id,
+              name: file.name,
+              file,
+              blobUrl,
+              thumbnail: null,
+              duration: info.duration || DEFAULT_CLIP_DURATION,
+              width: info.width || 0,
+              height: info.height || 0,
+              type: 'audio',
+            });
+          }
         } catch (e) {
           // Browser can't play this format — try auto-converting to MP4 via FFmpeg
           const canConvert = !isAudio && /\.(mov|avi|mkv|flv|wmv)$/i.test(file.name);
@@ -1435,13 +1453,26 @@ const VideoEditor = () => {
             setMediaItems(p => p.map(m =>
               m.id === id ? { ...m, isProcessing: false } : m
             ));
+            if (placeAudioOnTimeline && isAudio) {
+              addToTimeline({
+                id,
+                name: file.name,
+                file,
+                blobUrl,
+                thumbnail: null,
+                duration: DEFAULT_CLIP_DURATION,
+                width: 0,
+                height: 0,
+                type: 'audio',
+              });
+            }
           }
         }
       }
       notify("success", `Imported ${files.length} file${files.length > 1 ? "s" : ""}`);
     } catch (e) { notify("error", `Import failed: ${e.message}`); }
     finally { setIsImporting(false); setLoadMsg(""); setLoadSub(""); }
-  }, [notify, projectId, projectName]);
+  }, [addToTimeline, ffmpeg, notify, projectId, projectName]);
 
   // ---- Auto-analyze imported video for AI suggestions ----
   const lastAnalyzedKeyRef = useRef(null);
@@ -2882,6 +2913,7 @@ const VideoEditor = () => {
                     <MobileAudioPanel
                       selectedClip={selectedClip} onClipUpdate={updateClip}
                       bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                      onImportAudioToTimeline={(file) => importMedia([file], { placeAudioOnTimeline: true })}
                       onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                     />
                   )}
@@ -3131,6 +3163,7 @@ const VideoEditor = () => {
                   <MobileAudioPanel
                     selectedClip={selectedClip} onClipUpdate={updateClip}
                     bgMusic={bgMusic} onImportBgMusic={importBgMusic}
+                    onImportAudioToTimeline={(file) => importMedia([file], { placeAudioOnTimeline: true })}
                     onUpdateBgMusicVolume={updateBgMusicVolume} onRemoveBgMusic={removeBgMusic}
                   />
                 )}
